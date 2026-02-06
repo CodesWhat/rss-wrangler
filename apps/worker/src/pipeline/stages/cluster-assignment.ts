@@ -1,6 +1,7 @@
 import type { Pool } from "pg";
 import type { UpsertedItem } from "./parse-and-upsert";
 import { simhash, hammingDistance, jaccardSimilarity, tokenize } from "./compute-features";
+import { classifyItem } from "./classify-folder";
 
 // Thresholds for clustering
 const SIMHASH_MAX_DISTANCE = 10; // candidate pre-filter: Hamming distance
@@ -17,8 +18,7 @@ interface CandidateRow {
 
 export async function assignClusters(
   pool: Pool,
-  items: UpsertedItem[],
-  feedFolderId: string
+  items: UpsertedItem[]
 ): Promise<void> {
   const newItems = items.filter((i) => i.isNew);
   if (newItems.length === 0) return;
@@ -79,7 +79,7 @@ export async function assignClusters(
 
   // Track batch inserts for new cluster members and cluster size updates
   const addToCluster: { clusterId: string; itemId: string }[] = [];
-  const newClusters: { item: UpsertedItem }[] = [];
+  const newClusters: { item: UpsertedItem; folderId: string }[] = [];
   const repCandidates: { clusterId: string; item: UpsertedItem }[] = [];
 
   for (const item of unclustered) {
@@ -122,7 +122,8 @@ export async function assignClusters(
       addToCluster.push({ clusterId: bestClusterId, itemId: item.id });
       repCandidates.push({ clusterId: bestClusterId, item });
     } else {
-      newClusters.push({ item });
+      const classifiedFolderId = classifyItem({ title: item.title, summary: item.summary });
+      newClusters.push({ item, folderId: classifiedFolderId });
     }
   }
 
@@ -170,7 +171,7 @@ export async function assignClusters(
     for (let i = 0; i < newClusters.length; i++) {
       const entry = newClusters[i]!;
       clusterPlaceholders.push(`($${i * 2 + 1}, $${i * 2 + 2})`);
-      clusterValues.push(entry.item.id, feedFolderId);
+      clusterValues.push(entry.item.id, entry.folderId);
     }
     const newClusterResult = await pool.query<{ id: string; rep_item_id: string }>(
       `INSERT INTO cluster (rep_item_id, folder_id, size)

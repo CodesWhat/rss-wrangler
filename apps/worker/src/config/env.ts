@@ -5,7 +5,8 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1).default("postgres://postgres:postgres@localhost:5432/rss_wrangler"),
   WORKER_POLL_MINUTES: z.coerce.number().int().min(5).default(60),
   WORKER_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
-  API_BASE_URL: z.string().url().default("http://localhost:4000")
+  API_BASE_URL: z.string().url().default("http://localhost:4000"),
+  OPENAI_API_KEY: z.string().optional()
 });
 
 export type WorkerEnv = z.infer<typeof envSchema>;

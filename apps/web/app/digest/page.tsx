@@ -5,6 +5,69 @@ import { ProtectedRoute } from "@/components/protected-route";
 import { listDigests } from "@/lib/api";
 import type { Digest, DigestEntry } from "@rss-wrangler/contracts";
 
+function simpleMarkdownToHtml(md: string): string {
+  // Pre-process: merge continuation lines into their parent list items.
+  // A continuation line follows a "- " item and doesn't start with "- ", "* ", "## ", or blank.
+  const lines = md.split("\n");
+  const merged: string[] = [];
+  for (const line of lines) {
+    if (
+      merged.length > 0 &&
+      /^[-*] /.test(merged[merged.length - 1]!) &&
+      line.length > 0 &&
+      !/^[-*] /.test(line) &&
+      !/^#{2,4} /.test(line)
+    ) {
+      merged[merged.length - 1] += " " + line;
+    } else {
+      merged.push(line);
+    }
+  }
+
+  let html = merged.join("\n")
+    // Escape HTML entities
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  // Headings (## and ###)
+  html = html.replace(/^### (.+)$/gm, "<h4>$1</h4>");
+  html = html.replace(/^## (.+)$/gm, "<h3>$1</h3>");
+
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+
+  // Links [text](url)
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+  // Unordered list items (- item or * item)
+  html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
+
+  // Wrap consecutive <li> elements in <ul>
+  html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, "<ul>$1</ul>");
+
+  // Paragraphs: replace double newlines with paragraph breaks
+  html = html.replace(/\n{2,}/g, "</p><p>");
+
+  // Single newlines to <br> (but not inside tags)
+  html = html.replace(/\n/g, "<br>");
+
+  // Wrap in paragraph
+  html = "<p>" + html + "</p>";
+
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, "");
+  html = html.replace(/<p>\s*(<h[34]>)/g, "$1");
+  html = html.replace(/(<\/h[34]>)\s*<\/p>/g, "$1");
+  html = html.replace(/<p>\s*(<ul>)/g, "$1");
+  html = html.replace(/(<\/ul>)\s*<\/p>/g, "$1");
+
+  return html;
+}
+
 function DigestContent() {
   const [digests, setDigests] = useState<Digest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,7 +119,10 @@ function DigestContent() {
               </button>
               {expanded === digest.id && (
                 <div className="digest-body">
-                  <p>{digest.body}</p>
+                  <div
+                    className="digest-markdown"
+                    dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(digest.body) }}
+                  />
                   {renderSection(
                     "Top picks for you",
                     digest.entries.filter((e) => e.section === "top_picks")

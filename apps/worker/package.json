@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@rss-wrangler/contracts": "0.1.0",
+    "openai": "^6.18.0",
     "pg": "^8.13.3",
     "pg-boss": "^10.1.5",
     "rss-parser": "^3.13.0",

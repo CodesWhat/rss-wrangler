@@ -62,7 +62,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
     };
 
     try {
-      await runFeedPipeline({ feed, pool });
+      await runFeedPipeline({ feed, pool, openaiApiKey: env.OPENAI_API_KEY });
     } catch (err) {
       console.error("[worker] pipeline failed", { feedId: feed.id, error: err });
       throw err; // pg-boss will handle retry

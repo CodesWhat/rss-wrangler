@@ -31,6 +31,7 @@ const API_BASE_URL =
     : (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000");
 
 const LOGGED_IN_KEY = "rss_logged_in";
+const REFRESH_TOKEN_KEY = "rss_refresh_token";
 
 // ---------- In-memory token store ----------
 
@@ -45,7 +46,11 @@ function getAccessToken(): string | null {
 }
 
 function getRefreshToken(): string | null {
-  return refreshTokenValue;
+  if (refreshTokenValue) return refreshTokenValue;
+  if (typeof window !== "undefined") {
+    return localStorage.getItem(REFRESH_TOKEN_KEY);
+  }
+  return null;
 }
 
 function getTokenExpiresAt(): number {
@@ -58,6 +63,7 @@ export function storeTokens(tokens: AuthTokens): void {
   tokenExpiresAt = Date.now() + tokens.expiresInSeconds * 1000;
   if (typeof window !== "undefined") {
     localStorage.setItem(LOGGED_IN_KEY, "1");
+    localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
   }
 }
 
@@ -67,10 +73,18 @@ export function clearTokens(): void {
   tokenExpiresAt = 0;
   if (typeof window !== "undefined") {
     localStorage.removeItem(LOGGED_IN_KEY);
+    localStorage.removeItem(REFRESH_TOKEN_KEY);
   }
 }
 
 export function isLoggedIn(): boolean {
+  if (accessToken) return true;
+  if (typeof window !== "undefined" && localStorage.getItem(REFRESH_TOKEN_KEY)) return true;
+  return false;
+}
+
+/** Returns true only if an access token is currently held in memory. */
+export function hasAccessToken(): boolean {
   return !!accessToken;
 }
 
@@ -91,7 +105,17 @@ let refreshPromise: Promise<boolean> | null = null;
 
 async function ensureValidToken(): Promise<string | null> {
   const token = getAccessToken();
-  if (!token) return null;
+
+  // No access token in memory but refresh token available (e.g. after page reload)
+  if (!token) {
+    const rt = getRefreshToken();
+    if (rt) {
+      const ok = await refreshAccessToken();
+      if (!ok) return null;
+      return getAccessToken();
+    }
+    return null;
+  }
 
   // Refresh if expiring within 60 seconds
   const expiresAt = getTokenExpiresAt();
@@ -137,11 +161,24 @@ async function refreshAccessToken(): Promise<boolean> {
   return refreshPromise;
 }
 
+/**
+ * Attempt to restore a session from a persisted refresh token.
+ * Returns true if the session was restored successfully.
+ */
+export async function tryRestoreSession(): Promise<boolean> {
+  if (accessToken) return true;
+  const rt = getRefreshToken();
+  if (!rt) return false;
+  return refreshAccessToken();
+}
+
 // ---------- Core request helpers ----------
 
-async function authedHeaders(): Promise<Headers> {
+async function authedHeaders(includeContentType = true): Promise<Headers> {
   const headers = new Headers();
-  headers.set("Content-Type", "application/json");
+  if (includeContentType) {
+    headers.set("Content-Type", "application/json");
+  }
   const token = await ensureValidToken();
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -150,7 +187,8 @@ async function authedHeaders(): Promise<Headers> {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T | null> {
-  const headers = await authedHeaders();
+  const hasBody = init?.body != null;
+  const headers = await authedHeaders(hasBody);
   if (init?.headers) {
     const extra = new Headers(init.headers);
     extra.forEach((v, k) => headers.set(k, v));
@@ -167,7 +205,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
       // Try refresh once
       const ok = await refreshAccessToken();
       if (ok) {
-        const retryHeaders = await authedHeaders();
+        const retryHeaders = await authedHeaders(hasBody);
         if (init?.headers) {
           const extra = new Headers(init.headers);
           extra.forEach((v, k) => retryHeaders.set(k, v));
@@ -224,6 +262,7 @@ const fallbackFilters: FilterRule[] = [];
 const fallbackSettings: Settings = {
   aiMode: "summaries_digest",
   aiProvider: "openai",
+  openaiApiKey: "",
   monthlyAiCapUsd: 20,
   aiFallbackToLocal: false,
   digestAwayHours: 24,
@@ -240,8 +279,7 @@ export async function login(req: LoginRequest): Promise<AuthTokens> {
     body: JSON.stringify(req),
   });
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(body || "Login failed");
+    throw new Error(res.status === 401 ? "Invalid username or password" : "Login failed");
   }
   const tokens = authTokensSchema.parse(await res.json());
   storeTokens(tokens);
@@ -249,7 +287,7 @@ export async function login(req: LoginRequest): Promise<AuthTokens> {
 }
 
 export async function logout(): Promise<void> {
-  const headers = await authedHeaders();
+  const headers = await authedHeaders(false);
   try {
     await fetch(`${API_BASE_URL}/v1/auth/logout`, {
       method: "POST",

@@ -12,8 +12,10 @@ import {
   isLoggedIn,
   isLoggedInFlag,
   clearLoggedInFlag,
+  hasAccessToken,
   login,
   logout as apiLogout,
+  tryRestoreSession,
 } from "@/lib/api";
 import type { LoginRequest } from "@rss-wrangler/contracts";
 
@@ -40,14 +42,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Tokens are in-memory only, so after a page refresh they are gone.
-    // If the localStorage flag says we were logged in but we have no
-    // in-memory tokens, clear the stale flag.
-    if (!isLoggedIn() && isLoggedInFlag()) {
-      clearLoggedInFlag();
+    let cancelled = false;
+    async function restoreSession() {
+      if (isLoggedIn()) {
+        // Access token in memory or refresh token in localStorage
+        if (!hasAccessToken()) {
+          // Have refresh token but no access token — try to restore
+          const ok = await tryRestoreSession();
+          if (cancelled) return;
+          if (ok) {
+            setAuthenticated(true);
+          } else {
+            clearLoggedInFlag();
+            setAuthenticated(false);
+          }
+        } else {
+          setAuthenticated(true);
+        }
+      } else {
+        if (isLoggedInFlag()) clearLoggedInFlag();
+        setAuthenticated(false);
+      }
+      setLoading(false);
     }
-    setAuthenticated(isLoggedIn());
-    setLoading(false);
+    restoreSession();
+    return () => { cancelled = true; };
   }, []);
 
   const loginUser = useCallback(async (req: LoginRequest) => {

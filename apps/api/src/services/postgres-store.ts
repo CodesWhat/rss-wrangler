@@ -22,6 +22,7 @@ import { settingsSchema } from "@rss-wrangler/contracts";
 const DEFAULT_SETTINGS: Settings = settingsSchema.parse({
   aiMode: "summaries_digest",
   aiProvider: "openai",
+  openaiApiKey: "",
   monthlyAiCapUsd: 20,
   aiFallbackToLocal: false,
   digestAwayHours: 24,

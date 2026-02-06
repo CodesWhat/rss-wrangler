@@ -1,0 +1,213 @@
+import type { Pool } from "pg";
+
+// Well-known folder IDs from the migration seed (0001_init.sql)
+const FOLDER_IDS: Record<string, string> = {
+  Tech: "11111111-1111-1111-1111-111111111111",
+  Gaming: "22222222-2222-2222-2222-222222222222",
+  Security: "33333333-3333-3333-3333-333333333333",
+  Business: "44444444-4444-4444-4444-444444444444",
+  Politics: "55555555-5555-5555-5555-555555555555",
+  Sports: "66666666-6666-6666-6666-666666666666",
+  Design: "77777777-7777-7777-7777-777777777777",
+  Local: "88888888-8888-8888-8888-888888888888",
+  World: "99999999-9999-9999-9999-999999999999",
+  Other: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+};
+
+// Keywords mapped to folder names. All keywords should be lowercase.
+const FOLDER_KEYWORDS: [string, string[]][] = [
+  [
+    "Security",
+    [
+      "hack", "hacker", "hacking", "vulnerability", "cve", "exploit",
+      "breach", "malware", "ransomware", "phishing", "cybersecurity",
+      "cyber", "rce", "zero-day", "zeroday", "0day", "infosec",
+      "backdoor", "botnet", "ddos", "encryption", "firewall",
+      "trojan", "spyware", "authentication bypass", "sql injection",
+      "xss", "csrf", "security flaw", "patch tuesday", "threat",
+      "apt", "data leak", "password",
+    ],
+  ],
+  [
+    "Gaming",
+    [
+      "game", "gaming", "gamer", "steam", "playstation", "xbox",
+      "nintendo", "switch", "ps5", "ps4", "esports", "esport",
+      "twitch", "gpu", "graphics card", "rtx", "geforce", "radeon",
+      "valve", "epic games", "indie game", "mmo", "rpg", "fps",
+      "gameplay", "mod", "speedrun", "console", "unreal engine",
+      "unity engine", "godot",
+    ],
+  ],
+  [
+    "Business",
+    [
+      "market", "stock", "stocks", "revenue", "startup", "ipo",
+      "funding", "economy", "economic", "gdp", "inflation",
+      "venture capital", "acquisition", "merger", "earnings",
+      "quarterly", "profit", "loss", "investor", "investment",
+      "wall street", "nasdaq", "s&p", "dow jones", "valuation",
+      "layoff", "layoffs", "ceo", "cfo", "cto", "series a",
+      "series b", "unicorn", "billion", "million dollar",
+      "fundraise", "fundraising", "revenue",
+    ],
+  ],
+  [
+    "Politics",
+    [
+      "congress", "senate", "senator", "legislation", "bill",
+      "government", "election", "vote", "voting", "democrat",
+      "republican", "parliament", "policy", "regulation",
+      "president", "white house", "supreme court", "fbi", "cia",
+      "nsa", "political", "bipartisan", "partisan", "campaign",
+      "lobby", "lobbying", "geopolitical", "sanction", "sanctions",
+      "executive order", "attorney general",
+    ],
+  ],
+  [
+    "Sports",
+    [
+      "football", "basketball", "baseball", "soccer", "nfl",
+      "nba", "mlb", "nhl", "hockey", "tennis", "golf", "olympics",
+      "athlete", "championship", "tournament", "playoff", "playoffs",
+      "super bowl", "world cup", "premier league", "la liga",
+      "champions league", "ufc", "mma", "boxing", "f1",
+      "formula 1", "motorsport", "cricket", "rugby",
+    ],
+  ],
+  [
+    "Design",
+    [
+      "css", "ui design", "ux design", "ui/ux", "design system",
+      "typography", "figma", "sketch", "adobe", "photoshop",
+      "illustrator", "user interface", "user experience",
+      "responsive design", "accessibility", "a11y", "color scheme",
+      "wireframe", "prototype", "tailwind", "material design",
+      "font", "typeface", "graphic design", "web design",
+    ],
+  ],
+  [
+    "World",
+    [
+      "international", "foreign", "global", "united nations",
+      "nato", "eu ", "european union", "china", "russia", "ukraine",
+      "india", "japan", "brazil", "africa", "middle east", "asia",
+      "europe", "diplomacy", "diplomat", "embassy", "treaty",
+      "humanitarian", "refugee", "migration", "world bank", "imf",
+      "climate change", "carbon", "emissions",
+    ],
+  ],
+  [
+    "Local",
+    [
+      "local news", "city council", "neighborhood", "community",
+      "municipal", "mayor", "town hall", "school board", "zoning",
+      "local business", "county",
+    ],
+  ],
+  [
+    "Tech",
+    [
+      "programming", "software", "ai ", "artificial intelligence",
+      "machine learning", "llm", "chatgpt", "openai", "gpt",
+      "claude", "anthropic", "code", "coding", "developer",
+      "api", "linux", "rust", "python", "javascript", "typescript",
+      "github", "open source", "open-source", "database", "cloud",
+      "aws", "azure", "google cloud", "kubernetes", "docker",
+      "devops", "frontend", "backend", "fullstack", "full-stack",
+      "react", "nextjs", "node", "nodejs", "golang", "java ",
+      "algorithm", "compiler", "cpu", "chip", "semiconductor",
+      "silicon", "processor", "apple", "google", "microsoft",
+      "meta", "amazon", "startup", "tech", "saas", "kernel",
+      "browser", "firefox", "chrome", "safari", "web assembly",
+      "wasm", "blockchain", "crypto", "bitcoin", "ethereum",
+      "quantum", "robotics", "robot", "autonomous", "self-driving",
+      "ev ", "electric vehicle", "battery", "renewable",
+      "neural network", "transformer", "diffusion", "stable diffusion",
+      "midjourney", "copilot", "vscode", "ide", "git", "ci/cd",
+      "pipeline", "microservice", "serverless", "lambda",
+      "framework", "library", "package", "npm", "crate",
+      "operating system", "distro", "release",
+    ],
+  ],
+];
+
+/**
+ * Classify text content into a folder based on keyword matching.
+ * Returns the folder ID for the best-matching folder.
+ */
+export function classifyText(title: string, summary: string | null): string {
+  const text = ` ${(title + " " + (summary || "")).toLowerCase()} `;
+
+  let bestFolder = "Other";
+  let bestScore = 0;
+
+  for (const [folderName, keywords] of FOLDER_KEYWORDS) {
+    let score = 0;
+    for (const keyword of keywords) {
+      if (text.includes(keyword)) {
+        score++;
+      }
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      bestFolder = folderName;
+    }
+  }
+
+  return FOLDER_IDS[bestFolder] ?? FOLDER_IDS.Other!;
+}
+
+/**
+ * Classify a single item and return the folder ID.
+ */
+export function classifyItem(item: { title: string; summary: string | null }): string {
+  return classifyText(item.title, item.summary);
+}
+
+/**
+ * Reclassify all existing clusters based on their representative item's content.
+ * Updates cluster.folder_id in batch.
+ */
+export async function reclassifyAllClusters(pool: Pool): Promise<number> {
+  const result = await pool.query<{
+    cluster_id: string;
+    title: string;
+    summary: string | null;
+  }>(
+    `SELECT c.id AS cluster_id, COALESCE(i.title, '') AS title, i.summary
+     FROM cluster c
+     JOIN item i ON i.id = c.rep_item_id`
+  );
+
+  if (result.rows.length === 0) return 0;
+
+  let updated = 0;
+
+  // Process in batches of 500
+  const BATCH_SIZE = 500;
+  for (let i = 0; i < result.rows.length; i += BATCH_SIZE) {
+    const batch = result.rows.slice(i, i + BATCH_SIZE);
+    const clusterIds: string[] = [];
+    const folderIds: string[] = [];
+
+    for (const row of batch) {
+      const folderId = classifyText(row.title, row.summary);
+      clusterIds.push(row.cluster_id);
+      folderIds.push(folderId);
+    }
+
+    await pool.query(
+      `UPDATE cluster SET
+         folder_id = updates.new_folder_id,
+         updated_at = NOW()
+       FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::uuid[]) AS new_folder_id) AS updates
+       WHERE cluster.id = updates.id`,
+      [clusterIds, folderIds]
+    );
+
+    updated += batch.length;
+  }
+
+  return updated;
+}

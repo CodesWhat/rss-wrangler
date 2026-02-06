@@ -109,6 +109,7 @@ export type Digest = z.infer<typeof digestSchema>;
 export const settingsSchema = z.object({
   aiMode: aiModeSchema,
   aiProvider: aiProviderSchema,
+  openaiApiKey: z.string().optional().default(""),
   monthlyAiCapUsd: z.number().min(0),
   aiFallbackToLocal: z.boolean(),
   digestAwayHours: z.number().int().min(1),

@@ -142,6 +142,16 @@ function HomeFeed() {
           ))}
           {cursor && <div ref={sentinelRef} style={{ height: 1 }} />}
           {loadingMore && <p className="muted">Loading more...</p>}
+          {cursor && !loadingMore && (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => fetchClusters(false)}
+              style={{ justifySelf: "center", marginTop: "0.5rem" }}
+            >
+              Load more
+            </button>
+          )}
         </section>
       )}
     </>

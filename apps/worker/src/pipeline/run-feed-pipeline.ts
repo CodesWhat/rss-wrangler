@@ -4,15 +4,17 @@ import { FeedService } from "../services/feed-service";
 import { pollFeed } from "./stages/poll-feed";
 import { parseAndUpsert } from "./stages/parse-and-upsert";
 import { assignClusters } from "./stages/cluster-assignment";
+import { enrichWithAi } from "./stages/enrich-with-ai";
 import { preFilterSoftGate, postClusterFilter } from "./stages/filter";
 import { maybeGenerateDigest } from "./stages/generate-digest";
 
 export interface PipelineContext {
   feed: DueFeed;
   pool: Pool;
+  openaiApiKey?: string;
 }
 
-export async function runFeedPipeline({ feed, pool }: PipelineContext): Promise<void> {
+export async function runFeedPipeline({ feed, pool, openaiApiKey }: PipelineContext): Promise<void> {
   const feedService = new FeedService(pool);
 
   // Stage 1: Poll feed with conditional GET
@@ -73,7 +75,18 @@ export async function runFeedPipeline({ feed, pool }: PipelineContext): Promise<
 
   // Stage 6 + 7: Compute features and assign clusters
   // simhash + Jaccard is computed inline during cluster assignment
-  await assignClusters(pool, newItems, feed.folderId);
+  await assignClusters(pool, newItems);
+
+  // Stage: Enrich items with og:image and AI summaries
+  try {
+    await enrichWithAi(pool, newItems, openaiApiKey);
+  } catch (err) {
+    // Enrichment is non-critical; log and continue the pipeline
+    console.error("[pipeline] enrich-with-ai failed (non-fatal)", {
+      feedId: feed.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // Stage 8: Post-cluster filter (mute-with-breakout)
   // Get the cluster IDs for newly clustered items
