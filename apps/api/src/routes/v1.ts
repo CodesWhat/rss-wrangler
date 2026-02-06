@@ -13,7 +13,9 @@ import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 import { createAuthService } from "../services/auth-service";
-import { InMemoryStore } from "../services/store";
+import { parseOpml } from "../services/opml-parser";
+import { PostgresStore } from "../services/postgres-store";
+import { validateFeedUrl } from "../services/url-validator";
 
 const clusterIdParams = z.object({ id: z.string().uuid() });
 const feedIdParams = z.object({ id: z.string().uuid() });
@@ -28,12 +30,19 @@ const authLogoutSchema = z.object({
 });
 
 export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }) => {
-  const store = new InMemoryStore();
-  const auth = createAuthService(app, env);
+  const store = new PostgresStore(app.pg);
+  const auth = createAuthService(app, env, app.pg);
 
   app.get("/health", async () => ({ ok: true, service: "api" }));
 
-  app.post("/v1/auth/login", async (request, reply) => {
+  app.post("/v1/auth/login", {
+    config: {
+      rateLimit: {
+        max: 5,
+        timeWindow: "1 minute"
+      }
+    }
+  }, async (request, reply) => {
     const payload = loginRequestSchema.parse(request.body);
     const tokens = await auth.login(payload.username, payload.password);
 
@@ -71,7 +80,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.get("/v1/clusters/:id", async (request, reply) => {
       const { id } = clusterIdParams.parse(request.params);
-      const cluster = store.getCluster(id);
+      const cluster = await store.getCluster(id);
       if (!cluster) {
         return reply.notFound("cluster not found");
       }
@@ -80,7 +89,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.post("/v1/clusters/:id/read", async (request, reply) => {
       const { id } = clusterIdParams.parse(request.params);
-      if (!store.markRead(id)) {
+      if (!(await store.markRead(id))) {
         return reply.notFound("cluster not found");
       }
       return { ok: true };
@@ -88,7 +97,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.post("/v1/clusters/:id/save", async (request, reply) => {
       const { id } = clusterIdParams.parse(request.params);
-      if (!store.saveCluster(id)) {
+      if (!(await store.saveCluster(id))) {
         return reply.notFound("cluster not found");
       }
       return { ok: true };
@@ -96,7 +105,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.post("/v1/clusters/:id/split", async (request, reply) => {
       const { id } = clusterIdParams.parse(request.params);
-      if (!store.splitCluster(id)) {
+      if (!(await store.splitCluster(id))) {
         return reply.notFound("cluster not found");
       }
       return { ok: true, status: "accepted" };
@@ -105,7 +114,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     protectedRoutes.post("/v1/clusters/:id/feedback", async (request, reply) => {
       const { id } = clusterIdParams.parse(request.params);
       const payload = clusterFeedbackRequestSchema.parse(request.body);
-      if (!store.submitFeedback(id, payload)) {
+      if (!(await store.submitFeedback(id, payload))) {
         return reply.notFound("cluster not found");
       }
       return { ok: true };
@@ -115,22 +124,44 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.get("/v1/feeds", async () => store.listFeeds());
 
-    protectedRoutes.post("/v1/feeds", async (request) => {
+    protectedRoutes.post("/v1/feeds", async (request, reply) => {
       const payload = addFeedRequestSchema.parse(request.body);
+      const urlError = validateFeedUrl(payload.url);
+      if (urlError) {
+        return reply.badRequest(urlError);
+      }
       return store.addFeed(payload);
     });
 
     protectedRoutes.patch("/v1/feeds/:id", async (request, reply) => {
       const { id } = feedIdParams.parse(request.params);
       const payload = updateFeedRequestSchema.parse(request.body);
-      const feed = store.updateFeed(id, payload);
+      const feed = await store.updateFeed(id, payload);
       if (!feed) {
         return reply.notFound("feed not found");
       }
       return feed;
     });
 
-    protectedRoutes.post("/v1/opml/import", async () => ({ ok: true, status: "accepted" }));
+    protectedRoutes.post("/v1/opml/import", async (request, reply) => {
+      // Accept OPML as raw XML string in the body, or as { opml: "..." } JSON
+      let xml: string;
+      if (typeof request.body === "string") {
+        xml = request.body;
+      } else if (request.body && typeof (request.body as Record<string, unknown>).opml === "string") {
+        xml = (request.body as Record<string, unknown>).opml as string;
+      } else {
+        return reply.badRequest("request body must be an OPML XML string or { opml: \"...\" }");
+      }
+
+      const feeds = parseOpml(xml);
+      if (feeds.length === 0) {
+        return reply.badRequest("no feeds found in OPML");
+      }
+
+      const result = await store.importOpml(feeds);
+      return { ok: true, ...result, total: feeds.length };
+    });
 
     protectedRoutes.get("/v1/filters", async () => store.listFilters());
 
@@ -142,7 +173,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     protectedRoutes.patch("/v1/filters/:id", async (request, reply) => {
       const { id } = filterIdParams.parse(request.params);
       const payload = updateFilterRuleRequestSchema.parse(request.body);
-      const filter = store.updateFilter(id, payload);
+      const filter = await store.updateFilter(id, payload);
       if (!filter) {
         return reply.notFound("filter not found");
       }
@@ -151,7 +182,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.delete("/v1/filters/:id", async (request, reply) => {
       const { id } = filterIdParams.parse(request.params);
-      if (!store.deleteFilter(id)) {
+      if (!(await store.deleteFilter(id))) {
         return reply.notFound("filter not found");
       }
       return { ok: true };

@@ -5,12 +5,16 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   API_HOST: z.string().default("0.0.0.0"),
   API_CORS_ORIGIN: z.string().default("*"),
-  AUTH_JWT_SECRET: z.string().min(16).default("change-me-change-me"),
-  AUTH_USERNAME: z.string().default("admin"),
-  AUTH_PASSWORD: z.string().default("admin"),
+  DATABASE_URL: z.string().default("postgres://postgres:postgres@localhost:5432/rss_wrangler"),
+  AUTH_JWT_SECRET: z.string().min(32),
+  AUTH_USERNAME: z.string().min(1),
+  AUTH_PASSWORD: z.string().min(8),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL: z.string().default("30d")
-});
+}).refine(
+  (env) => env.AUTH_JWT_SECRET !== "change-me-change-me",
+  { message: "AUTH_JWT_SECRET must not use the placeholder value", path: ["AUTH_JWT_SECRET"] }
+);
 
 export type ApiEnv = z.infer<typeof envSchema>;
 

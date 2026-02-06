@@ -184,6 +184,56 @@ export type AuthTokens = z.infer<typeof authTokensSchema>;
 export const updateSettingsRequestSchema = settingsSchema.partial();
 export type UpdateSettingsRequest = z.infer<typeof updateSettingsRequestSchema>;
 
+// ---------- Auth request/response schemas ----------
+
+export const authRefreshRequestSchema = z.object({
+  refreshToken: z.string().min(1)
+});
+export type AuthRefreshRequest = z.infer<typeof authRefreshRequestSchema>;
+
+export const authLogoutRequestSchema = z.object({
+  refreshToken: z.string().optional()
+});
+export type AuthLogoutRequest = z.infer<typeof authLogoutRequestSchema>;
+
+// ---------- API response schemas ----------
+
+export const digestSectionSchema = z.enum(["top_picks", "big_stories", "quick_scan"]);
+export type DigestSection = z.infer<typeof digestSectionSchema>;
+
+export const listClustersResponseSchema = z.object({
+  data: z.array(clusterCardSchema),
+  nextCursor: z.string().nullable()
+});
+export type ListClustersResponse = z.infer<typeof listClustersResponseSchema>;
+
+export const okResponseSchema = z.object({
+  ok: z.literal(true)
+});
+export type OkResponse = z.infer<typeof okResponseSchema>;
+
+export const opmlImportResponseSchema = z.object({
+  ok: z.literal(true),
+  imported: z.number().int().min(0),
+  skipped: z.number().int().min(0),
+  total: z.number().int().min(0)
+});
+export type OpmlImportResponse = z.infer<typeof opmlImportResponseSchema>;
+
+export const recordEventsResponseSchema = z.object({
+  accepted: z.number().int().min(0),
+  deduped: z.number().int().min(0)
+});
+export type RecordEventsResponse = z.infer<typeof recordEventsResponseSchema>;
+
+export const opmlFeedSchema = z.object({
+  xmlUrl: z.string().url(),
+  title: z.string(),
+  htmlUrl: z.string().url().nullable(),
+  category: z.string().nullable()
+});
+export type OpmlFeed = z.infer<typeof opmlFeedSchema>;
+
 export const apiRoutes = {
   clusters: "/v1/clusters",
   folders: "/v1/folders",

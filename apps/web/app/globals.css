@@ -59,6 +59,7 @@ a {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
+  align-items: center;
 }
 
 .nav-link {
@@ -67,6 +68,15 @@ a {
   border-radius: 999px;
   padding: 0.35rem 0.75rem;
   background: var(--surface-alt);
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+
+.nav-link-active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
 }
 
 .main {
@@ -88,18 +98,58 @@ a {
   gap: 1rem;
 }
 
+/* ---------- Buttons ---------- */
+
 .button {
   border: 0;
   border-radius: 10px;
   padding: 0.5rem 0.8rem;
   font-weight: 600;
   cursor: pointer;
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .button-secondary {
   background: var(--surface-alt);
   border: 1px solid var(--border);
 }
+
+.button-primary {
+  background: var(--accent);
+  color: white;
+}
+
+.button-small {
+  padding: 0.3rem 0.6rem;
+  font-size: 0.82rem;
+  border-radius: 8px;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+}
+
+.button-active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.button-muted {
+  color: var(--muted);
+}
+
+.button-danger {
+  background: #fee2e2;
+  color: var(--danger);
+  border-color: #fca5a5;
+}
+
+/* ---------- Cards ---------- */
 
 .cards {
   display: grid;
@@ -124,6 +174,12 @@ a {
   padding: 0.9rem;
   display: grid;
   gap: 0.4rem;
+}
+
+.card-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.3rem;
 }
 
 .row {
@@ -165,6 +221,228 @@ a {
   gap: 0.45rem;
 }
 
+/* ---------- Inputs ---------- */
+
+.input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+  width: 100%;
+}
+
+select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.88rem;
+}
+
+/* ---------- Login ---------- */
+
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 60vh;
+}
+
+.login-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 380px;
+}
+
+.login-form {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.login-form label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* ---------- Feed controls ---------- */
+
+.feed-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.sort-toggle {
+  display: flex;
+  gap: 0.3rem;
+}
+
+/* ---------- Sources / Feed table ---------- */
+
+.source-actions {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+
+.add-feed-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.add-feed-form .input {
+  flex: 1;
+}
+
+.opml-import {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.feed-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.feed-table th,
+.feed-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.feed-table th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+/* ---------- Folders ---------- */
+
+.folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.75rem;
+}
+
+.folder-card {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  font-size: 0.95rem;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.15s;
+}
+
+.folder-card:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+/* ---------- Settings ---------- */
+
+.settings-layout {
+  display: grid;
+  gap: 1rem;
+}
+
+.settings-form {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+}
+
+.settings-form label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.checkbox-label {
+  display: flex !important;
+  gap: 0.5rem;
+  align-items: center;
+  font-weight: 400 !important;
+}
+
+.filter-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.filter-form .input {
+  width: auto;
+  flex: 1;
+  min-width: 120px;
+}
+
+/* ---------- Digest ---------- */
+
+.digest-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.digest-item {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.digest-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--surface-alt);
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.95rem;
+  text-align: left;
+}
+
+.digest-body {
+  padding: 0.75rem 1rem;
+}
+
+.digest-section {
+  margin-top: 0.5rem;
+}
+
+/* ---------- Responsive ---------- */
+
 @media (max-width: 700px) {
   .topbar-inner {
     flex-direction: column;
@@ -174,5 +452,27 @@ a {
   .banner {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .feed-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .add-feed-form {
+    flex-direction: column;
+  }
+
+  .add-feed-form .input {
+    width: 100%;
+  }
+
+  .feed-table {
+    font-size: 0.82rem;
+  }
+
+  .filter-form {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

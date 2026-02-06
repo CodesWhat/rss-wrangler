@@ -1,13 +1,9 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
-
-interface RefreshSession {
-  username: string;
-  expiresAt: number;
-}
+import type { Pool } from "pg";
 
 declare module "fastify" {
   interface FastifyInstance {
     verifyAccessToken: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
-    refreshSessions: Map<string, RefreshSession>;
+    pg: Pool;
   }
 }
