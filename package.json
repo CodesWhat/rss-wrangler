@@ -1,0 +1,25 @@
+{
+  "name": "rss-wrangler",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run build -w @rss-wrangler/contracts && npm run dev -w @rss-wrangler/web",
+    "dev:api": "npm run build -w @rss-wrangler/contracts && npm run dev -w @rss-wrangler/api",
+    "dev:worker": "npm run build -w @rss-wrangler/contracts && npm run dev -w @rss-wrangler/worker",
+    "build": "npm run build -w @rss-wrangler/contracts && npm run build -w @rss-wrangler/api && npm run build -w @rss-wrangler/worker && npm run build -w @rss-wrangler/web",
+    "typecheck": "npm run build -w @rss-wrangler/contracts && npm run typecheck -w @rss-wrangler/contracts && npm run typecheck -w @rss-wrangler/api && npm run typecheck -w @rss-wrangler/worker && npm run typecheck -w @rss-wrangler/web",
+    "lint": "npm run lint -w @rss-wrangler/contracts && npm run lint -w @rss-wrangler/api && npm run lint -w @rss-wrangler/worker && npm run lint -w @rss-wrangler/web"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.2"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

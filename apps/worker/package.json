@@ -1,0 +1,20 @@
+{
+  "name": "@rss-wrangler/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo 'lint not configured for worker'"
+  },
+  "dependencies": {
+    "@rss-wrangler/contracts": "0.1.0",
+    "pg": "^8.13.3",
+    "pg-boss": "^10.1.5",
+    "rss-parser": "^3.13.0",
+    "zod": "^3.24.2"
+  }
+}

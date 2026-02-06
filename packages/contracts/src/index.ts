@@ -1,0 +1,199 @@
+import { z } from "zod";
+
+export const storyStateSchema = z.enum(["unread", "saved", "all"]);
+export type StoryState = z.infer<typeof storyStateSchema>;
+
+export const storySortSchema = z.enum(["personal", "latest"]);
+export type StorySort = z.infer<typeof storySortSchema>;
+
+export const clusterFeedbackTypeSchema = z.enum(["not_interested", "split_request"]);
+export type ClusterFeedbackType = z.infer<typeof clusterFeedbackTypeSchema>;
+
+export const filterTypeSchema = z.enum(["phrase", "regex"]);
+export type FilterType = z.infer<typeof filterTypeSchema>;
+
+export const filterModeSchema = z.enum(["mute", "block"]);
+export type FilterMode = z.infer<typeof filterModeSchema>;
+
+export const aiModeSchema = z.enum(["off", "summaries_digest", "full"]);
+export type AiMode = z.infer<typeof aiModeSchema>;
+
+export const aiProviderSchema = z.enum(["openai", "anthropic", "local"]);
+export type AiProvider = z.infer<typeof aiProviderSchema>;
+
+export const folderSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1)
+});
+export type Folder = z.infer<typeof folderSchema>;
+
+export const feedWeightSchema = z.enum(["prefer", "neutral", "deprioritize"]);
+export type FeedWeight = z.infer<typeof feedWeightSchema>;
+
+export const feedSchema = z.object({
+  id: z.string().uuid(),
+  url: z.string().url(),
+  title: z.string(),
+  siteUrl: z.string().url().nullable(),
+  folderId: z.string().uuid(),
+  folderConfidence: z.number().min(0).max(1),
+  weight: feedWeightSchema,
+  muted: z.boolean(),
+  trial: z.boolean(),
+  createdAt: z.string().datetime(),
+  lastPolledAt: z.string().datetime().nullable()
+});
+export type Feed = z.infer<typeof feedSchema>;
+
+export const clusterCardSchema = z.object({
+  id: z.string().uuid(),
+  headline: z.string(),
+  heroImageUrl: z.string().url().nullable(),
+  primarySource: z.string(),
+  primarySourcePublishedAt: z.string().datetime(),
+  outletCount: z.number().int().min(1),
+  folderId: z.string().uuid(),
+  folderName: z.string(),
+  summary: z.string().nullable(),
+  mutedBreakoutReason: z.string().nullable(),
+  isRead: z.boolean(),
+  isSaved: z.boolean()
+});
+export type ClusterCard = z.infer<typeof clusterCardSchema>;
+
+export const clusterDetailMemberSchema = z.object({
+  itemId: z.string().uuid(),
+  title: z.string(),
+  sourceName: z.string(),
+  url: z.string().url(),
+  publishedAt: z.string().datetime()
+});
+export type ClusterDetailMember = z.infer<typeof clusterDetailMemberSchema>;
+
+export const clusterDetailSchema = z.object({
+  cluster: clusterCardSchema,
+  storySoFar: z.string().nullable(),
+  members: z.array(clusterDetailMemberSchema)
+});
+export type ClusterDetail = z.infer<typeof clusterDetailSchema>;
+
+export const filterRuleSchema = z.object({
+  id: z.string().uuid(),
+  pattern: z.string().min(1),
+  type: filterTypeSchema,
+  mode: filterModeSchema,
+  breakoutEnabled: z.boolean(),
+  createdAt: z.string().datetime()
+});
+export type FilterRule = z.infer<typeof filterRuleSchema>;
+
+export const digestEntrySchema = z.object({
+  clusterId: z.string().uuid(),
+  headline: z.string(),
+  section: z.enum(["top_picks", "big_stories", "quick_scan"]),
+  oneLiner: z.string().nullable()
+});
+export type DigestEntry = z.infer<typeof digestEntrySchema>;
+
+export const digestSchema = z.object({
+  id: z.string().uuid(),
+  createdAt: z.string().datetime(),
+  startTs: z.string().datetime(),
+  endTs: z.string().datetime(),
+  title: z.string(),
+  body: z.string(),
+  entries: z.array(digestEntrySchema)
+});
+export type Digest = z.infer<typeof digestSchema>;
+
+export const settingsSchema = z.object({
+  aiMode: aiModeSchema,
+  aiProvider: aiProviderSchema,
+  monthlyAiCapUsd: z.number().min(0),
+  aiFallbackToLocal: z.boolean(),
+  digestAwayHours: z.number().int().min(1),
+  digestBacklogThreshold: z.number().int().min(1),
+  feedPollMinutes: z.number().int().min(5)
+});
+export type Settings = z.infer<typeof settingsSchema>;
+
+export const listClustersQuerySchema = z.object({
+  folder_id: z.string().uuid().optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  state: storyStateSchema.default("unread"),
+  sort: storySortSchema.default("personal")
+});
+export type ListClustersQuery = z.infer<typeof listClustersQuerySchema>;
+
+export const addFeedRequestSchema = z.object({
+  url: z.string().url()
+});
+export type AddFeedRequest = z.infer<typeof addFeedRequestSchema>;
+
+export const updateFeedRequestSchema = z.object({
+  folderId: z.string().uuid().optional(),
+  weight: feedWeightSchema.optional(),
+  muted: z.boolean().optional(),
+  trial: z.boolean().optional()
+});
+export type UpdateFeedRequest = z.infer<typeof updateFeedRequestSchema>;
+
+export const createFilterRuleRequestSchema = z.object({
+  pattern: z.string().min(1),
+  type: filterTypeSchema,
+  mode: filterModeSchema,
+  breakoutEnabled: z.boolean().default(true)
+});
+export type CreateFilterRuleRequest = z.infer<typeof createFilterRuleRequestSchema>;
+
+export const updateFilterRuleRequestSchema = createFilterRuleRequestSchema.partial();
+export type UpdateFilterRuleRequest = z.infer<typeof updateFilterRuleRequestSchema>;
+
+export const clusterFeedbackRequestSchema = z.object({
+  type: clusterFeedbackTypeSchema
+});
+export type ClusterFeedbackRequest = z.infer<typeof clusterFeedbackRequestSchema>;
+
+export const eventSchema = z.object({
+  idempotencyKey: z.string().min(6),
+  ts: z.string().datetime(),
+  type: z.string().min(1),
+  payload: z.record(z.unknown()).default({})
+});
+export type Event = z.infer<typeof eventSchema>;
+
+export const eventsBatchRequestSchema = z.object({
+  events: z.array(eventSchema).max(100)
+});
+export type EventsBatchRequest = z.infer<typeof eventsBatchRequestSchema>;
+
+export const loginRequestSchema = z.object({
+  username: z.string().min(1),
+  password: z.string().min(1)
+});
+export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
+export const authTokensSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  expiresInSeconds: z.number().int().positive()
+});
+export type AuthTokens = z.infer<typeof authTokensSchema>;
+
+export const updateSettingsRequestSchema = settingsSchema.partial();
+export type UpdateSettingsRequest = z.infer<typeof updateSettingsRequestSchema>;
+
+export const apiRoutes = {
+  clusters: "/v1/clusters",
+  folders: "/v1/folders",
+  feeds: "/v1/feeds",
+  filters: "/v1/filters",
+  digests: "/v1/digests",
+  events: "/v1/events",
+  settings: "/v1/settings",
+  authLogin: "/v1/auth/login",
+  authLogout: "/v1/auth/logout",
+  authRefresh: "/v1/auth/refresh",
+  opmlImport: "/v1/opml/import"
+} as const;
