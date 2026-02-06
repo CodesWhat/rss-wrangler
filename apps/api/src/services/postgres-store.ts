@@ -11,6 +11,7 @@ import type {
   Digest,
   Event,
   Feed,
+  FeedTopic,
   FilterRule,
   Folder,
   ListClustersQuery,
@@ -49,6 +50,12 @@ export class PostgresStore {
       paramIndex++;
     }
 
+    if (query.topic_id) {
+      conditions.push(`c.topic_id = $${paramIndex}`);
+      params.push(query.topic_id);
+      paramIndex++;
+    }
+
     if (query.state === "unread") {
       conditions.push(`(rs.read_at IS NULL)`);
     } else if (query.state === "saved") {
@@ -81,6 +88,8 @@ export class PostgresStore {
         c.size AS outlet_count,
         c.folder_id,
         COALESCE(fo.name, 'Other') AS folder_name,
+        c.topic_id,
+        t.name AS topic_name,
         i.summary,
         rs.read_at,
         rs.saved_at
@@ -88,6 +97,7 @@ export class PostgresStore {
       LEFT JOIN item i ON i.id = c.rep_item_id
       LEFT JOIN feed f ON i.feed_id = f.id
       LEFT JOIN folder fo ON c.folder_id = fo.id
+      LEFT JOIN topic t ON c.topic_id = t.id
       LEFT JOIN read_state rs ON rs.cluster_id = c.id
       ${whereClause}
       ${orderClause}
@@ -107,6 +117,8 @@ export class PostgresStore {
       outletCount: Number(r.outlet_count),
       folderId: r.folder_id as string,
       folderName: r.folder_name as string,
+      topicId: (r.topic_id as string) ?? null,
+      topicName: (r.topic_name as string) ?? null,
       summary: (r.summary as string) ?? null,
       mutedBreakoutReason: null,
       isRead: r.read_at != null,
@@ -128,6 +140,8 @@ export class PostgresStore {
         c.size AS outlet_count,
         c.folder_id,
         COALESCE(fo.name, 'Other') AS folder_name,
+        c.topic_id,
+        t.name AS topic_name,
         i.summary,
         i.extracted_text,
         rs.read_at,
@@ -136,6 +150,7 @@ export class PostgresStore {
       LEFT JOIN item i ON i.id = c.rep_item_id
       LEFT JOIN feed f ON i.feed_id = f.id
       LEFT JOIN folder fo ON c.folder_id = fo.id
+      LEFT JOIN topic t ON c.topic_id = t.id
       LEFT JOIN read_state rs ON rs.cluster_id = c.id
       WHERE c.id = $1
     `;
@@ -170,6 +185,8 @@ export class PostgresStore {
       outletCount: Number(r.outlet_count),
       folderId: r.folder_id as string,
       folderName: r.folder_name as string,
+      topicId: (r.topic_id as string) ?? null,
+      topicName: (r.topic_name as string) ?? null,
       summary: (r.summary as string) ?? null,
       mutedBreakoutReason: null,
       isRead: r.read_at != null,
@@ -253,7 +270,7 @@ export class PostgresStore {
   async listFeeds(): Promise<Feed[]> {
     const { rows } = await this.pool.query(`
       SELECT id, url, title, site_url, folder_id, folder_confidence,
-             weight, muted, trial, created_at, last_polled_at
+             weight, muted, trial, classification_status, created_at, last_polled_at
       FROM feed
       ORDER BY created_at DESC
     `);
@@ -267,6 +284,7 @@ export class PostgresStore {
       weight: r.weight as Feed["weight"],
       muted: r.muted as boolean,
       trial: r.trial as boolean,
+      classificationStatus: (r.classification_status as Feed["classificationStatus"]),
       createdAt: (r.created_at as Date).toISOString(),
       lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
     }));
@@ -280,9 +298,9 @@ export class PostgresStore {
     const folderId = otherFolder.rows.length > 0 ? (otherFolder.rows[0] as Record<string, unknown>).id as string : "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
     const { rows } = await this.pool.query(
-      `INSERT INTO feed (url, url_normalized, title, folder_id, folder_confidence, weight, muted, trial)
-       VALUES ($1, $2, $1, $3, 0.4, 'neutral', false, false)
-       RETURNING id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, created_at, last_polled_at`,
+      `INSERT INTO feed (url, url_normalized, title, folder_id, folder_confidence, weight, muted, trial, classification_status)
+       VALUES ($1, $2, $1, $3, 0.4, 'neutral', false, false, 'pending_classification')
+       RETURNING id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, classification_status, created_at, last_polled_at`,
       [payload.url, urlNormalized, folderId]
     );
 
@@ -297,6 +315,7 @@ export class PostgresStore {
       weight: r.weight as Feed["weight"],
       muted: r.muted as boolean,
       trial: r.trial as boolean,
+      classificationStatus: r.classification_status as Feed["classificationStatus"],
       createdAt: (r.created_at as Date).toISOString(),
       lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
     };
@@ -331,7 +350,7 @@ export class PostgresStore {
     if (setClauses.length === 0) {
       // Nothing to update; return current feed
       const { rows } = await this.pool.query(
-        `SELECT id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, created_at, last_polled_at
+        `SELECT id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, classification_status, created_at, last_polled_at
          FROM feed WHERE id = $1`,
         [feedId]
       );
@@ -343,7 +362,7 @@ export class PostgresStore {
     const sql = `
       UPDATE feed SET ${setClauses.join(", ")}
       WHERE id = $${paramIndex}
-      RETURNING id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, created_at, last_polled_at
+      RETURNING id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, classification_status, created_at, last_polled_at
     `;
 
     const { rows } = await this.pool.query(sql, params);
@@ -580,6 +599,8 @@ export class PostgresStore {
         c.size AS outlet_count,
         c.folder_id,
         COALESCE(fo.name, 'Other') AS folder_name,
+        c.topic_id,
+        t.name AS topic_name,
         rep_i.summary,
         rs.read_at,
         rs.saved_at,
@@ -590,6 +611,7 @@ export class PostgresStore {
       LEFT JOIN item rep_i ON rep_i.id = c.rep_item_id
       LEFT JOIN feed f ON rep_i.feed_id = f.id
       LEFT JOIN folder fo ON c.folder_id = fo.id
+      LEFT JOIN topic t ON c.topic_id = t.id
       LEFT JOIN read_state rs ON rs.cluster_id = c.id
       WHERE i.search_vector @@ plainto_tsquery('english', $1)
       ORDER BY c.id, rank DESC
@@ -614,6 +636,8 @@ export class PostgresStore {
       outletCount: Number(r.outlet_count),
       folderId: r.folder_id as string,
       folderName: r.folder_name as string,
+      topicId: (r.topic_id as string) ?? null,
+      topicName: (r.topic_name as string) ?? null,
       summary: (r.summary as string) ?? null,
       mutedBreakoutReason: null,
       isRead: r.read_at != null,
@@ -863,6 +887,170 @@ export class PostgresStore {
     };
   }
 
+  // ---------- Topic management ----------
+
+  async listTopics(): Promise<Array<{ id: string; name: string; clusterCount: number; createdAt: string }>> {
+    const { rows } = await this.pool.query(`
+      SELECT t.id, t.name, t.created_at, COUNT(c.id)::int AS cluster_count
+      FROM topic t
+      LEFT JOIN cluster c ON c.topic_id = t.id
+      GROUP BY t.id
+      ORDER BY cluster_count DESC, t.name
+    `);
+    return rows.map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      name: r.name as string,
+      clusterCount: Number(r.cluster_count),
+      createdAt: (r.created_at as Date).toISOString()
+    }));
+  }
+
+  async renameTopic(topicId: string, name: string): Promise<boolean> {
+    // Prevent renaming the "Uncategorized" sentinel topic
+    const result = await this.pool.query(
+      "UPDATE topic SET name = $2 WHERE id = $1 AND name != 'Uncategorized'",
+      [topicId, name]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async deleteTopic(topicId: string): Promise<boolean> {
+    // Reassign clusters to Uncategorized, then delete the topic
+    await this.pool.query(
+      "UPDATE cluster SET topic_id = (SELECT id FROM topic WHERE name = 'Uncategorized') WHERE topic_id = $1",
+      [topicId]
+    );
+    const result = await this.pool.query(
+      "DELETE FROM topic WHERE id = $1 AND name != 'Uncategorized'",
+      [topicId]
+    );
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async listPendingClassifications(): Promise<Array<{ feed: Feed; proposedTopics: FeedTopic[] }>> {
+    const { rows } = await this.pool.query(`
+      SELECT f.id, f.url, f.title, f.site_url, f.folder_id, f.folder_confidence,
+             f.weight, f.muted, f.trial, f.classification_status, f.created_at, f.last_polled_at,
+             ft.topic_id, ft.status AS ft_status, ft.confidence, ft.proposed_at, ft.resolved_at,
+             t.name AS topic_name
+      FROM feed f
+      JOIN feed_topic ft ON ft.feed_id = f.id
+      JOIN topic t ON t.id = ft.topic_id
+      WHERE f.classification_status = 'classified' AND ft.status = 'pending'
+      ORDER BY f.created_at DESC, ft.confidence DESC
+    `);
+
+    // Group by feed
+    const feedMap = new Map<string, { feed: Feed; proposedTopics: FeedTopic[] }>();
+    for (const r of rows as Record<string, unknown>[]) {
+      const feedId = r.id as string;
+      if (!feedMap.has(feedId)) {
+        feedMap.set(feedId, {
+          feed: {
+            id: feedId,
+            url: r.url as string,
+            title: r.title as string,
+            siteUrl: (r.site_url as string) ?? null,
+            folderId: r.folder_id as string,
+            folderConfidence: Number(r.folder_confidence),
+            weight: r.weight as Feed["weight"],
+            muted: r.muted as boolean,
+            trial: r.trial as boolean,
+            classificationStatus: r.classification_status as Feed["classificationStatus"],
+            createdAt: (r.created_at as Date).toISOString(),
+            lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
+          },
+          proposedTopics: []
+        });
+      }
+      feedMap.get(feedId)!.proposedTopics.push({
+        feedId,
+        topicId: r.topic_id as string,
+        topicName: r.topic_name as string,
+        status: r.ft_status as FeedTopic["status"],
+        confidence: Number(r.confidence),
+        proposedAt: (r.proposed_at as Date).toISOString(),
+        resolvedAt: r.resolved_at ? (r.resolved_at as Date).toISOString() : null
+      });
+    }
+
+    return Array.from(feedMap.values());
+  }
+
+  async getFeedTopics(feedId: string): Promise<FeedTopic[]> {
+    const { rows } = await this.pool.query(`
+      SELECT ft.feed_id, ft.topic_id, ft.status, ft.confidence, ft.proposed_at, ft.resolved_at,
+             t.name AS topic_name
+      FROM feed_topic ft
+      JOIN topic t ON t.id = ft.topic_id
+      WHERE ft.feed_id = $1
+      ORDER BY ft.confidence DESC
+    `, [feedId]);
+
+    return rows.map((r: Record<string, unknown>) => ({
+      feedId: r.feed_id as string,
+      topicId: r.topic_id as string,
+      topicName: r.topic_name as string,
+      status: r.status as FeedTopic["status"],
+      confidence: Number(r.confidence),
+      proposedAt: (r.proposed_at as Date).toISOString(),
+      resolvedAt: r.resolved_at ? (r.resolved_at as Date).toISOString() : null
+    }));
+  }
+
+  async resolveFeedTopic(feedId: string, topicId: string, action: "approve" | "reject"): Promise<boolean> {
+    const status = action === "approve" ? "approved" : "rejected";
+    const result = await this.pool.query(
+      "UPDATE feed_topic SET status = $3, resolved_at = NOW() WHERE feed_id = $1 AND topic_id = $2",
+      [feedId, topicId, status]
+    );
+    if ((result.rowCount ?? 0) === 0) return false;
+
+    // Check if all proposals for this feed are resolved
+    const { rows } = await this.pool.query(
+      "SELECT COUNT(*) FILTER (WHERE status = 'pending')::int AS pending FROM feed_topic WHERE feed_id = $1",
+      [feedId]
+    );
+    const pending = Number((rows[0] as Record<string, unknown>).pending);
+    if (pending === 0) {
+      await this.pool.query(
+        "UPDATE feed SET classification_status = 'approved' WHERE id = $1",
+        [feedId]
+      );
+    }
+
+    return true;
+  }
+
+  async approveAllFeedTopics(feedId: string): Promise<boolean> {
+    const result = await this.pool.query(
+      "UPDATE feed_topic SET status = 'approved', resolved_at = NOW() WHERE feed_id = $1 AND status = 'pending'",
+      [feedId]
+    );
+    if ((result.rowCount ?? 0) === 0) return false;
+
+    await this.pool.query(
+      "UPDATE feed SET classification_status = 'approved' WHERE id = $1",
+      [feedId]
+    );
+
+    return true;
+  }
+
+  async getTopicDistribution(): Promise<{ topicName: string; count: number }[]> {
+    const { rows } = await this.pool.query(`
+      SELECT COALESCE(t.name, 'Uncategorized') AS topic_name, COUNT(*)::int AS cnt
+      FROM cluster c
+      LEFT JOIN topic t ON t.id = c.topic_id
+      GROUP BY t.name
+      ORDER BY cnt DESC
+    `);
+    return rows.map((r: Record<string, unknown>) => ({
+      topicName: r.topic_name as string,
+      count: Number(r.cnt)
+    }));
+  }
+
   async getFolderDistribution(): Promise<{ folderName: string; count: number }[]> {
     const { rows } = await this.pool.query(`
       SELECT COALESCE(fo.name, 'Other') AS folder_name, COUNT(*)::int AS cnt
@@ -888,6 +1076,7 @@ export class PostgresStore {
       weight: r.weight as Feed["weight"],
       muted: r.muted as boolean,
       trial: r.trial as boolean,
+      classificationStatus: r.classification_status as Feed["classificationStatus"],
       createdAt: (r.created_at as Date).toISOString(),
       lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
     };

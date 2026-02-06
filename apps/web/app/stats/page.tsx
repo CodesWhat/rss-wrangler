@@ -101,10 +101,10 @@ function StatsContent() {
         </section>
       </div>
 
-      {/* Folder breakdown */}
+      {/* Topic breakdown */}
       {stats.folderBreakdown.length > 0 && (
         <section className="section-card">
-          <h2>Reading by folder</h2>
+          <h2>Reading by topic</h2>
           <BarChart
             items={stats.folderBreakdown.map((f) => ({ label: f.folderName, value: f.count }))}
           />

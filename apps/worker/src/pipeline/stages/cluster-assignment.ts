@@ -77,9 +77,24 @@ export async function assignClusters(
     feedWeights.set(row.id, row.weight);
   }
 
+  // Pre-fetch approved topic_id for each feed (for new cluster creation)
+  const feedTopicMap = new Map<string, string | null>();
+  if (feedIds.size > 0) {
+    const feedTopicResult = await pool.query<{ feed_id: string; topic_id: string }>(
+      `SELECT DISTINCT ON (feed_id) feed_id, topic_id
+       FROM feed_topic
+       WHERE feed_id = ANY($1) AND status = 'approved'
+       ORDER BY feed_id, confidence DESC`,
+      [Array.from(feedIds)]
+    );
+    for (const row of feedTopicResult.rows) {
+      feedTopicMap.set(row.feed_id, row.topic_id);
+    }
+  }
+
   // Track batch inserts for new cluster members and cluster size updates
   const addToCluster: { clusterId: string; itemId: string }[] = [];
-  const newClusters: { item: UpsertedItem; folderId: string }[] = [];
+  const newClusters: { item: UpsertedItem; folderId: string; topicId: string | null }[] = [];
   const repCandidates: { clusterId: string; item: UpsertedItem }[] = [];
 
   for (const item of unclustered) {
@@ -123,7 +138,8 @@ export async function assignClusters(
       repCandidates.push({ clusterId: bestClusterId, item });
     } else {
       const classifiedFolderId = classifyItem({ title: item.title, summary: item.summary });
-      newClusters.push({ item, folderId: classifiedFolderId });
+      const topicId = feedTopicMap.get(item.feedId) ?? null;
+      newClusters.push({ item, folderId: classifiedFolderId, topicId });
     }
   }
 
@@ -170,12 +186,13 @@ export async function assignClusters(
     const clusterPlaceholders: string[] = [];
     for (let i = 0; i < newClusters.length; i++) {
       const entry = newClusters[i]!;
-      clusterPlaceholders.push(`($${i * 2 + 1}, $${i * 2 + 2})`);
-      clusterValues.push(entry.item.id, entry.folderId);
+      const offset = i * 3;
+      clusterPlaceholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, 1)`);
+      clusterValues.push(entry.item.id, entry.folderId, entry.topicId);
     }
     const newClusterResult = await pool.query<{ id: string; rep_item_id: string }>(
-      `INSERT INTO cluster (rep_item_id, folder_id, size)
-       VALUES ${clusterPlaceholders.map((p) => p.replace(/\)$/, ", 1)")).join(", ")}
+      `INSERT INTO cluster (rep_item_id, folder_id, topic_id, size)
+       VALUES ${clusterPlaceholders.join(", ")}
        RETURNING id, rep_item_id`,
       clusterValues
     );

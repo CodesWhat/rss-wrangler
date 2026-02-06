@@ -10,6 +10,7 @@ export interface DueFeed {
   etag: string | null;
   lastModified: string | null;
   lastPolledAt: Date | null;
+  classificationStatus: "pending_classification" | "classified" | "approved";
 }
 
 export class FeedService {
@@ -26,8 +27,9 @@ export class FeedService {
       etag: string | null;
       last_modified: string | null;
       last_polled_at: Date | null;
+      classification_status: "pending_classification" | "classified" | "approved";
     }>(
-      `SELECT id, url, title, site_url, folder_id, weight, etag, last_modified, last_polled_at
+      `SELECT id, url, title, site_url, folder_id, weight, etag, last_modified, last_polled_at, classification_status
        FROM feed
        WHERE muted = FALSE
        ORDER BY last_polled_at ASC NULLS FIRST
@@ -45,6 +47,7 @@ export class FeedService {
       etag: r.etag,
       lastModified: r.last_modified,
       lastPolledAt: r.last_polled_at,
+      classificationStatus: r.classification_status,
     }));
   }
 

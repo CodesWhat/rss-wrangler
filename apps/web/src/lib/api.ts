@@ -5,12 +5,14 @@ import {
   clusterDetailSchema,
   digestSchema,
   feedSchema,
+  feedTopicSchema,
   filterRuleSchema,
   folderSchema,
   listClustersQuerySchema,
   readingStatsSchema,
   searchQuerySchema,
   settingsSchema,
+  topicSchema,
   type Annotation,
   type AuthTokens,
   type ClusterCard,
@@ -20,6 +22,7 @@ import {
   type CreateFilterRuleRequest,
   type Digest,
   type Feed,
+  type FeedTopic,
   type Folder,
   type ListClustersQuery,
   type LoginRequest,
@@ -27,6 +30,7 @@ import {
   type SearchQuery,
   type Settings,
   type StatsPeriod,
+  type Topic,
   type UpdateFeedRequest,
   type UpdateFilterRuleRequest,
   type UpdateSettingsRequest,
@@ -252,6 +256,8 @@ const fallbackClusters: ClusterCard[] = [
     outletCount: 1,
     folderId: "11111111-1111-1111-1111-111111111111",
     folderName: "Tech",
+    topicId: null,
+    topicName: null,
     summary: "API not reachable yet. Start api/worker containers and refresh.",
     mutedBreakoutReason: null,
     isRead: false,
@@ -325,6 +331,7 @@ export async function listClusters(
     sort: parsed.sort,
   });
   if (parsed.folder_id) search.set("folder_id", parsed.folder_id);
+  if (parsed.topic_id) search.set("topic_id", parsed.topic_id);
   if (parsed.cursor) search.set("cursor", parsed.cursor);
 
   const payload = await requestJson<unknown>(`/v1/clusters?${search.toString()}`);
@@ -625,6 +632,71 @@ export async function recordDwell(clusterId: string, seconds: number): Promise<b
       method: "POST",
       body: JSON.stringify({ seconds }),
     }
+  );
+  return res !== null;
+}
+
+// ---------- Topics ----------
+
+export async function listTopics(): Promise<Topic[]> {
+  const payload = await requestJson<unknown>("/v1/topics");
+  if (!payload || !Array.isArray(payload)) return [];
+  return payload.map((entry) => topicSchema.parse(entry));
+}
+
+export async function renameTopic(topicId: string, name: string): Promise<Topic | null> {
+  const payload = await requestJson<unknown>(`/v1/topics/${encodeURIComponent(topicId)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+  if (!payload) return null;
+  return topicSchema.parse(payload);
+}
+
+export async function deleteTopic(topicId: string): Promise<boolean> {
+  const res = await requestJson<unknown>(`/v1/topics/${encodeURIComponent(topicId)}`, {
+    method: "DELETE",
+  });
+  return res !== null;
+}
+
+// ---------- Feed Topic Classifications ----------
+
+interface PendingFeed extends Feed {
+  pendingTopics?: FeedTopic[];
+}
+
+export async function getPendingClassifications(): Promise<PendingFeed[]> {
+  const payload = await requestJson<unknown>("/v1/feeds/pending");
+  if (!payload || !Array.isArray(payload)) return [];
+  return payload as PendingFeed[];
+}
+
+export async function getFeedTopics(feedId: string): Promise<FeedTopic[]> {
+  const payload = await requestJson<unknown>(`/v1/feeds/${encodeURIComponent(feedId)}/topics`);
+  if (!payload || !Array.isArray(payload)) return [];
+  return payload.map((entry) => feedTopicSchema.parse(entry));
+}
+
+export async function resolveFeedTopic(
+  feedId: string,
+  topicId: string,
+  action: "approve" | "reject"
+): Promise<boolean> {
+  const res = await requestJson<unknown>(
+    `/v1/feeds/${encodeURIComponent(feedId)}/topics/resolve`,
+    {
+      method: "POST",
+      body: JSON.stringify({ topicId, action }),
+    }
+  );
+  return res !== null;
+}
+
+export async function approveAllFeedTopics(feedId: string): Promise<boolean> {
+  const res = await requestJson<unknown>(
+    `/v1/feeds/${encodeURIComponent(feedId)}/topics/approve-all`,
+    { method: "POST" }
   );
   return res !== null;
 }

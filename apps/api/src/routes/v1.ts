@@ -9,6 +9,8 @@ import {
   pushSubscribeRequestSchema,
   pushUnsubscribeRequestSchema,
   recordDwellRequestSchema,
+  renameTopicRequestSchema,
+  resolveTopicRequestSchema,
   searchQuerySchema,
   statsQuerySchema,
   updateFeedRequestSchema,
@@ -27,6 +29,7 @@ const clusterIdParams = z.object({ id: z.string().uuid() });
 const feedIdParams = z.object({ id: z.string().uuid() });
 const filterIdParams = z.object({ id: z.string().uuid() });
 const annotationIdParams = z.object({ id: z.string().uuid() });
+const topicIdParams = z.object({ id: z.string().uuid() });
 
 const authRefreshSchema = z.object({
   refreshToken: z.string().min(1)
@@ -152,7 +155,31 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.get("/v1/folders", async () => store.listFolders());
 
+    // ---------- Topics ----------
+
+    protectedRoutes.get("/v1/topics", async () => store.listTopics());
+
+    protectedRoutes.patch("/v1/topics/:id", async (request, reply) => {
+      const { id } = topicIdParams.parse(request.params);
+      const body = renameTopicRequestSchema.parse(request.body);
+      const ok = await store.renameTopic(id, body.name);
+      if (!ok) return reply.notFound("topic not found");
+      return { ok: true };
+    });
+
+    protectedRoutes.delete("/v1/topics/:id", async (request, reply) => {
+      const { id } = topicIdParams.parse(request.params);
+      const ok = await store.deleteTopic(id);
+      if (!ok) return reply.notFound("topic not found or is Uncategorized");
+      return { ok: true };
+    });
+
+    // ---------- Feeds ----------
+
     protectedRoutes.get("/v1/feeds", async () => store.listFeeds());
+
+    // Register /v1/feeds/pending BEFORE /v1/feeds/:id routes
+    protectedRoutes.get("/v1/feeds/pending", async () => store.listPendingClassifications());
 
     protectedRoutes.get("/v1/feeds/suggestions", async () => {
       const distribution = await store.getFolderDistribution();
@@ -205,6 +232,24 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.notFound("feed not found");
       }
       return feed;
+    });
+
+    protectedRoutes.get("/v1/feeds/:id/topics", async (request) => {
+      const { id } = feedIdParams.parse(request.params);
+      return store.getFeedTopics(id);
+    });
+
+    protectedRoutes.post("/v1/feeds/:id/topics/resolve", async (request) => {
+      const { id } = feedIdParams.parse(request.params);
+      const body = resolveTopicRequestSchema.parse(request.body);
+      const ok = await store.resolveFeedTopic(id, body.topicId, body.action);
+      return { ok };
+    });
+
+    protectedRoutes.post("/v1/feeds/:id/topics/approve-all", async (request) => {
+      const { id } = feedIdParams.parse(request.params);
+      const ok = await store.approveAllFeedTopics(id);
+      return { ok };
     });
 
     protectedRoutes.post("/v1/opml/import", async (request, reply) => {

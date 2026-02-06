@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
-import { addFeed, exportOpml, importOpml, listFeeds, listFolders, updateFeed } from "@/lib/api";
-import type { Feed, Folder, FeedWeight } from "@rss-wrangler/contracts";
+import { addFeed, exportOpml, getFeedTopics, importOpml, listFeeds, listFolders, updateFeed } from "@/lib/api";
+import type { Feed, FeedTopic, Folder, FeedWeight } from "@rss-wrangler/contracts";
 
 function SourcesContent() {
   const [feeds, setFeeds] = useState<Feed[]>([]);
@@ -13,6 +13,7 @@ function SourcesContent() {
   const [addError, setAddError] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [importMsg, setImportMsg] = useState("");
+  const [feedTopics, setFeedTopics] = useState<Record<string, FeedTopic[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -20,6 +21,14 @@ function SourcesContent() {
       setFeeds(f);
       setFolders(fo);
       setLoading(false);
+      // Load topic proposals for feeds with non-approved classification status
+      f.forEach((feed) => {
+        if (feed.classificationStatus !== "approved") {
+          getFeedTopics(feed.id).then((topics) => {
+            setFeedTopics((prev) => ({ ...prev, [feed.id]: topics }));
+          });
+        }
+      });
     });
   }, []);
 
@@ -122,7 +131,7 @@ function SourcesContent() {
           <thead>
             <tr>
               <th>Title</th>
-              <th>Folder</th>
+              <th>Topics</th>
               <th>Weight</th>
               <th>Muted</th>
             </tr>
@@ -134,7 +143,29 @@ function SourcesContent() {
                   <strong>{feed.title || feed.url}</strong>
                   {feed.trial && <span className="badge" style={{ marginLeft: "0.4rem" }}>Trial</span>}
                 </td>
-                <td>{folderName(feed.folderId)}</td>
+                <td>
+                  {feedTopics[feed.id]?.map((ft) => (
+                    <span
+                      key={ft.topicId}
+                      className="badge"
+                      style={{
+                        marginRight: "0.3rem",
+                        backgroundColor: ft.status === "approved" ? "var(--color-success, #22c55e)" : ft.status === "pending" ? "var(--color-warning, #eab308)" : undefined,
+                        color: ft.status === "approved" || ft.status === "pending" ? "#000" : undefined,
+                      }}
+                    >
+                      {ft.topicName}
+                    </span>
+                  )) ?? null}
+                  {feed.classificationStatus !== "approved" && (
+                    <a href="/topics/pending" className="badge" style={{ marginLeft: "0.2rem", backgroundColor: "var(--color-warning, #eab308)", color: "#000", textDecoration: "none" }}>
+                      Pending
+                    </a>
+                  )}
+                  {(!feedTopics[feed.id] || (feedTopics[feed.id]?.length ?? 0) === 0) && feed.classificationStatus === "approved" && (
+                    <span className="muted">{folderName(feed.folderId)}</span>
+                  )}
+                </td>
                 <td>
                   <select
                     value={feed.weight}

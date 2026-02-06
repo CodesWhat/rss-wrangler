@@ -5,6 +5,7 @@ import type { ClusterCard } from "@rss-wrangler/contracts";
 import { markClusterRead, saveCluster, clusterFeedback, recordDwell } from "@/lib/api";
 import type { ViewLayout } from "@/components/layout-toggle";
 import { ShareMenu } from "@/components/share-menu";
+import { AnnotationToolbar } from "@/components/annotation-toolbar";
 
 interface ParsedSummary {
   articleUrl: string | null;
@@ -71,6 +72,7 @@ export const StoryCard = forwardRef<HTMLElement, StoryCardProps>(
     const parsed = useMemo(() => parseSummary(cluster.summary), [cluster.summary]);
 
     // Dwell time tracking: measure how long the card is visible in viewport
+    const cardBodyRef = useRef<HTMLDivElement>(null);
     const dwellStart = useRef<number | null>(null);
     const dwellSent = useRef(false);
 
@@ -160,7 +162,7 @@ export const StoryCard = forwardRef<HTMLElement, StoryCardProps>(
             <span className="muted list-meta">
               {cluster.primarySource} &middot; {timeStr}
             </span>
-            <span className="badge">{cluster.folderName}</span>
+            <span className="badge">{cluster.topicName ?? "Uncategorized"}</span>
           </div>
         </article>
       );
@@ -197,7 +199,7 @@ export const StoryCard = forwardRef<HTMLElement, StoryCardProps>(
                   : ""}
                 {parsed.cleanText ? " \u00b7 " : ""}
                 {cluster.primarySource} &middot; {timeStr}
-                <span className="badge compact-badge">{cluster.folderName}</span>
+                <span className="badge compact-badge">{cluster.topicName ?? "Uncategorized"}</span>
               </p>
             </div>
           </div>
@@ -216,7 +218,8 @@ export const StoryCard = forwardRef<HTMLElement, StoryCardProps>(
             loading="lazy"
           />
         )}
-        <div className="card-body">
+        <div className="card-body" ref={cardBodyRef} style={{ position: "relative" }}>
+          <AnnotationToolbar clusterId={cluster.id} containerRef={cardBodyRef} />
           <h2>
             {headlineUrl ? (
               <a href={headlineUrl} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
@@ -233,7 +236,7 @@ export const StoryCard = forwardRef<HTMLElement, StoryCardProps>(
           </p>
           {parsed.cleanText ? <p>{parsed.cleanText}</p> : null}
           <div className="row">
-            <span className="badge">{cluster.folderName}</span>
+            <span className="badge">{cluster.topicName ?? "Uncategorized"}</span>
             {parsed.points && <span className="badge">{parsed.points} pts</span>}
             {parsed.commentCount && (
               <span className="badge">

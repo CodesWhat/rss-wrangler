@@ -7,7 +7,7 @@ import { SearchBar } from "@/components/search-bar";
 
 const navItems = [
   { href: "/", label: "Home" },
-  { href: "/folders", label: "Folders" },
+  { href: "/topics", label: "Topics" },
   { href: "/digest", label: "Digest" },
   { href: "/saved", label: "Saved" },
   { href: "/discover", label: "Discover" },

@@ -2,7 +2,6 @@ import PgBoss from "pg-boss";
 import { loadEnv } from "./config/env";
 import { registerJobs } from "./jobs/register-jobs";
 import { getPool, closePool } from "./db";
-import { reclassifyAllClusters } from "./pipeline/stages/classify-folder";
 
 async function start() {
   const env = loadEnv();
@@ -19,16 +18,6 @@ async function start() {
 
   await boss.start();
   await registerJobs(boss, { env, pool });
-
-  // Reclassify existing clusters on startup (one-time catch-up)
-  try {
-    const reclassified = await reclassifyAllClusters(pool);
-    console.info("[worker] reclassified existing clusters", { count: reclassified });
-  } catch (err) {
-    console.error("[worker] reclassification failed (non-fatal)", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
 
   console.info("[worker] started", {
     pollMinutes: env.WORKER_POLL_MINUTES

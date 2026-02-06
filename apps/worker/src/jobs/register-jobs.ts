@@ -59,6 +59,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
       etag: (data.etag as string) || null,
       lastModified: (data.lastModified as string) || null,
       lastPolledAt: data.lastPolledAt ? new Date(data.lastPolledAt as string) : null,
+      classificationStatus: (data.classificationStatus as "pending_classification" | "classified" | "approved") || "approved",
     };
 
     try {

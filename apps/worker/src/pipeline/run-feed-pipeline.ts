@@ -5,6 +5,7 @@ import { pollFeed } from "./stages/poll-feed";
 import { parseAndUpsert } from "./stages/parse-and-upsert";
 import { assignClusters } from "./stages/cluster-assignment";
 import { enrichWithAi } from "./stages/enrich-with-ai";
+import { classifyFeedTopics } from "./stages/classify-feed-topics";
 import { preFilterSoftGate, postClusterFilter } from "./stages/filter";
 import { maybeGenerateDigest } from "./stages/generate-digest";
 import { sendNewStoriesNotification } from "../services/push-service";
@@ -65,6 +66,18 @@ export async function runFeedPipeline({ feed, pool, openaiApiKey, pushConfig }: 
   if (newItems.length === 0) {
     console.info("[pipeline] no new items, skipping downstream stages", { feedId: feed.id });
     return;
+  }
+
+  // Stage: Classify feed topics (LLM) -- runs once for newly subscribed feeds
+  if (feed.classificationStatus === "pending_classification") {
+    try {
+      await classifyFeedTopics(pool, feed.id, openaiApiKey);
+    } catch (err) {
+      console.error("[pipeline] classify-feed-topics failed (non-fatal)", {
+        feedId: feed.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Stage 4: Pre-filter soft gate (mute/block check on title+summary)

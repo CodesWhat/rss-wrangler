@@ -30,6 +30,27 @@ export const folderSchema = z.object({
 });
 export type Folder = z.infer<typeof folderSchema>;
 
+export const topicSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string().min(1),
+  createdAt: z.string().datetime(),
+});
+export type Topic = z.infer<typeof topicSchema>;
+
+export const feedTopicSchema = z.object({
+  feedId: z.string().uuid(),
+  topicId: z.string().uuid(),
+  topicName: z.string(),
+  status: z.enum(["pending", "approved", "rejected"]),
+  confidence: z.number().min(0).max(1),
+  proposedAt: z.string().datetime(),
+  resolvedAt: z.string().datetime().nullable(),
+});
+export type FeedTopic = z.infer<typeof feedTopicSchema>;
+
+export const classificationStatusSchema = z.enum(["pending_classification", "classified", "approved"]);
+export type ClassificationStatus = z.infer<typeof classificationStatusSchema>;
+
 export const feedWeightSchema = z.enum(["prefer", "neutral", "deprioritize"]);
 export type FeedWeight = z.infer<typeof feedWeightSchema>;
 
@@ -43,6 +64,7 @@ export const feedSchema = z.object({
   weight: feedWeightSchema,
   muted: z.boolean(),
   trial: z.boolean(),
+  classificationStatus: classificationStatusSchema,
   createdAt: z.string().datetime(),
   lastPolledAt: z.string().datetime().nullable()
 });
@@ -57,6 +79,8 @@ export const clusterCardSchema = z.object({
   outletCount: z.number().int().min(1),
   folderId: z.string().uuid(),
   folderName: z.string(),
+  topicId: z.string().uuid().nullable(),
+  topicName: z.string().nullable(),
   summary: z.string().nullable(),
   mutedBreakoutReason: z.string().nullable(),
   isRead: z.boolean(),
@@ -141,6 +165,7 @@ export type Settings = z.infer<typeof settingsSchema>;
 
 export const listClustersQuerySchema = z.object({
   folder_id: z.string().uuid().optional(),
+  topic_id: z.string().uuid().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   state: storyStateSchema.default("unread"),
@@ -327,6 +352,21 @@ export const statsQuerySchema = z.object({
 });
 export type StatsQuery = z.infer<typeof statsQuerySchema>;
 
+export const resolveTopicRequestSchema = z.object({
+  topicId: z.string().uuid(),
+  action: z.enum(["approve", "reject"]),
+});
+export type ResolveTopicRequest = z.infer<typeof resolveTopicRequestSchema>;
+
+export const approveAllTopicsRequestSchema = z.object({
+  feedId: z.string().uuid(),
+});
+
+export const renameTopicRequestSchema = z.object({
+  name: z.string().min(1).max(50),
+});
+export type RenameTopicRequest = z.infer<typeof renameTopicRequestSchema>;
+
 export const apiRoutes = {
   clusters: "/v1/clusters",
   folders: "/v1/folders",
@@ -343,5 +383,9 @@ export const apiRoutes = {
   search: "/v1/search",
   pushVapidKey: "/v1/push/vapid-key",
   pushSubscribe: "/v1/push/subscribe",
-  stats: "/v1/stats"
+  stats: "/v1/stats",
+  topics: "/v1/topics",
+  feedTopicResolve: "/v1/feeds/:id/topics/resolve",
+  feedTopicApproveAll: "/v1/feeds/:id/topics/approve-all",
+  pendingClassifications: "/v1/feeds/pending",
 } as const;
