@@ -15,6 +15,9 @@ export type FilterType = z.infer<typeof filterTypeSchema>;
 export const filterModeSchema = z.enum(["mute", "block"]);
 export type FilterMode = z.infer<typeof filterModeSchema>;
 
+export const annotationColorSchema = z.enum(["yellow", "green", "blue", "pink"]);
+export type AnnotationColor = z.infer<typeof annotationColorSchema>;
+
 export const aiModeSchema = z.enum(["off", "summaries_digest", "full"]);
 export type AiMode = z.infer<typeof aiModeSchema>;
 
@@ -87,6 +90,23 @@ export const filterRuleSchema = z.object({
 });
 export type FilterRule = z.infer<typeof filterRuleSchema>;
 
+export const annotationSchema = z.object({
+  id: z.string().uuid(),
+  clusterId: z.string().uuid(),
+  highlightedText: z.string(),
+  note: z.string().nullable(),
+  color: annotationColorSchema,
+  createdAt: z.string().datetime()
+});
+export type Annotation = z.infer<typeof annotationSchema>;
+
+export const createAnnotationRequestSchema = z.object({
+  highlightedText: z.string().min(1),
+  note: z.string().optional(),
+  color: annotationColorSchema.default("yellow")
+});
+export type CreateAnnotationRequest = z.infer<typeof createAnnotationRequestSchema>;
+
 export const digestEntrySchema = z.object({
   clusterId: z.string().uuid(),
   headline: z.string(),
@@ -114,7 +134,8 @@ export const settingsSchema = z.object({
   aiFallbackToLocal: z.boolean(),
   digestAwayHours: z.number().int().min(1),
   digestBacklogThreshold: z.number().int().min(1),
-  feedPollMinutes: z.number().int().min(5)
+  feedPollMinutes: z.number().int().min(5),
+  wallabagUrl: z.string().optional().default("")
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
@@ -235,6 +256,77 @@ export const opmlFeedSchema = z.object({
 });
 export type OpmlFeed = z.infer<typeof opmlFeedSchema>;
 
+export const searchQuerySchema = z.object({
+  q: z.string().min(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().optional()
+});
+export type SearchQuery = z.infer<typeof searchQuerySchema>;
+
+export const searchResponseSchema = z.object({
+  data: z.array(clusterCardSchema),
+  nextCursor: z.string().nullable()
+});
+export type SearchResponse = z.infer<typeof searchResponseSchema>;
+
+// ---------- Push subscription schemas ----------
+
+export const pushSubscribeRequestSchema = z.object({
+  endpoint: z.string().url(),
+  keys: z.object({
+    p256dh: z.string().min(1),
+    auth: z.string().min(1)
+  })
+});
+export type PushSubscribeRequest = z.infer<typeof pushSubscribeRequestSchema>;
+
+export const pushUnsubscribeRequestSchema = z.object({
+  endpoint: z.string().url()
+});
+export type PushUnsubscribeRequest = z.infer<typeof pushUnsubscribeRequestSchema>;
+
+// ---------- Dwell tracking ----------
+
+export const recordDwellRequestSchema = z.object({
+  seconds: z.number().int().min(1).max(86400)
+});
+export type RecordDwellRequest = z.infer<typeof recordDwellRequestSchema>;
+
+// ---------- Reading stats ----------
+
+export const statsPeriodSchema = z.enum(["7d", "30d", "all"]);
+export type StatsPeriod = z.infer<typeof statsPeriodSchema>;
+
+export const readingStatsSchema = z.object({
+  articlesReadToday: z.number().int(),
+  articlesReadWeek: z.number().int(),
+  articlesReadMonth: z.number().int(),
+  avgDwellSeconds: z.number(),
+  folderBreakdown: z.array(z.object({
+    folderName: z.string(),
+    count: z.number().int()
+  })),
+  topSources: z.array(z.object({
+    feedTitle: z.string(),
+    count: z.number().int()
+  })),
+  readingStreak: z.number().int(),
+  peakHours: z.array(z.object({
+    hour: z.number().int().min(0).max(23),
+    count: z.number().int()
+  })),
+  dailyReads: z.array(z.object({
+    date: z.string(),
+    count: z.number().int()
+  }))
+});
+export type ReadingStats = z.infer<typeof readingStatsSchema>;
+
+export const statsQuerySchema = z.object({
+  period: statsPeriodSchema.default("7d")
+});
+export type StatsQuery = z.infer<typeof statsQuerySchema>;
+
 export const apiRoutes = {
   clusters: "/v1/clusters",
   folders: "/v1/folders",
@@ -246,5 +338,10 @@ export const apiRoutes = {
   authLogin: "/v1/auth/login",
   authLogout: "/v1/auth/logout",
   authRefresh: "/v1/auth/refresh",
-  opmlImport: "/v1/opml/import"
+  opmlImport: "/v1/opml/import",
+  opmlExport: "/v1/opml/export",
+  search: "/v1/search",
+  pushVapidKey: "/v1/push/vapid-key",
+  pushSubscribe: "/v1/push/subscribe",
+  stats: "/v1/stats"
 } as const;

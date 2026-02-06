@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
-import { addFeed, importOpml, listFeeds, listFolders, updateFeed } from "@/lib/api";
+import { addFeed, exportOpml, importOpml, listFeeds, listFolders, updateFeed } from "@/lib/api";
 import type { Feed, Folder, FeedWeight } from "@rss-wrangler/contracts";
 
 function SourcesContent() {
@@ -100,6 +100,16 @@ function SourcesContent() {
             onChange={handleOpmlImport}
           />
           {importMsg ? <p className="muted">{importMsg}</p> : null}
+        </div>
+
+        <div className="opml-export">
+          <button
+            type="button"
+            className="button"
+            onClick={() => exportOpml()}
+          >
+            Export OPML
+          </button>
         </div>
       </div>
 

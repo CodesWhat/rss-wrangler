@@ -79,6 +79,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthenticated(false);
   }, []);
 
+  // Register service worker for push notifications
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").catch(() => {
+        // Service worker registration failed — non-critical
+      });
+    }
+  }, []);
+
   // Cross-tab awareness: if another tab logs out (removes the flag),
   // mark this tab as unauthenticated too.
   useEffect(() => {

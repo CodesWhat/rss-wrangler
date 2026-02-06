@@ -7,14 +7,22 @@ import { assignClusters } from "./stages/cluster-assignment";
 import { enrichWithAi } from "./stages/enrich-with-ai";
 import { preFilterSoftGate, postClusterFilter } from "./stages/filter";
 import { maybeGenerateDigest } from "./stages/generate-digest";
+import { sendNewStoriesNotification } from "../services/push-service";
+
+export interface PushConfig {
+  vapidPublicKey?: string;
+  vapidPrivateKey?: string;
+  vapidContact?: string;
+}
 
 export interface PipelineContext {
   feed: DueFeed;
   pool: Pool;
   openaiApiKey?: string;
+  pushConfig?: PushConfig;
 }
 
-export async function runFeedPipeline({ feed, pool, openaiApiKey }: PipelineContext): Promise<void> {
+export async function runFeedPipeline({ feed, pool, openaiApiKey, pushConfig }: PipelineContext): Promise<void> {
   const feedService = new FeedService(pool);
 
   // Stage 1: Poll feed with conditional GET
@@ -98,6 +106,30 @@ export async function runFeedPipeline({ feed, pool, openaiApiKey }: PipelineCont
 
   // Stage 10: Digest generation (if triggers met)
   await maybeGenerateDigest(pool);
+
+  // Send push notification if new clusters were created
+  if (clusterIds.length > 0 && pushConfig?.vapidPublicKey && pushConfig?.vapidPrivateKey) {
+    try {
+      const topHeadline = newItems[0]?.title ?? "New stories available";
+      const result = await sendNewStoriesNotification(
+        pool,
+        {
+          vapidPublicKey: pushConfig.vapidPublicKey,
+          vapidPrivateKey: pushConfig.vapidPrivateKey,
+          vapidContact: pushConfig.vapidContact ?? "mailto:admin@localhost"
+        },
+        clusterIds.length,
+        topHeadline
+      );
+      if (result.sent > 0) {
+        console.info("[pipeline] push notifications sent", result);
+      }
+    } catch (err) {
+      console.error("[pipeline] push notification failed (non-fatal)", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   console.info("[pipeline] completed", {
     feedId: feed.id,

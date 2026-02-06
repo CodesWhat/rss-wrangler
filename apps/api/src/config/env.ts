@@ -10,7 +10,9 @@ const envSchema = z.object({
   AUTH_USERNAME: z.string().min(1),
   AUTH_PASSWORD: z.string().min(8),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
-  REFRESH_TOKEN_TTL: z.string().default("30d")
+  REFRESH_TOKEN_TTL: z.string().default("30d"),
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional()
 }).refine(
   (env) => env.AUTH_JWT_SECRET !== "change-me-change-me",
   { message: "AUTH_JWT_SECRET must not use the placeholder value", path: ["AUTH_JWT_SECRET"] }

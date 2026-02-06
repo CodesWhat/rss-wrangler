@@ -1,10 +1,12 @@
 import type { Pool } from "pg";
 import type {
   AddFeedRequest,
+  Annotation,
   ClusterCard,
   ClusterDetail,
   ClusterDetailMember,
   ClusterFeedbackRequest,
+  CreateAnnotationRequest,
   CreateFilterRuleRequest,
   Digest,
   Event,
@@ -12,7 +14,10 @@ import type {
   FilterRule,
   Folder,
   ListClustersQuery,
+  ReadingStats,
+  SearchQuery,
   Settings,
+  StatsPeriod,
   UpdateFeedRequest,
   UpdateFilterRuleRequest,
   UpdateSettingsRequest
@@ -559,6 +564,317 @@ export class PostgresStore {
     } finally {
       client.release();
     }
+  }
+
+  async searchClusters(query: SearchQuery): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
+    const offset = query.cursor ? parseInt(query.cursor, 10) || 0 : 0;
+    const limit = query.limit;
+
+    const sql = `
+      SELECT DISTINCT ON (c.id)
+        c.id,
+        COALESCE(rep_i.title, 'Untitled') AS headline,
+        rep_i.hero_image_url,
+        COALESCE(f.title, 'Unknown') AS primary_source,
+        COALESCE(rep_i.published_at, c.created_at) AS primary_source_published_at,
+        c.size AS outlet_count,
+        c.folder_id,
+        COALESCE(fo.name, 'Other') AS folder_name,
+        rep_i.summary,
+        rs.read_at,
+        rs.saved_at,
+        ts_rank(i.search_vector, plainto_tsquery('english', $1)) AS rank
+      FROM item i
+      JOIN cluster_member cm ON cm.item_id = i.id
+      JOIN cluster c ON c.id = cm.cluster_id
+      LEFT JOIN item rep_i ON rep_i.id = c.rep_item_id
+      LEFT JOIN feed f ON rep_i.feed_id = f.id
+      LEFT JOIN folder fo ON c.folder_id = fo.id
+      LEFT JOIN read_state rs ON rs.cluster_id = c.id
+      WHERE i.search_vector @@ plainto_tsquery('english', $1)
+      ORDER BY c.id, rank DESC
+    `;
+
+    // Wrap to apply global ordering and pagination
+    const wrappedSql = `
+      SELECT * FROM (${sql}) sub
+      ORDER BY sub.rank DESC
+      OFFSET $2 LIMIT $3
+    `;
+
+    const { rows } = await this.pool.query(wrappedSql, [query.q, offset, limit + 1]);
+
+    const hasMore = rows.length > limit;
+    const data: ClusterCard[] = rows.slice(0, limit).map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      headline: r.headline as string,
+      heroImageUrl: (r.hero_image_url as string) ?? null,
+      primarySource: r.primary_source as string,
+      primarySourcePublishedAt: (r.primary_source_published_at as Date).toISOString(),
+      outletCount: Number(r.outlet_count),
+      folderId: r.folder_id as string,
+      folderName: r.folder_name as string,
+      summary: (r.summary as string) ?? null,
+      mutedBreakoutReason: null,
+      isRead: r.read_at != null,
+      isSaved: r.saved_at != null
+    }));
+
+    const nextCursor = hasMore ? String(offset + limit) : null;
+    return { data, nextCursor };
+  }
+
+  async exportOpml(): Promise<{ feeds: { xmlUrl: string; title: string; htmlUrl: string | null; folderName: string }[] }> {
+    const { rows } = await this.pool.query(`
+      SELECT f.url AS xml_url, f.title, f.site_url AS html_url, COALESCE(fo.name, 'Other') AS folder_name
+      FROM feed f
+      LEFT JOIN folder fo ON fo.id = f.folder_id
+      ORDER BY fo.name, f.title
+    `);
+
+    return {
+      feeds: rows.map((r: Record<string, unknown>) => ({
+        xmlUrl: r.xml_url as string,
+        title: r.title as string,
+        htmlUrl: (r.html_url as string) ?? null,
+        folderName: r.folder_name as string
+      }))
+    };
+  }
+
+  async createAnnotation(clusterId: string, payload: CreateAnnotationRequest): Promise<Annotation | null> {
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1", [clusterId]);
+    if (check.rows.length === 0) {
+      return null;
+    }
+
+    const { rows } = await this.pool.query(
+      `INSERT INTO annotation (cluster_id, highlighted_text, note, color)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, cluster_id, highlighted_text, note, color, created_at`,
+      [clusterId, payload.highlightedText, payload.note ?? null, payload.color]
+    );
+
+    const r = rows[0] as Record<string, unknown>;
+    return {
+      id: r.id as string,
+      clusterId: r.cluster_id as string,
+      highlightedText: r.highlighted_text as string,
+      note: (r.note as string) ?? null,
+      color: r.color as Annotation["color"],
+      createdAt: (r.created_at as Date).toISOString()
+    };
+  }
+
+  async listAnnotations(clusterId: string): Promise<Annotation[]> {
+    const { rows } = await this.pool.query(
+      `SELECT id, cluster_id, highlighted_text, note, color, created_at
+       FROM annotation
+       WHERE cluster_id = $1
+       ORDER BY created_at DESC`,
+      [clusterId]
+    );
+    return rows.map((r: Record<string, unknown>) => ({
+      id: r.id as string,
+      clusterId: r.cluster_id as string,
+      highlightedText: r.highlighted_text as string,
+      note: (r.note as string) ?? null,
+      color: r.color as Annotation["color"],
+      createdAt: (r.created_at as Date).toISOString()
+    }));
+  }
+
+  async deleteAnnotation(annotationId: string): Promise<boolean> {
+    const result = await this.pool.query("DELETE FROM annotation WHERE id = $1", [annotationId]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  // ---------- Push subscription methods ----------
+
+  async savePushSubscription(endpoint: string, p256dh: string, auth: string): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO push_subscription (endpoint, p256dh, auth)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (endpoint) DO UPDATE SET p256dh = $2, auth = $3`,
+      [endpoint, p256dh, auth]
+    );
+  }
+
+  async deletePushSubscription(endpoint: string): Promise<boolean> {
+    const result = await this.pool.query("DELETE FROM push_subscription WHERE endpoint = $1", [endpoint]);
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getAllPushSubscriptions(): Promise<{ endpoint: string; p256dh: string; auth: string }[]> {
+    const { rows } = await this.pool.query("SELECT endpoint, p256dh, auth FROM push_subscription");
+    return rows.map((r: Record<string, unknown>) => ({
+      endpoint: r.endpoint as string,
+      p256dh: r.p256dh as string,
+      auth: r.auth as string
+    }));
+  }
+
+  // ---------- Dwell tracking ----------
+
+  async recordDwell(clusterId: string, seconds: number): Promise<boolean> {
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1", [clusterId]);
+    if (check.rows.length === 0) {
+      return false;
+    }
+
+    await this.pool.query(
+      `INSERT INTO read_state (cluster_id, dwell_seconds, clicked_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (cluster_id) DO UPDATE SET
+         dwell_seconds = read_state.dwell_seconds + $2,
+         clicked_at = NOW()`,
+      [clusterId, seconds]
+    );
+    return true;
+  }
+
+  // ---------- Reading stats ----------
+
+  async getReadingStats(period: StatsPeriod): Promise<ReadingStats> {
+    const periodCondition = period === "all"
+      ? ""
+      : period === "30d"
+        ? "AND rs.read_at >= NOW() - INTERVAL '30 days'"
+        : "AND rs.read_at >= NOW() - INTERVAL '7 days'";
+
+    // Articles read today / week / month
+    const countsSql = `
+      SELECT
+        COUNT(*) FILTER (WHERE rs.read_at >= CURRENT_DATE) AS today,
+        COUNT(*) FILTER (WHERE rs.read_at >= NOW() - INTERVAL '7 days') AS week,
+        COUNT(*) FILTER (WHERE rs.read_at >= NOW() - INTERVAL '30 days') AS month
+      FROM read_state rs
+      WHERE rs.read_at IS NOT NULL
+    `;
+    const countsResult = await this.pool.query(countsSql);
+    const counts = countsResult.rows[0] as Record<string, unknown>;
+
+    // Average dwell time
+    const avgDwellSql = `
+      SELECT COALESCE(AVG(rs.dwell_seconds), 0) AS avg_dwell
+      FROM read_state rs
+      WHERE rs.read_at IS NOT NULL AND rs.dwell_seconds > 0
+      ${periodCondition}
+    `;
+    const avgDwellResult = await this.pool.query(avgDwellSql);
+    const avgDwell = Number((avgDwellResult.rows[0] as Record<string, unknown>).avg_dwell);
+
+    // Folder breakdown
+    const folderSql = `
+      SELECT COALESCE(fo.name, 'Other') AS folder_name, COUNT(*) AS cnt
+      FROM read_state rs
+      JOIN cluster c ON c.id = rs.cluster_id
+      LEFT JOIN folder fo ON fo.id = c.folder_id
+      WHERE rs.read_at IS NOT NULL ${periodCondition}
+      GROUP BY fo.name
+      ORDER BY cnt DESC
+    `;
+    const folderResult = await this.pool.query(folderSql);
+    const folderBreakdown = folderResult.rows.map((r: Record<string, unknown>) => ({
+      folderName: r.folder_name as string,
+      count: Number(r.cnt)
+    }));
+
+    // Top sources
+    const sourcesSql = `
+      SELECT COALESCE(f.title, 'Unknown') AS feed_title, COUNT(*) AS cnt
+      FROM read_state rs
+      JOIN cluster c ON c.id = rs.cluster_id
+      LEFT JOIN item i ON i.id = c.rep_item_id
+      LEFT JOIN feed f ON f.id = i.feed_id
+      WHERE rs.read_at IS NOT NULL ${periodCondition}
+      GROUP BY f.title
+      ORDER BY cnt DESC
+      LIMIT 5
+    `;
+    const sourcesResult = await this.pool.query(sourcesSql);
+    const topSources = sourcesResult.rows.map((r: Record<string, unknown>) => ({
+      feedTitle: r.feed_title as string,
+      count: Number(r.cnt)
+    }));
+
+    // Reading streak (consecutive days with at least 1 read)
+    const streakSql = `
+      WITH daily AS (
+        SELECT DISTINCT DATE(rs.read_at AT TIME ZONE 'UTC') AS read_date
+        FROM read_state rs
+        WHERE rs.read_at IS NOT NULL
+      ),
+      numbered AS (
+        SELECT read_date, read_date - (ROW_NUMBER() OVER (ORDER BY read_date))::int AS grp
+        FROM daily
+      ),
+      streaks AS (
+        SELECT grp, COUNT(*) AS streak_len, MAX(read_date) AS last_date
+        FROM numbered
+        GROUP BY grp
+      )
+      SELECT COALESCE(
+        (SELECT streak_len FROM streaks WHERE last_date >= CURRENT_DATE - 1 ORDER BY last_date DESC LIMIT 1),
+        0
+      ) AS streak
+    `;
+    const streakResult = await this.pool.query(streakSql);
+    const readingStreak = Number((streakResult.rows[0] as Record<string, unknown>).streak);
+
+    // Peak reading hours
+    const hoursSql = `
+      SELECT EXTRACT(HOUR FROM rs.read_at AT TIME ZONE 'UTC')::int AS hour, COUNT(*) AS cnt
+      FROM read_state rs
+      WHERE rs.read_at IS NOT NULL ${periodCondition}
+      GROUP BY hour
+      ORDER BY hour
+    `;
+    const hoursResult = await this.pool.query(hoursSql);
+    const peakHours = hoursResult.rows.map((r: Record<string, unknown>) => ({
+      hour: Number(r.hour),
+      count: Number(r.cnt)
+    }));
+
+    // Daily reads
+    const dailySql = `
+      SELECT DATE(rs.read_at AT TIME ZONE 'UTC') AS read_date, COUNT(*) AS cnt
+      FROM read_state rs
+      WHERE rs.read_at IS NOT NULL ${periodCondition}
+      GROUP BY read_date
+      ORDER BY read_date
+    `;
+    const dailyResult = await this.pool.query(dailySql);
+    const dailyReads = dailyResult.rows.map((r: Record<string, unknown>) => ({
+      date: (r.read_date as Date).toISOString().split("T")[0]!,
+      count: Number(r.cnt)
+    }));
+
+    return {
+      articlesReadToday: Number(counts.today),
+      articlesReadWeek: Number(counts.week),
+      articlesReadMonth: Number(counts.month),
+      avgDwellSeconds: Math.round(avgDwell),
+      folderBreakdown,
+      topSources,
+      readingStreak,
+      peakHours,
+      dailyReads
+    };
+  }
+
+  async getFolderDistribution(): Promise<{ folderName: string; count: number }[]> {
+    const { rows } = await this.pool.query(`
+      SELECT COALESCE(fo.name, 'Other') AS folder_name, COUNT(*)::int AS cnt
+      FROM cluster c
+      LEFT JOIN folder fo ON fo.id = c.folder_id
+      GROUP BY fo.name
+      ORDER BY cnt DESC
+    `);
+    return rows.map((r: Record<string, unknown>) => ({
+      folderName: r.folder_name as string,
+      count: Number(r.cnt)
+    }));
   }
 
   private mapFeedRow(r: Record<string, unknown>): Feed {

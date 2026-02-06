@@ -1,4 +1,5 @@
 import {
+  annotationSchema,
   authTokensSchema,
   clusterCardSchema,
   clusterDetailSchema,
@@ -7,18 +8,25 @@ import {
   filterRuleSchema,
   folderSchema,
   listClustersQuerySchema,
+  readingStatsSchema,
+  searchQuerySchema,
   settingsSchema,
+  type Annotation,
   type AuthTokens,
   type ClusterCard,
   type ClusterDetail,
   type ClusterFeedbackRequest,
+  type CreateAnnotationRequest,
   type CreateFilterRuleRequest,
   type Digest,
   type Feed,
   type Folder,
   type ListClustersQuery,
   type LoginRequest,
+  type ReadingStats,
+  type SearchQuery,
   type Settings,
+  type StatsPeriod,
   type UpdateFeedRequest,
   type UpdateFilterRuleRequest,
   type UpdateSettingsRequest,
@@ -268,6 +276,7 @@ const fallbackSettings: Settings = {
   digestAwayHours: 24,
   digestBacklogThreshold: 50,
   feedPollMinutes: 60,
+  wallabagUrl: "",
 };
 
 // ---------- Auth ----------
@@ -481,4 +490,161 @@ export async function updateSettings(body: UpdateSettingsRequest): Promise<Setti
   });
   if (!payload) return null;
   return settingsSchema.parse(payload);
+}
+
+// ---------- Search ----------
+
+interface SearchClustersResponse {
+  data: ClusterCard[];
+  nextCursor: string | null;
+}
+
+export async function searchClusters(
+  q: string,
+  limit = 20,
+  cursor?: string
+): Promise<SearchClustersResponse> {
+  const parsed = searchQuerySchema.parse({ q, limit, cursor });
+  const search = new URLSearchParams({
+    q: parsed.q,
+    limit: String(parsed.limit),
+  });
+  if (parsed.cursor) search.set("cursor", parsed.cursor);
+
+  const payload = await requestJson<unknown>(`/v1/search?${search.toString()}`);
+  if (!payload) return { data: [], nextCursor: null };
+
+  const data = Array.isArray((payload as { data?: unknown }).data)
+    ? (payload as { data: unknown[] }).data.map((entry) => clusterCardSchema.parse(entry))
+    : [];
+
+  const nextCursor =
+    typeof (payload as { nextCursor?: unknown }).nextCursor === "string"
+      ? (payload as { nextCursor: string }).nextCursor
+      : null;
+
+  return { data, nextCursor };
+}
+
+// ---------- OPML Export ----------
+
+export async function exportOpml(): Promise<void> {
+  const token = await ensureValidToken();
+  const headers = new Headers();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+
+  try {
+    const res = await fetch(`${API_BASE_URL}/v1/opml/export`, { headers });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rss-wrangler-export.opml";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    // best-effort
+  }
+}
+
+// ---------- Annotations ----------
+
+export async function createAnnotation(
+  clusterId: string,
+  body: CreateAnnotationRequest
+): Promise<Annotation | null> {
+  const payload = await requestJson<unknown>(
+    `/v1/clusters/${encodeURIComponent(clusterId)}/annotations`,
+    { method: "POST", body: JSON.stringify(body) }
+  );
+  if (!payload) return null;
+  return annotationSchema.parse(payload);
+}
+
+export async function listAnnotations(clusterId: string): Promise<Annotation[]> {
+  const payload = await requestJson<unknown>(
+    `/v1/clusters/${encodeURIComponent(clusterId)}/annotations`
+  );
+  if (!payload || !Array.isArray(payload)) return [];
+  return payload.map((entry) => annotationSchema.parse(entry));
+}
+
+export async function deleteAnnotation(id: string): Promise<boolean> {
+  const res = await requestJson<unknown>(
+    `/v1/annotations/${encodeURIComponent(id)}`,
+    { method: "DELETE" }
+  );
+  return res !== null;
+}
+
+// ---------- Feed Discovery ----------
+
+export async function getFeedSuggestions(): Promise<string[]> {
+  const payload = await requestJson<unknown>("/v1/feeds/suggestions");
+  if (!payload || !Array.isArray((payload as { categories?: unknown }).categories)) return [];
+  return (payload as { categories: string[] }).categories;
+}
+
+// ---------- Push Notifications ----------
+
+export async function getVapidKey(): Promise<string | null> {
+  const payload = await requestJson<unknown>("/v1/push/vapid-key");
+  if (!payload) return null;
+  return (payload as { publicKey: string }).publicKey || null;
+}
+
+export async function subscribePush(
+  endpoint: string,
+  p256dh: string,
+  auth: string
+): Promise<boolean> {
+  const res = await requestJson<unknown>("/v1/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint, keys: { p256dh, auth } }),
+  });
+  return res !== null;
+}
+
+export async function unsubscribePush(endpoint: string): Promise<boolean> {
+  const res = await requestJson<unknown>("/v1/push/subscribe", {
+    method: "DELETE",
+    body: JSON.stringify({ endpoint }),
+  });
+  return res !== null;
+}
+
+// ---------- Dwell Tracking ----------
+
+export async function recordDwell(clusterId: string, seconds: number): Promise<boolean> {
+  const res = await requestJson<unknown>(
+    `/v1/clusters/${encodeURIComponent(clusterId)}/dwell`,
+    {
+      method: "POST",
+      body: JSON.stringify({ seconds }),
+    }
+  );
+  return res !== null;
+}
+
+// ---------- Stats ----------
+
+export async function getReadingStats(period: StatsPeriod = "7d"): Promise<ReadingStats> {
+  const payload = await requestJson<unknown>(`/v1/stats?period=${period}`);
+  if (!payload) {
+    return {
+      articlesReadToday: 0,
+      articlesReadWeek: 0,
+      articlesReadMonth: 0,
+      avgDwellSeconds: 0,
+      folderBreakdown: [],
+      topSources: [],
+      readingStreak: 0,
+      peakHours: [],
+      dailyReads: [],
+    };
+  }
+  return readingStatsSchema.parse(payload);
 }

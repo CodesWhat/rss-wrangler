@@ -3,13 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
+import { SearchBar } from "@/components/search-bar";
 
 const navItems = [
   { href: "/", label: "Home" },
   { href: "/folders", label: "Folders" },
   { href: "/digest", label: "Digest" },
   { href: "/saved", label: "Saved" },
+  { href: "/discover", label: "Discover" },
   { href: "/sources", label: "Sources" },
+  { href: "/stats", label: "Stats" },
   { href: "/settings", label: "Settings" },
 ];
 
@@ -23,6 +26,7 @@ export function AppNav() {
     <header className="topbar">
       <div className="topbar-inner">
         <div className="brand">RSS Wrangler</div>
+        <SearchBar />
         <nav className="nav-links" aria-label="Primary">
           {navItems.map((item) => (
             <Link

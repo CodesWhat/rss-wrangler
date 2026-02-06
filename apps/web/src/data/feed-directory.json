@@ -1,0 +1,499 @@
+[
+  {
+    "name": "Hacker News",
+    "url": "https://hnrss.org/frontpage",
+    "description": "Top stories from Hacker News, the social news site for programmers and startup enthusiasts.",
+    "category": "Tech",
+    "popularity": 5
+  },
+  {
+    "name": "Ars Technica",
+    "url": "https://feeds.arstechnica.com/arstechnica/index",
+    "description": "In-depth technology news, reviews, and analysis covering IT, science, and gadgets.",
+    "category": "Tech",
+    "popularity": 5
+  },
+  {
+    "name": "The Verge",
+    "url": "https://www.theverge.com/rss/index.xml",
+    "description": "Technology, science, art, and culture news and features.",
+    "category": "Tech",
+    "popularity": 5
+  },
+  {
+    "name": "TechCrunch",
+    "url": "https://techcrunch.com/feed/",
+    "description": "Startup and technology news, funding rounds, and product launches.",
+    "category": "Tech",
+    "popularity": 5
+  },
+  {
+    "name": "Wired",
+    "url": "https://www.wired.com/feed/rss",
+    "description": "Award-winning coverage of technology, science, culture, and business.",
+    "category": "Tech",
+    "popularity": 5
+  },
+  {
+    "name": "Engadget",
+    "url": "https://www.engadget.com/rss.xml",
+    "description": "Technology news, reviews, and buyer's guides for consumer electronics.",
+    "category": "Tech",
+    "popularity": 4
+  },
+  {
+    "name": "LWN.net",
+    "url": "https://lwn.net/headlines/rss",
+    "description": "Linux and free software community news and development coverage.",
+    "category": "Tech",
+    "popularity": 3
+  },
+  {
+    "name": "Lobsters",
+    "url": "https://lobste.rs/rss",
+    "description": "Computing-focused link aggregation community with high-quality technical discussions.",
+    "category": "Tech",
+    "popularity": 3
+  },
+  {
+    "name": "MIT Technology Review",
+    "url": "https://www.technologyreview.com/feed/",
+    "description": "Emerging technologies and their impact on business, society, and politics.",
+    "category": "Tech",
+    "popularity": 4
+  },
+  {
+    "name": "Krebs on Security",
+    "url": "https://krebsonsecurity.com/feed/",
+    "description": "In-depth security news and investigation by journalist Brian Krebs.",
+    "category": "Security",
+    "popularity": 5
+  },
+  {
+    "name": "Schneier on Security",
+    "url": "https://www.schneier.com/feed/atom/",
+    "description": "Security analysis and commentary from cryptography expert Bruce Schneier.",
+    "category": "Security",
+    "popularity": 4
+  },
+  {
+    "name": "The Hacker News",
+    "url": "https://feeds.feedburner.com/TheHackersNews",
+    "description": "Cybersecurity news, vulnerabilities, hacking, and data breaches.",
+    "category": "Security",
+    "popularity": 5
+  },
+  {
+    "name": "BleepingComputer",
+    "url": "https://www.bleepingcomputer.com/feed/",
+    "description": "Technology news with a focus on security, malware, and tech support.",
+    "category": "Security",
+    "popularity": 4
+  },
+  {
+    "name": "Dark Reading",
+    "url": "https://www.darkreading.com/rss.xml",
+    "description": "Enterprise cybersecurity news, threat intelligence, and analysis.",
+    "category": "Security",
+    "popularity": 4
+  },
+  {
+    "name": "Threatpost",
+    "url": "https://threatpost.com/feed/",
+    "description": "Independent cybersecurity news and analysis on vulnerabilities and threats.",
+    "category": "Security",
+    "popularity": 3
+  },
+  {
+    "name": "SANS Internet Storm Center",
+    "url": "https://isc.sans.edu/rssfeed.xml",
+    "description": "Daily security diary and analysis from the SANS Internet Storm Center.",
+    "category": "Security",
+    "popularity": 3
+  },
+  {
+    "name": "Polygon",
+    "url": "https://www.polygon.com/rss/index.xml",
+    "description": "Gaming news, reviews, guides, and features from Vox Media.",
+    "category": "Gaming",
+    "popularity": 5
+  },
+  {
+    "name": "Kotaku",
+    "url": "https://kotaku.com/rss",
+    "description": "Gaming and geek culture news, reviews, and commentary.",
+    "category": "Gaming",
+    "popularity": 5
+  },
+  {
+    "name": "PC Gamer",
+    "url": "https://www.pcgamer.com/rss/",
+    "description": "PC gaming news, reviews, hardware, and guides.",
+    "category": "Gaming",
+    "popularity": 4
+  },
+  {
+    "name": "Rock Paper Shotgun",
+    "url": "https://www.rockpapershotgun.com/feed",
+    "description": "PC gaming site covering news, reviews, features, and the best PC games.",
+    "category": "Gaming",
+    "popularity": 4
+  },
+  {
+    "name": "Eurogamer",
+    "url": "https://www.eurogamer.net/feed",
+    "description": "European gaming news, reviews, previews, and Digital Foundry analysis.",
+    "category": "Gaming",
+    "popularity": 4
+  },
+  {
+    "name": "IGN",
+    "url": "https://feeds.feedburner.com/ign/all",
+    "description": "Video game news, reviews, trailers, and walkthroughs.",
+    "category": "Gaming",
+    "popularity": 5
+  },
+  {
+    "name": "Nintendo Life",
+    "url": "https://www.nintendolife.com/feeds/latest",
+    "description": "Nintendo news, reviews, and features for Switch and other Nintendo platforms.",
+    "category": "Gaming",
+    "popularity": 3
+  },
+  {
+    "name": "Reuters",
+    "url": "https://www.reutersagency.com/feed/",
+    "description": "Global breaking news and analysis from one of the world's largest news agencies.",
+    "category": "Business",
+    "popularity": 5
+  },
+  {
+    "name": "Financial Times",
+    "url": "https://www.ft.com/rss/home",
+    "description": "International business, finance, economic and political news.",
+    "category": "Business",
+    "popularity": 5
+  },
+  {
+    "name": "Harvard Business Review",
+    "url": "https://hbr.org/resources/rss",
+    "description": "Management insights, leadership, strategy, and innovation ideas.",
+    "category": "Business",
+    "popularity": 4
+  },
+  {
+    "name": "Planet Money (NPR)",
+    "url": "https://feeds.npr.org/510289/podcast.xml",
+    "description": "The economy explained with entertaining stories and clear explanations.",
+    "category": "Business",
+    "popularity": 4
+  },
+  {
+    "name": "Stratechery",
+    "url": "https://stratechery.com/feed/",
+    "description": "Analysis of the strategy and business of technology and media.",
+    "category": "Business",
+    "popularity": 4
+  },
+  {
+    "name": "Bloomberg Markets",
+    "url": "https://feeds.bloomberg.com/markets/news.rss",
+    "description": "Financial markets news and analysis from Bloomberg.",
+    "category": "Business",
+    "popularity": 5
+  },
+  {
+    "name": "Nature",
+    "url": "https://www.nature.com/nature.rss",
+    "description": "International weekly journal of science publishing peer-reviewed research.",
+    "category": "Science",
+    "popularity": 5
+  },
+  {
+    "name": "Science Daily",
+    "url": "https://www.sciencedaily.com/rss/all.xml",
+    "description": "Breaking science news and research from universities and journals worldwide.",
+    "category": "Science",
+    "popularity": 4
+  },
+  {
+    "name": "New Scientist",
+    "url": "https://www.newscientist.com/feed/home/",
+    "description": "Science and technology news, features, and opinion pieces.",
+    "category": "Science",
+    "popularity": 4
+  },
+  {
+    "name": "Quanta Magazine",
+    "url": "https://www.quantamagazine.org/feed/",
+    "description": "Illuminating research in mathematics, physics, biology, and computer science.",
+    "category": "Science",
+    "popularity": 4
+  },
+  {
+    "name": "Ars Technica Science",
+    "url": "https://feeds.arstechnica.com/arstechnica/science",
+    "description": "Scientific discoveries, space exploration, and environment coverage.",
+    "category": "Science",
+    "popularity": 4
+  },
+  {
+    "name": "NASA Breaking News",
+    "url": "https://www.nasa.gov/news-release/feed/",
+    "description": "Latest news releases and updates from NASA.",
+    "category": "Science",
+    "popularity": 4
+  },
+  {
+    "name": "Phys.org",
+    "url": "https://phys.org/rss-feed/",
+    "description": "Science, research, and technology news covering physics, earth science, and more.",
+    "category": "Science",
+    "popularity": 3
+  },
+  {
+    "name": "Scientific American",
+    "url": "http://rss.sciam.com/ScientificAmerican-Global",
+    "description": "Science and technology news and expert analysis since 1845.",
+    "category": "Science",
+    "popularity": 4
+  },
+  {
+    "name": "Smashing Magazine",
+    "url": "https://www.smashingmagazine.com/feed/",
+    "description": "Web design, front-end development, and UX articles for professional designers and developers.",
+    "category": "Design",
+    "popularity": 5
+  },
+  {
+    "name": "A List Apart",
+    "url": "https://alistapart.com/main/feed/",
+    "description": "Explores the design, development, and meaning of web content.",
+    "category": "Design",
+    "popularity": 4
+  },
+  {
+    "name": "CSS-Tricks",
+    "url": "https://css-tricks.com/feed/",
+    "description": "Tips, tricks, and techniques on using CSS, web design, and front-end development.",
+    "category": "Design",
+    "popularity": 5
+  },
+  {
+    "name": "Codrops",
+    "url": "https://tympanus.net/codrops/feed/",
+    "description": "Web design and development blog with demos, tutorials, and free resources.",
+    "category": "Design",
+    "popularity": 4
+  },
+  {
+    "name": "UX Collective",
+    "url": "https://uxdesign.cc/feed",
+    "description": "Curated stories on UX, visual, and product design.",
+    "category": "Design",
+    "popularity": 3
+  },
+  {
+    "name": "Sidebar.io",
+    "url": "https://sidebar.io/feed.xml",
+    "description": "Five curated design links delivered daily.",
+    "category": "Design",
+    "popularity": 3
+  },
+  {
+    "name": "BBC News",
+    "url": "https://feeds.bbci.co.uk/news/rss.xml",
+    "description": "Latest stories from the BBC, covering world events, UK news, and more.",
+    "category": "World News",
+    "popularity": 5
+  },
+  {
+    "name": "Reuters World",
+    "url": "https://www.reutersagency.com/feed/",
+    "description": "Global news coverage from Reuters news agency.",
+    "category": "World News",
+    "popularity": 5
+  },
+  {
+    "name": "AP News",
+    "url": "https://rsshub.app/apnews/topics/apf-topnews",
+    "description": "Breaking news and top stories from the Associated Press.",
+    "category": "World News",
+    "popularity": 5
+  },
+  {
+    "name": "The Guardian World",
+    "url": "https://www.theguardian.com/world/rss",
+    "description": "World news, comment, and analysis from The Guardian.",
+    "category": "World News",
+    "popularity": 5
+  },
+  {
+    "name": "Al Jazeera",
+    "url": "https://www.aljazeera.com/xml/rss/all.xml",
+    "description": "International news and current affairs from a Middle Eastern perspective.",
+    "category": "World News",
+    "popularity": 4
+  },
+  {
+    "name": "NPR News",
+    "url": "https://feeds.npr.org/1001/rss.xml",
+    "description": "Top stories and breaking news from NPR (National Public Radio).",
+    "category": "World News",
+    "popularity": 4
+  },
+  {
+    "name": "ABC News",
+    "url": "https://abcnews.go.com/abcnews/topstories",
+    "description": "Top news stories from ABC News covering US and international events.",
+    "category": "World News",
+    "popularity": 4
+  },
+  {
+    "name": "Dev.to",
+    "url": "https://dev.to/feed",
+    "description": "Community-driven content for software developers covering all topics.",
+    "category": "Programming",
+    "popularity": 5
+  },
+  {
+    "name": "Hacker Noon",
+    "url": "https://hackernoon.com/feed",
+    "description": "Tech stories by real technologists: programming, AI, crypto, and startups.",
+    "category": "Programming",
+    "popularity": 4
+  },
+  {
+    "name": "Martin Fowler",
+    "url": "https://martinfowler.com/feed.atom",
+    "description": "Thoughtful articles on software development, refactoring, and architecture.",
+    "category": "Programming",
+    "popularity": 4
+  },
+  {
+    "name": "Joel on Software",
+    "url": "https://www.joelonsoftware.com/feed/",
+    "description": "Insights on software management, development, and the business of software.",
+    "category": "Programming",
+    "popularity": 3
+  },
+  {
+    "name": "The Pragmatic Engineer",
+    "url": "https://newsletter.pragmaticengineer.com/feed",
+    "description": "Big tech and startup engineering culture, career advice, and industry insights.",
+    "category": "Programming",
+    "popularity": 4
+  },
+  {
+    "name": "Dan Abramov (Overreacted)",
+    "url": "https://overreacted.io/rss.xml",
+    "description": "Personal blog from React core team member Dan Abramov on UI engineering.",
+    "category": "Programming",
+    "popularity": 3
+  },
+  {
+    "name": "Go Blog",
+    "url": "https://go.dev/blog/feed.atom",
+    "description": "Official blog for the Go programming language with news and tutorials.",
+    "category": "Programming",
+    "popularity": 3
+  },
+  {
+    "name": "Rust Blog",
+    "url": "https://blog.rust-lang.org/feed.xml",
+    "description": "Official Rust programming language blog with release notes and updates.",
+    "category": "Programming",
+    "popularity": 3
+  },
+  {
+    "name": "Python Insider",
+    "url": "https://blog.python.org/feeds/posts/default",
+    "description": "Official blog of the Python core development team.",
+    "category": "Programming",
+    "popularity": 3
+  },
+  {
+    "name": "The GitHub Blog",
+    "url": "https://github.blog/feed/",
+    "description": "Updates on GitHub features, engineering, open source, and community.",
+    "category": "Programming",
+    "popularity": 4
+  },
+  {
+    "name": "Julia Evans",
+    "url": "https://jvns.ca/atom.xml",
+    "description": "Fun explanations of technical concepts: networking, Linux, debugging, and more.",
+    "category": "Programming",
+    "popularity": 4
+  },
+  {
+    "name": "The Morning Brew",
+    "url": "https://www.morningbrew.com/feed",
+    "description": "Daily business newsletter making business news enjoyable and accessible.",
+    "category": "Business",
+    "popularity": 3
+  },
+  {
+    "name": "Ars Technica Policy",
+    "url": "https://feeds.arstechnica.com/arstechnica/tech-policy",
+    "description": "Tech policy, law, and regulation coverage from Ars Technica.",
+    "category": "Tech",
+    "popularity": 3
+  },
+  {
+    "name": "9to5Mac",
+    "url": "https://9to5mac.com/feed/",
+    "description": "Apple news, rumors, reviews, and how-tos for Mac, iPhone, iPad, and more.",
+    "category": "Tech",
+    "popularity": 4
+  },
+  {
+    "name": "Android Authority",
+    "url": "https://www.androidauthority.com/feed/",
+    "description": "Android news, reviews, how-tos, and deals for enthusiasts.",
+    "category": "Tech",
+    "popularity": 4
+  },
+  {
+    "name": "Tom's Hardware",
+    "url": "https://www.tomshardware.com/feeds/all",
+    "description": "PC hardware news, reviews, benchmarks, and buyer's guides.",
+    "category": "Tech",
+    "popularity": 4
+  },
+  {
+    "name": "The Register",
+    "url": "https://www.theregister.com/headlines.atom",
+    "description": "Enterprise technology news and commentary with a British edge.",
+    "category": "Tech",
+    "popularity": 4
+  },
+  {
+    "name": "InfoQ",
+    "url": "https://feed.infoq.com/",
+    "description": "Software development news, articles, and conference talks.",
+    "category": "Programming",
+    "popularity": 3
+  },
+  {
+    "name": "Daring Fireball",
+    "url": "https://daringfireball.net/feeds/main",
+    "description": "John Gruber's commentary on Apple, technology, and design.",
+    "category": "Tech",
+    "popularity": 4
+  },
+  {
+    "name": "Wait But Why",
+    "url": "https://waitbutwhy.com/feed",
+    "description": "Long-form, illustrated blog posts exploring complex topics in an accessible way.",
+    "category": "Science",
+    "popularity": 3
+  },
+  {
+    "name": "XKCD",
+    "url": "https://xkcd.com/rss.xml",
+    "description": "A webcomic of romance, sarcasm, math, and language.",
+    "category": "Science",
+    "popularity": 4
+  }
+]

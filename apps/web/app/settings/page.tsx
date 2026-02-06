@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
+import { NotificationToggle } from "@/components/notification-toggle";
 import {
   getSettings,
   updateSettings,
@@ -314,6 +315,17 @@ function SettingsContent() {
             />
           </label>
 
+          <label>
+            {fieldLabel("wallabagUrl", "Wallabag server URL (optional)")}
+            <input
+              type="url"
+              placeholder="https://your-wallabag-server.com"
+              value={settings.wallabagUrl ?? ""}
+              onChange={(e) => updateField("wallabagUrl", e.target.value)}
+              className="input"
+            />
+          </label>
+
           <button
             type="submit"
             className="button button-primary"
@@ -322,6 +334,15 @@ function SettingsContent() {
             {saving ? "Saving..." : isDirty ? "Save settings" : "Settings saved"}
           </button>
         </form>
+      </section>
+
+      {/* Notifications */}
+      <section className="section-card">
+        <h2>Notifications</h2>
+        <p className="muted">Receive push notifications when new stories arrive.</p>
+        <div className="settings-form">
+          <NotificationToggle />
+        </div>
       </section>
 
       {/* Filter rules */}
