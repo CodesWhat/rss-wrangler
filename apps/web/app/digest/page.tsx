@@ -40,8 +40,16 @@ function simpleMarkdownToHtml(md: string): string {
   // Italic
   html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
 
-  // Links [text](url)
-  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  // Links [text](url) — validate each URL to prevent injection
+  html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g, (_match, text, url) => {
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return text;
+      return `<a href="${parsed.href}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+    } catch {
+      return text;
+    }
+  });
 
   // Unordered list items (- item or * item)
   html = html.replace(/^[-*] (.+)$/gm, "<li>$1</li>");
@@ -98,50 +106,55 @@ function DigestContent() {
   }
 
   return (
-    <section className="section-card">
-      <h1>Digest</h1>
-      <p className="muted">Top picks, big stories, and quick scan.</p>
-      {loading ? (
-        <p className="muted">Loading digests...</p>
-      ) : digests.length === 0 ? (
-        <p>No digests yet. Worker will generate when triggers are met.</p>
-      ) : (
-        <div className="digest-list">
-          {digests.map((digest) => (
-            <div key={digest.id} className="digest-item">
-              <button
-                type="button"
-                className="digest-header"
-                onClick={() => setExpanded(expanded === digest.id ? null : digest.id)}
-              >
-                <strong>{digest.title}</strong>
-                <span className="muted">{new Date(digest.createdAt).toLocaleString()}</span>
-              </button>
-              {expanded === digest.id && (
-                <div className="digest-body">
-                  <div
-                    className="digest-markdown"
-                    dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(digest.body) }}
-                  />
-                  {renderSection(
-                    "Top picks for you",
-                    digest.entries.filter((e) => e.section === "top_picks")
-                  )}
-                  {renderSection(
-                    "Big stories",
-                    digest.entries.filter((e) => e.section === "big_stories")
-                  )}
-                  {renderSection(
-                    "Quick scan",
-                    digest.entries.filter((e) => e.section === "quick_scan")
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+    <>
+      <div className="page-header">
+        <h1 className="page-title">Digest</h1>
+        <p className="page-meta">Top picks, big stories, and quick scan.</p>
+      </div>
+
+      <section className="section-card">
+        {loading ? (
+          <p className="muted">Loading digests...</p>
+        ) : digests.length === 0 ? (
+          <p>No digests yet. Worker will generate when triggers are met.</p>
+        ) : (
+          <div className="digest-list">
+            {digests.map((digest) => (
+              <div key={digest.id} className="digest-item">
+                <button
+                  type="button"
+                  className="digest-header"
+                  onClick={() => setExpanded(expanded === digest.id ? null : digest.id)}
+                >
+                  <strong>{digest.title}</strong>
+                  <span className="muted">{new Date(digest.createdAt).toLocaleString()}</span>
+                </button>
+                {expanded === digest.id && (
+                  <div className="digest-body">
+                    <div
+                      className="digest-markdown"
+                      dangerouslySetInnerHTML={{ __html: simpleMarkdownToHtml(digest.body) }}
+                    />
+                    {renderSection(
+                      "Top picks for you",
+                      digest.entries.filter((e) => e.section === "top_picks")
+                    )}
+                    {renderSection(
+                      "Big stories",
+                      digest.entries.filter((e) => e.section === "big_stories")
+                    )}
+                    {renderSection(
+                      "Quick scan",
+                      digest.entries.filter((e) => e.section === "quick_scan")
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 

@@ -96,8 +96,8 @@ function SettingsContent() {
       <>
         {label}
         {savedFields.has(field) && (
-          <span style={{ marginLeft: 6, fontSize: "0.9em" }} title="Saved">
-            \ud83d\udcbe
+          <span className="key-status key-status-active saved-indicator">
+            SAVED
           </span>
         )}
       </>
@@ -161,7 +161,12 @@ function SettingsContent() {
     <div className="settings-layout">
       {/* AI Provider section */}
       <section className="section-card">
-        <h1>AI Provider {savedFields.has("openaiApiKey") && "\ud83d\udcbe"}</h1>
+        <h1 className="page-title">
+          AI Provider
+          {savedFields.has("openaiApiKey") && (
+            <span className="key-status key-status-active saved-indicator-lg">SAVED</span>
+          )}
+        </h1>
         <p className="muted">Configure the AI backend for summaries and digests.</p>
 
         <div className="settings-form">

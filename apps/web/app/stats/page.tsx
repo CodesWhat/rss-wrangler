@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { getReadingStats } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import type { ReadingStats, StatsPeriod } from "@rss-wrangler/contracts";
 
 function formatDwell(seconds: number): string {
@@ -61,42 +62,44 @@ function StatsContent() {
 
   return (
     <div className="settings-layout">
-      <div style={{ display: "flex", alignItems: "center", gap: "1rem", marginBottom: "1rem" }}>
-        <h1 style={{ margin: 0 }}>Reading Stats</h1>
-        <div className="sort-toggle">
-          {(["7d", "30d", "all"] as StatsPeriod[]).map((p) => (
-            <button
-              key={p}
-              type="button"
-              className={`button button-small${period === p ? " button-active" : ""}`}
-              onClick={() => setPeriod(p)}
-            >
-              {p === "7d" ? "7 days" : p === "30d" ? "30 days" : "All time"}
-            </button>
-          ))}
+      <div className="page-header">
+        <div className="row">
+          <h1 className="page-title">Reading Stats</h1>
+          <div className="sort-toggle">
+            {(["7d", "30d", "all"] as StatsPeriod[]).map((p) => (
+              <button
+                key={p}
+                type="button"
+                className={cn("sort-btn", period === p && "active")}
+                onClick={() => setPeriod(p)}
+              >
+                {p === "7d" ? "7 days" : p === "30d" ? "30 days" : "All time"}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
       {/* Summary cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "1rem", marginBottom: "1.5rem" }}>
-        <section className="section-card" style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "2rem", fontWeight: 700 }}>{stats.articlesReadToday}</div>
+      <div className="folder-grid">
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.articlesReadToday}</div>
           <div className="muted">Read today</div>
         </section>
-        <section className="section-card" style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "2rem", fontWeight: 700 }}>{stats.articlesReadWeek}</div>
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.articlesReadWeek}</div>
           <div className="muted">This week</div>
         </section>
-        <section className="section-card" style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "2rem", fontWeight: 700 }}>{stats.articlesReadMonth}</div>
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.articlesReadMonth}</div>
           <div className="muted">This month</div>
         </section>
-        <section className="section-card" style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "2rem", fontWeight: 700 }}>{formatDwell(stats.avgDwellSeconds)}</div>
+        <section className="section-card">
+          <div className="bar-value stat-value">{formatDwell(stats.avgDwellSeconds)}</div>
           <div className="muted">Avg. dwell time</div>
         </section>
-        <section className="section-card" style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "2rem", fontWeight: 700 }}>{stats.readingStreak}</div>
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.readingStreak}</div>
           <div className="muted">Day streak</div>
         </section>
       </div>

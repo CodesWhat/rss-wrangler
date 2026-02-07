@@ -75,124 +75,88 @@ function PendingContent() {
   }
 
   return (
-    <section className="section-card">
-      <div className="row" style={{ marginBottom: "1rem" }}>
-        <a href="/topics" className="button button-small">
-          Back to topics
-        </a>
-        <h1 style={{ margin: 0 }}>Pending Topic Approvals</h1>
-      </div>
-
-      {message && (
-        <p
-          className="banner"
-          style={{ marginBottom: "1rem", padding: "0.5rem 1rem" }}
-        >
-          {message}
-        </p>
-      )}
-
-      {loading ? (
-        <p className="muted">Loading pending classifications...</p>
-      ) : pendingFeeds.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "2rem" }}>
-          <p className="muted">All feeds are categorized.</p>
-          <a href="/topics" className="button button-secondary">
+    <>
+      <div className="page-header">
+        <div className="row">
+          <a href="/topics" className="button button-small">
             Back to topics
           </a>
+          <h1 className="page-title">Pending Topic Approvals</h1>
         </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-          {pendingFeeds.map((pf) => (
-            <div key={pf.feed.id} className="section-card">
-              <div
-                className="row"
-                style={{
-                  justifyContent: "space-between",
-                  marginBottom: "0.75rem",
-                }}
-              >
-                <h2 style={{ margin: 0 }}>
-                  {pf.feed.title || pf.feed.url}
-                </h2>
-                <button
-                  type="button"
-                  className="button button-small button-primary"
-                  onClick={() => handleApproveAll(pf.feed.id)}
-                  disabled={busyFeed === pf.feed.id}
-                >
-                  Approve All
-                </button>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: "0.5rem",
-                }}
-              >
-                {pf.topics.map((topic) => (
-                  <div
-                    key={topic.topicId}
-                    className="badge"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "0.4rem",
-                      padding: "0.3rem 0.6rem",
-                      fontSize: "0.9rem",
-                    }}
+      </div>
+
+      <section className="section-card">
+        {message && (
+          <p className="banner">
+            {message}
+          </p>
+        )}
+
+        {loading ? (
+          <p className="muted">Loading pending classifications...</p>
+        ) : pendingFeeds.length === 0 ? (
+          <div className="section-card">
+            <p className="muted">All feeds are categorized.</p>
+            <a href="/topics" className="button button-secondary">
+              Back to topics
+            </a>
+          </div>
+        ) : (
+          <div className="settings-layout">
+            {pendingFeeds.map((pf) => (
+              <div key={pf.feed.id} className="section-card">
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <h2 className="page-title">
+                    {pf.feed.title || pf.feed.url}
+                  </h2>
+                  <button
+                    type="button"
+                    className="button button-small button-primary"
+                    onClick={() => handleApproveAll(pf.feed.id)}
+                    disabled={busyFeed === pf.feed.id}
                   >
-                    <span>{topic.topicName}</span>
-                    <span className="muted" style={{ fontSize: "0.8em" }}>
-                      ({Math.round(topic.confidence * 100)}%)
-                    </span>
-                    <button
-                      type="button"
-                      title="Approve"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "var(--color-success, #22c55e)",
-                        fontWeight: 700,
-                        fontSize: "1.1em",
-                        padding: "0 0.2rem",
-                      }}
-                      onClick={() =>
-                        handleResolve(pf.feed.id, topic.topicId, "approve")
-                      }
-                      disabled={busyFeed === pf.feed.id}
+                    Approve All
+                  </button>
+                </div>
+                <div className="row" style={{ flexWrap: "wrap" }}>
+                  {pf.topics.map((topic) => (
+                    <div
+                      key={topic.topicId}
+                      className="badge"
                     >
-                      &#x2713;
-                    </button>
-                    <button
-                      type="button"
-                      title="Reject"
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "var(--color-danger, #ef4444)",
-                        fontWeight: 700,
-                        fontSize: "1.1em",
-                        padding: "0 0.2rem",
-                      }}
-                      onClick={() =>
-                        handleResolve(pf.feed.id, topic.topicId, "reject")
-                      }
-                      disabled={busyFeed === pf.feed.id}
-                    >
-                      &#x2717;
-                    </button>
-                  </div>
-                ))}
+                      <span>{topic.topicName}</span>
+                      <span className="muted"> ({Math.round(topic.confidence * 100)}%)</span>
+                      <button
+                        type="button"
+                        title="Approve"
+                        className="action-btn"
+                        onClick={() =>
+                          handleResolve(pf.feed.id, topic.topicId, "approve")
+                        }
+                        disabled={busyFeed === pf.feed.id}
+                      >
+                        &#x2713;
+                      </button>
+                      <button
+                        type="button"
+                        title="Reject"
+                        className="action-btn"
+                        onClick={() =>
+                          handleResolve(pf.feed.id, topic.topicId, "reject")
+                        }
+                        disabled={busyFeed === pf.feed.id}
+                      >
+                        &#x2717;
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
+            ))}
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 

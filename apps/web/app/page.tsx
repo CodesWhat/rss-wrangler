@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StoryCard } from "@/components/story-card";
 import { ProtectedRoute } from "@/components/protected-route";
 import { listClusters } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import { ShortcutsHelp, ShortcutsButton } from "@/components/shortcuts-help";
 import { LayoutToggle, getStoredLayout, storeLayout } from "@/components/layout-toggle";
 import type { ViewLayout } from "@/components/layout-toggle";
@@ -186,18 +187,25 @@ function HomeFeed() {
 
   return (
     <>
+      <div className="page-header">
+        <h1 className="page-title">Your Feed</h1>
+        <p className="page-meta">
+          <span className="count">{clusters.length} stories</span>
+        </p>
+      </div>
+
       <div className="feed-controls">
-        <div className="sort-toggle">
+        <div className="feed-sort">
           <button
             type="button"
-            className={`button button-small${sort === "personal" ? " button-active" : ""}`}
+            className={cn("sort-btn", sort === "personal" && "active")}
             onClick={() => setSort("personal")}
           >
             For You
           </button>
           <button
             type="button"
-            className={`button button-small${sort === "latest" ? " button-active" : ""}`}
+            className={cn("sort-btn", sort === "latest" && "active")}
             onClick={() => setSort("latest")}
           >
             Latest
@@ -245,14 +253,13 @@ function HomeFeed() {
               }}
             />
           ))}
-          {cursor && <div ref={sentinelRef} style={{ height: 1 }} />}
+          {cursor && <div ref={sentinelRef} className="scroll-sentinel" />}
           {loadingMore && <p className="muted">Loading more...</p>}
           {cursor && !loadingMore && (
             <button
               type="button"
               className="button button-secondary"
               onClick={() => fetchClusters(false)}
-              style={{ justifySelf: "center", marginTop: "0.5rem" }}
             >
               Load more
             </button>

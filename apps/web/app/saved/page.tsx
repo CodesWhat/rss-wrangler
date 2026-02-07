@@ -22,18 +22,25 @@ function SavedFeed() {
   }
 
   return (
-    <section className="cards">
-      <h1>Saved</h1>
-      {loading ? (
-        <p className="muted">Loading...</p>
-      ) : clusters.length === 0 ? (
-        <p className="muted">No saved stories yet.</p>
-      ) : (
-        clusters.map((cluster) => (
-          <StoryCard key={cluster.id} cluster={cluster} onRemove={handleRemove} />
-        ))
-      )}
-    </section>
+    <>
+      <div className="page-header">
+        <h1 className="page-title">Saved</h1>
+        <p className="page-meta">
+          <span className="count">{clusters.length} stories</span>
+        </p>
+      </div>
+      <section className="cards">
+        {loading ? (
+          <p className="muted">Loading...</p>
+        ) : clusters.length === 0 ? (
+          <p className="muted">No saved stories yet.</p>
+        ) : (
+          clusters.map((cluster) => (
+            <StoryCard key={cluster.id} cluster={cluster} onRemove={handleRemove} />
+          ))
+        )}
+      </section>
+    </>
   );
 }
 

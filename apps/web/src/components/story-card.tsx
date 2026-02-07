@@ -1,11 +1,13 @@
 "use client";
 
-import { useMemo, useState, useEffect, useRef, useCallback, forwardRef } from "react";
+import { memo, useMemo, useState, useEffect, useRef, useCallback, forwardRef } from "react";
 import type { ClusterCard } from "@rss-wrangler/contracts";
 import { markClusterRead, saveCluster, clusterFeedback, recordDwell } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import type { ViewLayout } from "@/components/layout-toggle";
 import { ShareMenu } from "@/components/share-menu";
 import { AnnotationToolbar } from "@/components/annotation-toolbar";
+import { BookmarkIcon, CheckIcon, XIcon } from "@/components/icons";
 
 interface ParsedSummary {
   articleUrl: string | null;
@@ -53,6 +55,49 @@ function parseSummary(summary: string | null): ParsedSummary {
   return { articleUrl, commentsUrl, points, commentCount, cleanText };
 }
 
+function isSafeUrl(url: string | null): boolean {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+const TOPIC_SLUG_MAP: Record<string, string> = {
+  technology: "tech",
+  tech: "tech",
+  gaming: "gaming",
+  games: "gaming",
+  culture: "culture",
+  entertainment: "culture",
+  science: "science",
+  business: "biz",
+  biz: "biz",
+  finance: "biz",
+  security: "security",
+  cybersecurity: "security",
+};
+
+function topicSlug(name: string | null): string | undefined {
+  if (!name) return undefined;
+  return TOPIC_SLUG_MAP[name.toLowerCase()];
+}
+
+function relativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay}d ago`;
+}
+
 interface StoryCardProps {
   cluster: ClusterCard;
   layout?: ViewLayout;
@@ -63,7 +108,8 @@ interface StoryCardProps {
   onToggleSave?: (id: string) => void;
 }
 
-export const StoryCard = forwardRef<HTMLElement, StoryCardProps>(
+export const StoryCard = memo(
+  forwardRef<HTMLElement, StoryCardProps>(
   function StoryCard({ cluster, layout = "card", selected, wallabagUrl, onRemove, onToggleRead, onToggleSave }, ref) {
     const [saved, setSaved] = useState(cluster.isSaved);
     const [read, setRead] = useState(cluster.isRead);
@@ -114,195 +160,192 @@ export const StoryCard = forwardRef<HTMLElement, StoryCardProps>(
     async function handleSave() {
       if (busy) return;
       setBusy(true);
-      const ok = await saveCluster(cluster.id);
-      if (ok) setSaved(true);
-      setBusy(false);
-      onToggleSave?.(cluster.id);
+      try {
+        const ok = await saveCluster(cluster.id);
+        if (ok) setSaved(true);
+        onToggleSave?.(cluster.id);
+      } catch (err) {
+        console.error("handleSave failed", err);
+      } finally {
+        setBusy(false);
+      }
     }
 
     async function handleMarkRead() {
       if (busy) return;
       setBusy(true);
-      const ok = await markClusterRead(cluster.id);
-      if (ok) {
-        setRead(true);
-        onRemove?.(cluster.id);
+      try {
+        const ok = await markClusterRead(cluster.id);
+        if (ok) {
+          setRead(true);
+          onRemove?.(cluster.id);
+        }
+        onToggleRead?.(cluster.id);
+      } catch (err) {
+        console.error("handleMarkRead failed", err);
+      } finally {
+        setBusy(false);
       }
-      setBusy(false);
-      onToggleRead?.(cluster.id);
     }
 
     async function handleNotInterested() {
       if (busy) return;
       setBusy(true);
-      const ok = await clusterFeedback(cluster.id, { type: "not_interested" });
-      if (ok) onRemove?.(cluster.id);
-      setBusy(false);
+      try {
+        const ok = await clusterFeedback(cluster.id, { type: "not_interested" });
+        if (ok) onRemove?.(cluster.id);
+      } catch (err) {
+        console.error("handleNotInterested failed", err);
+      } finally {
+        setBusy(false);
+      }
     }
 
     const headlineUrl = parsed.articleUrl;
-    const className = `card layout-${layout}${selected ? " card-selected" : ""}`;
-
-    const timeStr = new Date(cluster.primarySourcePublishedAt).toLocaleString();
+    const slug = topicSlug(cluster.topicName);
+    const timeAgo = relativeTime(cluster.primarySourcePublishedAt);
+    const topicDisplay = (cluster.topicName ?? "UNCATEGORIZED").toUpperCase();
 
     // ---------- List layout: single line ----------
     if (layout === "list") {
+      const listClasses = cn("story-card", read && "is-read", selected && "card-selected");
       return (
-        <article className={className} ref={ref} data-cluster-id={cluster.id} data-article-url={headlineUrl ?? ""}>
-          <div className="card-body card-body-list">
-            <h2 className="list-headline">
-              {headlineUrl ? (
-                <a href={headlineUrl} target="_blank" rel="noopener noreferrer">
-                  {cluster.headline}
-                </a>
-              ) : (
-                cluster.headline
-              )}
-            </h2>
-            <span className="muted list-meta">
-              {cluster.primarySource} &middot; {timeStr}
-            </span>
-            <span className="badge">{cluster.topicName ?? "Uncategorized"}</span>
+        <article
+          className={listClasses}
+          ref={ref}
+          data-cluster-id={cluster.id}
+          data-article-url={headlineUrl ?? ""}
+          data-topic={slug}
+        >
+          <div className="story-source">
+            {!read && <span className="unread-marker" />}
+            <span className="source-name">{cluster.primarySource.toUpperCase().replace(/ /g, "_")}</span>
+            <span className="source-sep">/</span>
+            <span className="story-time">{timeAgo}</span>
           </div>
-        </article>
-      );
-    }
-
-    // ---------- Compact layout: two lines ----------
-    if (layout === "compact") {
-      return (
-        <article className={className} ref={ref} data-cluster-id={cluster.id} data-article-url={headlineUrl ?? ""}>
-          <div className="card-body card-body-compact">
-            {cluster.heroImageUrl && (
-              <img
-                className="compact-thumb"
-                src={cluster.heroImageUrl}
-                alt={cluster.headline}
-                loading="lazy"
-              />
-            )}
-            <div className="compact-text">
-              <h2 className="compact-headline">
-                {headlineUrl ? (
-                  <a href={headlineUrl} target="_blank" rel="noopener noreferrer">
-                    {cluster.headline}
-                  </a>
-                ) : (
-                  cluster.headline
-                )}
-              </h2>
-              <p className="muted compact-meta">
-                {parsed.cleanText
-                  ? parsed.cleanText.length > 120
-                    ? parsed.cleanText.slice(0, 120) + "..."
-                    : parsed.cleanText
-                  : ""}
-                {parsed.cleanText ? " \u00b7 " : ""}
-                {cluster.primarySource} &middot; {timeStr}
-                <span className="badge compact-badge">{cluster.topicName ?? "Uncategorized"}</span>
-              </p>
-            </div>
-          </div>
-        </article>
-      );
-    }
-
-    // ---------- Card layout: default ----------
-    return (
-      <article className={className} ref={ref} data-cluster-id={cluster.id} data-article-url={headlineUrl ?? ""}>
-        {cluster.heroImageUrl && (
-          <img
-            className="card-media"
-            src={cluster.heroImageUrl}
-            alt={cluster.headline}
-            loading="lazy"
-          />
-        )}
-        <div className="card-body" ref={cardBodyRef} style={{ position: "relative" }}>
-          <AnnotationToolbar clusterId={cluster.id} containerRef={cardBodyRef} />
-          <h2>
-            {headlineUrl ? (
-              <a href={headlineUrl} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
+          <h2 className="story-headline">
+            {isSafeUrl(headlineUrl) ? (
+              <a href={headlineUrl!} target="_blank" rel="noopener noreferrer">
                 {cluster.headline}
               </a>
             ) : (
               cluster.headline
             )}
           </h2>
-          <p className="muted">
-            {cluster.primarySource} &middot;{" "}
-            {timeStr}
-            {cluster.outletCount > 1 ? ` \u00b7 +${cluster.outletCount - 1} outlets` : ""}
-          </p>
-          {parsed.cleanText ? <p>{parsed.cleanText}</p> : null}
-          <div className="row">
-            <span className="badge">{cluster.topicName ?? "Uncategorized"}</span>
-            {parsed.points && <span className="badge">{parsed.points} pts</span>}
-            {parsed.commentCount && (
-              <span className="badge">
-                {parsed.commentsUrl ? (
-                  <a href={parsed.commentsUrl} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
-                    {parsed.commentCount} comments
-                  </a>
-                ) : (
-                  <>{parsed.commentCount} comments</>
-                )}
-              </span>
-            )}
-            {cluster.mutedBreakoutReason ? (
-              <span className="badge badge-breakout">
-                Muted topic breakout: {cluster.mutedBreakoutReason}
-              </span>
-            ) : null}
-            {saved ? <span className="badge">Saved</span> : null}
-            {read ? <span className="badge">Read</span> : <span className="badge">Unread</span>}
+        </article>
+      );
+    }
+
+    // ---------- Compact layout: two lines ----------
+    if (layout === "compact") {
+      const compactClasses = cn("story-card", read && "is-read", selected && "card-selected");
+      return (
+        <article
+          className={compactClasses}
+          ref={ref}
+          data-cluster-id={cluster.id}
+          data-article-url={headlineUrl ?? ""}
+          data-topic={slug}
+        >
+          <div className="story-source">
+            {!read && <span className="unread-marker" />}
+            <span className="source-name">{cluster.primarySource.toUpperCase().replace(/ /g, "_")}</span>
+            <span className="source-sep">/</span>
+            <span className="story-time">{timeAgo}</span>
           </div>
-          <div className="card-actions">
-            {headlineUrl && (
-              <a
-                href={headlineUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="button button-small button-primary"
-                style={{ textDecoration: "none" }}
-              >
-                Read article
+          <h2 className="story-headline">
+            {isSafeUrl(headlineUrl) ? (
+              <a href={headlineUrl!} target="_blank" rel="noopener noreferrer">
+                {cluster.headline}
               </a>
+            ) : (
+              cluster.headline
             )}
-            {!saved && (
-              <button
-                type="button"
-                className="button button-small"
-                onClick={handleSave}
-                disabled={busy}
-              >
-                Save
-              </button>
+          </h2>
+          {parsed.cleanText && <p className="story-summary">{parsed.cleanText}</p>}
+        </article>
+      );
+    }
+
+    // ---------- Card layout: default ----------
+    const cardClasses = cn("story-card", read && "is-read", selected && "card-selected");
+
+    return (
+      <article
+        className={cardClasses}
+        ref={ref}
+        data-cluster-id={cluster.id}
+        data-article-url={headlineUrl ?? ""}
+        data-topic={slug}
+      >
+        <div className="story-source">
+          {!read && <span className="unread-marker" />}
+          <span className="source-name">{cluster.primarySource.toUpperCase().replace(/ /g, "_")}</span>
+          <span className="source-sep">/</span>
+          <span className="story-time">{timeAgo}</span>
+        </div>
+
+        <div ref={cardBodyRef} className="story-card-body">
+          <AnnotationToolbar clusterId={cluster.id} containerRef={cardBodyRef} />
+
+          <h2 className="story-headline">
+            {isSafeUrl(headlineUrl) ? (
+              <a href={headlineUrl!} target="_blank" rel="noopener noreferrer">
+                {cluster.headline}
+              </a>
+            ) : (
+              cluster.headline
             )}
+          </h2>
+
+          {parsed.cleanText && <p className="story-summary">{parsed.cleanText}</p>}
+        </div>
+
+        <div className="story-footer">
+          <span className={cn("story-tag", slug && `tag-${slug}`)}>{topicDisplay}</span>
+          {cluster.mutedBreakoutReason && (
+            <span className="story-tag tag-trending">TRENDING</span>
+          )}
+
+          <div className="story-actions">
+            <button
+              type="button"
+              className={cn("action-btn", saved && "saved")}
+              onClick={handleSave}
+              disabled={busy}
+              aria-label={saved ? "Saved" : "Save"}
+              title={saved ? "Saved" : "Save"}
+            >
+              <BookmarkIcon />
+            </button>
             {!read && (
               <button
                 type="button"
-                className="button button-small"
+                className="action-btn"
                 onClick={handleMarkRead}
                 disabled={busy}
+                aria-label="Mark read"
+                title="Mark read"
               >
-                Mark read
+                <CheckIcon />
               </button>
             )}
             <button
               type="button"
-              className="button button-small button-muted"
+              className="action-btn"
               onClick={handleNotInterested}
               disabled={busy}
+              aria-label="Not interested"
+              title="Not interested"
             >
-              Not interested
+              <XIcon />
             </button>
-            {headlineUrl && (
-              <ShareMenu articleUrl={headlineUrl} wallabagUrl={wallabagUrl} />
+            {isSafeUrl(headlineUrl) && (
+              <ShareMenu articleUrl={headlineUrl!} wallabagUrl={wallabagUrl} />
             )}
           </div>
         </div>
       </article>
     );
   }
-);
+));

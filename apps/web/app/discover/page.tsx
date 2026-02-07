@@ -111,68 +111,72 @@ function DiscoverContent() {
   }
 
   return (
-    <section className="section-card">
-      <h1>Discover Feeds</h1>
-      <p className="muted">
-        Browse popular RSS feeds and subscribe with one click.
-      </p>
-
-      <div className="discover-search">
-        <input
-          type="text"
-          className="input"
-          placeholder="Search feeds by name, topic, or keyword..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+    <>
+      <div className="page-header">
+        <h1 className="page-title">Discover Feeds</h1>
+        <p className="page-meta">
+          Browse popular RSS feeds and subscribe with one click.
+        </p>
       </div>
 
-      {loading ? (
-        <p className="muted">Loading...</p>
-      ) : (
-        <>
-          {recommendedFeeds.length > 0 && activeCategory === "All" && !search.trim() && (
-            <div className="discover-section">
-              <h2>Recommended for You</h2>
-              <p className="muted">
-                Based on your current feed subscriptions, you might enjoy these.
-              </p>
-              <div className="discover-grid">
-                {recommendedFeeds.map(renderFeedCard)}
+      <section className="section-card">
+        <div className="discover-search">
+          <input
+            type="text"
+            className="input"
+            placeholder="Search feeds by name, topic, or keyword..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+
+        {loading ? (
+          <p className="muted">Loading...</p>
+        ) : (
+          <>
+            {recommendedFeeds.length > 0 && activeCategory === "All" && !search.trim() && (
+              <div className="discover-section">
+                <h2>Recommended for You</h2>
+                <p className="muted">
+                  Based on your current feed subscriptions, you might enjoy these.
+                </p>
+                <div className="discover-grid">
+                  {recommendedFeeds.map(renderFeedCard)}
+                </div>
               </div>
-            </div>
-          )}
-
-          <div className="discover-tabs">
-            <button
-              type="button"
-              className={`button button-small${activeCategory === "All" ? " button-active" : ""}`}
-              onClick={() => setActiveCategory("All")}
-            >
-              All
-            </button>
-            {CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className={`button button-small${activeCategory === cat ? " button-active" : ""}`}
-                onClick={() => setActiveCategory(cat)}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-
-          <div className="discover-grid">
-            {filteredFeeds.length === 0 ? (
-              <p className="muted">No feeds match your search.</p>
-            ) : (
-              filteredFeeds.map(renderFeedCard)
             )}
-          </div>
-        </>
-      )}
-    </section>
+
+            <div className="discover-tabs">
+              <button
+                type="button"
+                className={`button button-small${activeCategory === "All" ? " button-active" : ""}`}
+                onClick={() => setActiveCategory("All")}
+              >
+                All
+              </button>
+              {CATEGORIES.map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  className={`button button-small${activeCategory === cat ? " button-active" : ""}`}
+                  onClick={() => setActiveCategory(cat)}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+
+            <div className="discover-grid">
+              {filteredFeeds.length === 0 ? (
+                <p className="muted">No feeds match your search.</p>
+              ) : (
+                filteredFeeds.map(renderFeedCard)
+              )}
+            </div>
+          </>
+        )}
+      </section>
+    </>
   );
 }
 

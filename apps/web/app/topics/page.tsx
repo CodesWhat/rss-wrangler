@@ -61,96 +61,97 @@ function TopicsContent() {
   if (selectedTopic || showUncategorized) {
     const title = selectedTopic ? selectedTopic.name : "Uncategorized";
     return (
-      <section className="section-card">
-        <div className="row" style={{ marginBottom: "1rem" }}>
-          <button
-            type="button"
-            className="button button-small"
-            onClick={() => {
-              setSelectedTopic(null);
-              setShowUncategorized(false);
-              setClusters([]);
-            }}
-          >
-            Back to topics
-          </button>
-          <h1 style={{ margin: 0 }}>{title}</h1>
-        </div>
-        {loadingClusters ? (
-          <p className="muted">Loading stories...</p>
-        ) : clusters.length === 0 ? (
-          <p className="muted">No unread stories in this topic.</p>
-        ) : (
-          <div className="cards">
-            {clusters.map((cluster) => (
-              <StoryCard
-                key={cluster.id}
-                cluster={cluster}
-                onRemove={handleRemove}
-              />
-            ))}
+      <>
+        <div className="page-header">
+          <div className="row">
+            <button
+              type="button"
+              className="button button-small"
+              onClick={() => {
+                setSelectedTopic(null);
+                setShowUncategorized(false);
+                setClusters([]);
+              }}
+            >
+              Back to topics
+            </button>
+            <h1 className="page-title">{title}</h1>
           </div>
-        )}
-      </section>
+        </div>
+        <section className="section-card">
+          {loadingClusters ? (
+            <p className="muted">Loading stories...</p>
+          ) : clusters.length === 0 ? (
+            <p className="muted">No unread stories in this topic.</p>
+          ) : (
+            <div className="cards">
+              {clusters.map((cluster) => (
+                <StoryCard
+                  key={cluster.id}
+                  cluster={cluster}
+                  onRemove={handleRemove}
+                />
+              ))}
+            </div>
+          )}
+        </section>
+      </>
     );
   }
 
   return (
-    <section className="section-card">
-      <h1>Topics</h1>
-      <p className="muted">
-        Browse stories organized by AI-classified topics.
-      </p>
+    <>
+      <div className="page-header">
+        <h1 className="page-title">Topics</h1>
+        <p className="page-meta">
+          Browse stories organized by AI-classified topics.
+        </p>
+      </div>
 
-      {pendingCount > 0 && (
-        <a
-          href="/topics/pending"
-          className="banner"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            textDecoration: "none",
-            marginBottom: "1rem",
-          }}
-        >
-          <span>
-            <strong>
-              {pendingCount} feed{pendingCount !== 1 ? "s" : ""} need
-              {pendingCount === 1 ? "s" : ""} topic approval
-            </strong>
-          </span>
-          <span className="button button-secondary button-small">
-            Review now
-          </span>
-        </a>
-      )}
-
-      {loading ? (
-        <p className="muted">Loading topics...</p>
-      ) : (
-        <div className="folder-grid">
-          <button
-            type="button"
-            className="folder-card"
-            onClick={openUncategorized}
-            style={{ borderStyle: "dashed" }}
+      <section className="section-card">
+        {pendingCount > 0 && (
+          <a
+            href="/topics/pending"
+            className="banner"
           >
-            Uncategorized
-          </button>
-          {topics.map((topic) => (
+            <span>
+              <strong>
+                {pendingCount} feed{pendingCount !== 1 ? "s" : ""} need
+                {pendingCount === 1 ? "s" : ""} topic approval
+              </strong>
+            </span>
+            <span className="button button-secondary button-small">
+              Review now
+            </span>
+          </a>
+        )}
+
+        {loading ? (
+          <p className="muted">Loading topics...</p>
+        ) : (
+          <div className="folder-grid">
             <button
-              key={topic.id}
               type="button"
               className="folder-card"
-              onClick={() => openTopic(topic)}
+              onClick={openUncategorized}
+              style={{ borderStyle: "dashed" }}
             >
-              {topic.name}
+              Uncategorized
             </button>
-          ))}
-        </div>
-      )}
-    </section>
+            {topics.map((topic) => (
+              <button
+                key={topic.id}
+                type="button"
+                className="folder-card"
+                onClick={() => openTopic(topic)}
+              >
+                {topic.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    </>
   );
 }
 

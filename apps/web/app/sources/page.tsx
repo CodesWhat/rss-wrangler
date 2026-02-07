@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { addFeed, exportOpml, getFeedTopics, importOpml, listFeeds, listFolders, updateFeed } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import type { Feed, FeedTopic, Folder, FeedWeight } from "@rss-wrangler/contracts";
 
 function SourcesContent() {
@@ -79,118 +80,124 @@ function SourcesContent() {
     }
   }
 
+  function badgeClass(status: string): string {
+    if (status === "approved") return "badge badge-approved";
+    if (status === "pending") return "badge badge-pending";
+    if (status === "rejected") return "badge badge-rejected";
+    return "badge";
+  }
+
   return (
-    <section className="section-card">
-      <h1>Sources</h1>
-      <p className="muted">Manage feed assignment, weights, and trial sources.</p>
-
-      <div className="source-actions">
-        <form onSubmit={handleAddFeed} className="add-feed-form">
-          <input
-            type="url"
-            placeholder="https://example.com/feed.xml"
-            required
-            value={feedUrl}
-            onChange={(e) => setFeedUrl(e.target.value)}
-            className="input"
-          />
-          <button type="submit" className="button button-primary" disabled={addBusy}>
-            {addBusy ? "Adding..." : "Add feed"}
-          </button>
-        </form>
-        {addError ? <p className="error-text">{addError}</p> : null}
-
-        <div className="opml-import">
-          <label className="muted">OPML import:</label>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".opml,.xml"
-            onChange={handleOpmlImport}
-          />
-          {importMsg ? <p className="muted">{importMsg}</p> : null}
-        </div>
-
-        <div className="opml-export">
-          <button
-            type="button"
-            className="button"
-            onClick={() => exportOpml()}
-          >
-            Export OPML
-          </button>
-        </div>
+    <>
+      <div className="page-header">
+        <h1 className="page-title">Sources</h1>
+        <p className="page-meta">Manage feed assignment, weights, and trial sources.</p>
       </div>
 
-      {loading ? (
-        <p className="muted">Loading feeds...</p>
-      ) : feeds.length === 0 ? (
-        <p>No feeds added yet. Add a URL or import OPML above.</p>
-      ) : (
-        <table className="feed-table">
-          <thead>
-            <tr>
-              <th>Title</th>
-              <th>Topics</th>
-              <th>Weight</th>
-              <th>Muted</th>
-            </tr>
-          </thead>
-          <tbody>
-            {feeds.map((feed) => (
-              <tr key={feed.id}>
-                <td>
-                  <strong>{feed.title || feed.url}</strong>
-                  {feed.trial && <span className="badge" style={{ marginLeft: "0.4rem" }}>Trial</span>}
-                </td>
-                <td>
-                  {feedTopics[feed.id]?.map((ft) => (
-                    <span
-                      key={ft.topicId}
-                      className="badge"
-                      style={{
-                        marginRight: "0.3rem",
-                        backgroundColor: ft.status === "approved" ? "var(--color-success, #22c55e)" : ft.status === "pending" ? "var(--color-warning, #eab308)" : undefined,
-                        color: ft.status === "approved" || ft.status === "pending" ? "#000" : undefined,
-                      }}
-                    >
-                      {ft.topicName}
-                    </span>
-                  )) ?? null}
-                  {feed.classificationStatus !== "approved" && (
-                    <a href="/topics/pending" className="badge" style={{ marginLeft: "0.2rem", backgroundColor: "var(--color-warning, #eab308)", color: "#000", textDecoration: "none" }}>
-                      Pending
-                    </a>
-                  )}
-                  {(!feedTopics[feed.id] || (feedTopics[feed.id]?.length ?? 0) === 0) && feed.classificationStatus === "approved" && (
-                    <span className="muted">{folderName(feed.folderId)}</span>
-                  )}
-                </td>
-                <td>
-                  <select
-                    value={feed.weight}
-                    onChange={(e) => handleWeightChange(feed, e.target.value as FeedWeight)}
-                  >
-                    <option value="prefer">Prefer</option>
-                    <option value="neutral">Neutral</option>
-                    <option value="deprioritize">Deprioritize</option>
-                  </select>
-                </td>
-                <td>
-                  <button
-                    type="button"
-                    className={`button button-small${feed.muted ? " button-active" : ""}`}
-                    onClick={() => handleToggleMute(feed)}
-                  >
-                    {feed.muted ? "Muted" : "Active"}
-                  </button>
-                </td>
+      <section className="section-card">
+        <div className="source-actions">
+          <form onSubmit={handleAddFeed} className="add-feed-form">
+            <input
+              type="url"
+              placeholder="https://example.com/feed.xml"
+              required
+              value={feedUrl}
+              onChange={(e) => setFeedUrl(e.target.value)}
+              className="input"
+            />
+            <button type="submit" className="button button-primary" disabled={addBusy}>
+              {addBusy ? "Adding..." : "Add feed"}
+            </button>
+          </form>
+          {addError ? <p className="error-text">{addError}</p> : null}
+
+          <div className="opml-import">
+            <label className="muted">OPML import:</label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".opml,.xml"
+              onChange={handleOpmlImport}
+            />
+            {importMsg ? <p className="muted">{importMsg}</p> : null}
+          </div>
+
+          <div className="opml-export">
+            <button
+              type="button"
+              className="button"
+              onClick={() => exportOpml()}
+            >
+              Export OPML
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="muted">Loading feeds...</p>
+        ) : feeds.length === 0 ? (
+          <p>No feeds added yet. Add a URL or import OPML above.</p>
+        ) : (
+          <table className="feed-table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Topics</th>
+                <th>Weight</th>
+                <th>Muted</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </section>
+            </thead>
+            <tbody>
+              {feeds.map((feed) => (
+                <tr key={feed.id}>
+                  <td>
+                    <strong>{feed.title || feed.url}</strong>
+                    {feed.trial && <span className="badge badge-ml">Trial</span>}
+                  </td>
+                  <td>
+                    {feedTopics[feed.id]?.map((ft) => (
+                      <span
+                        key={ft.topicId}
+                        className={cn(badgeClass(ft.status), "badge-mr")}
+                      >
+                        {ft.topicName}
+                      </span>
+                    )) ?? null}
+                    {feed.classificationStatus !== "approved" && (
+                      <a href="/topics/pending" className="badge badge-ml-sm">
+                        Pending
+                      </a>
+                    )}
+                    {(!feedTopics[feed.id] || (feedTopics[feed.id]?.length ?? 0) === 0) && feed.classificationStatus === "approved" && (
+                      <span className="muted">{folderName(feed.folderId)}</span>
+                    )}
+                  </td>
+                  <td>
+                    <select
+                      value={feed.weight}
+                      onChange={(e) => handleWeightChange(feed, e.target.value as FeedWeight)}
+                    >
+                      <option value="prefer">Prefer</option>
+                      <option value="neutral">Neutral</option>
+                      <option value="deprioritize">Deprioritize</option>
+                    </select>
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className={cn("button button-small", feed.muted && "button-active")}
+                      onClick={() => handleToggleMute(feed)}
+                    >
+                      {feed.muted ? "Muted" : "Active"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
+    </>
   );
 }
 

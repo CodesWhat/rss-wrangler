@@ -38,7 +38,8 @@ export default function LoginPage() {
   return (
     <section className="login-container">
       <div className="login-card">
-        <h1>RSS Wrangler</h1>
+        <div className="brand-mark" />
+        <h1 className="brand-name">RSS_WRANGLER</h1>
         <p className="muted">Sign in to continue</p>
         <form onSubmit={handleSubmit} className="login-form">
           <label htmlFor="username">Username</label>
