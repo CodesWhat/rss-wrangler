@@ -24,3 +24,28 @@ To run migrations manually:
 ```bash
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/rss_wrangler sh db/run-migrations.sh
 ```
+
+## Render deployment (Blueprint)
+
+Two Blueprint files are available at repo root:
+
+- `render.free.yaml`: free-tier smoke setup (API + Web + Postgres only; no worker).
+- `render.yaml`: dogfood baseline (API + Worker + Web + Postgres on starter plans).
+
+### 1) Free smoke deploy
+
+Use `render.free.yaml` to verify hosted auth, billing, consent, and basic web/API paths.
+
+### 2) Dogfood deploy (recommended next)
+
+Use `render.yaml` for realistic hosted testing and cost tracking.
+This is the first point where p95 latency, ingestion, and background job behavior are meaningful.
+
+### Notes
+
+- API runs migrations automatically on startup via:
+  ```bash
+  npm run db:migrate
+  ```
+- Fill all `sync: false` env vars in Render dashboard after first apply.
+- For browser traffic, `NEXT_PUBLIC_API_BASE_URL` and `API_CORS_ORIGIN` are wired from service external URLs.

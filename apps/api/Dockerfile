@@ -20,6 +20,8 @@ COPY --from=build /app/package.json /app/package.json
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/packages/contracts /app/packages/contracts
 COPY --from=build /app/apps/api /app/apps/api
+COPY db /app/db
+COPY scripts /app/scripts
 
 EXPOSE 4000
 CMD ["npm", "run", "start", "-w", "@rss-wrangler/api"]

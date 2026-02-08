@@ -131,6 +131,13 @@ All features are unlocked when self-hosted. No license keys, no feature gates, n
 
 Docker Compose on any Linux server, NAS (Synology, etc.), or cloud VM. See [Quick Start](#quick-start-docker-compose) above.
 
+## Render Blueprints
+
+- `render.free.yaml` - free-tier smoke profile (API + web + Postgres, no worker)
+- `render.yaml` - hosted dogfood baseline (API + worker + web + Postgres on starter plans)
+
+Both profiles are documented in `infra/README.md`.
+
 ## Hosted Service (Planned)
 
 | Tier | Price | Highlights |

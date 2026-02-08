@@ -65,6 +65,7 @@ Implementation notes:
 - Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, tenant join flow, account data-export baseline, invite-token controls, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline, and consent/CMP baseline.
 - Phase 0 in progress: member approval policy/roles and entitlements hardening beyond baseline limits.
 - Still open for hosted launch: billing polish (cancel/reactivate UX + annual variants + webhook alerting), CMP adapter + script-gating verification, and hosted dogfood rollout.
+- Deployment readiness update: Render blueprint profiles now exist (`render.free.yaml` smoke, `render.yaml` dogfood baseline); next action is first live deploy + telemetry validation.
 
 ---
 

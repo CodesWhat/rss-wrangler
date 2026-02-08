@@ -163,6 +163,7 @@ user_id -> plan -> features -> limits
 - Hosted foundations are in-progress with shipped slices for onboarding wizard, tenant join, invite-token onboarding guard, password recovery/verification, account-export baseline, account-deletion automation, and load/SLO tooling.
 - Entitlements are partial: feed/search/ingest gates are live and now sync with Lemon webhook plan changes; broader route coverage + usage UX remain.
 - Billing foundation is partial-live: checkout/webhook sync/pricing/portal handoff shipped. Consent baseline is now partial-live; hosted dogfood rollout remains open.
+- Deployment bootstrap is in place: Render blueprints exist for free smoke (`render.free.yaml`) and dogfood baseline (`render.yaml`), awaiting first live run.
 
 ### What we need to build
 

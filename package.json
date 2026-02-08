@@ -20,6 +20,7 @@
     "test:coverage": "vitest run --coverage",
     "test:coverage:policy": "npm run test:coverage && node scripts/check-coverage-policy.mjs",
     "debt:scan": "knip --include files,exports,duplicates,dependencies --reporter compact --no-exit-code",
+    "db:migrate": "node scripts/run-migrations.mjs",
     "backfill:enrichment": "tsx scripts/backfill-enrichment.ts",
     "push:vapid:keys": "node scripts/generate-vapid-keys.js",
     "hooks:install": "lefthook install",
