@@ -208,6 +208,13 @@ select {
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-primary);
+  margin: 0;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
 }
 
 .topbar-spacer {

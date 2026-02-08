@@ -43,8 +43,10 @@ export default function ResetPasswordPage() {
   return (
     <section className="login-container">
       <div className="login-card">
-        <div className="brand-mark" />
-        <h1 className="brand-name">Set new password</h1>
+        <div className="auth-brand">
+          <div className="brand-mark" />
+          <h1 className="brand-name">Set New Password</h1>
+        </div>
         <p className="muted">Choose a new password for your account.</p>
 
         <form onSubmit={handleSubmit} className="login-form">

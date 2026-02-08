@@ -33,21 +33,13 @@ export default function ForgotPasswordPage() {
   return (
     <section className="login-container">
       <div className="login-card">
-        <div className="brand-mark" />
-        <h1 className="brand-name">Reset password</h1>
-        <p className="muted">Enter your workspace and email to receive a reset link.</p>
+        <div className="auth-brand">
+          <div className="brand-mark" />
+          <h1 className="brand-name">Reset Password</h1>
+        </div>
+        <p className="muted">Enter your email to receive a reset link.</p>
 
         <form onSubmit={handleSubmit} className="login-form">
-          <label htmlFor="tenantSlug">Workspace</label>
-          <input
-            id="tenantSlug"
-            type="text"
-            required
-            value={tenantSlug}
-            onChange={(event) => setTenantSlug(event.target.value)}
-            className="input"
-          />
-
           <label htmlFor="email">Email</label>
           <input
             id="email"
@@ -60,7 +52,7 @@ export default function ForgotPasswordPage() {
 
           {submitted ? (
             <p className="muted">
-              If an account exists for that workspace and email, a reset link has been sent.
+              If an account exists for that email, a reset link has been sent.
             </p>
           ) : null}
           {error ? <p className="error-text">{error}</p> : null}

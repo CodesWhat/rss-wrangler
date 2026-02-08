@@ -33,21 +33,13 @@ export default function ResendVerificationPage() {
   return (
     <section className="login-container">
       <div className="login-card">
-        <div className="brand-mark" />
-        <h1 className="brand-name">Resend verification</h1>
+        <div className="auth-brand">
+          <div className="brand-mark" />
+          <h1 className="brand-name">Resend Verification</h1>
+        </div>
         <p className="muted">Request a new email verification link.</p>
 
         <form onSubmit={handleSubmit} className="login-form">
-          <label htmlFor="tenantSlug">Workspace</label>
-          <input
-            id="tenantSlug"
-            type="text"
-            required
-            value={tenantSlug}
-            onChange={(event) => setTenantSlug(event.target.value)}
-            className="input"
-          />
-
           <label htmlFor="email">Email</label>
           <input
             id="email"

@@ -51,8 +51,10 @@ export default function VerifyEmailPage() {
   return (
     <section className="login-container">
       <div className="login-card">
-        <div className="brand-mark" />
-        <h1 className="brand-name">Verify email</h1>
+        <div className="auth-brand">
+          <div className="brand-mark" />
+          <h1 className="brand-name">Verify Email</h1>
+        </div>
         <p className={state === "error" ? "error-text" : "muted"}>{message}</p>
         <a href="/login" className="button button-primary" style={{ textAlign: "center" }}>
           Go to sign in

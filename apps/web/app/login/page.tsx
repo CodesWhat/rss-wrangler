@@ -49,20 +49,12 @@ export default function LoginPage() {
   return (
     <section className="login-container">
       <div className="login-card">
-        <div className="brand-mark" />
-        <h1 className="brand-name">RSS_WRANGLER</h1>
+        <div className="auth-brand">
+          <div className="brand-mark" />
+          <h1 className="brand-name">RSS_WRANGLER</h1>
+        </div>
         <p className="muted">Sign in to continue</p>
         <form onSubmit={handleSubmit} className="login-form">
-          <label htmlFor="tenantSlug">Workspace</label>
-          <input
-            id="tenantSlug"
-            type="text"
-            autoComplete="organization"
-            required
-            value={tenantSlug}
-            onChange={(e) => setTenantSlug(e.target.value)}
-            className="input"
-          />
           <label htmlFor="username">Username</label>
           <input
             id="username"
@@ -89,28 +81,29 @@ export default function LoginPage() {
             {submitting ? "Signing in..." : "Sign in"}
           </button>
           <a
-            href={`/forgot-password?tenant=${encodeURIComponent(tenantSlug)}`}
+            href={
+              tenantSlug === "default"
+                ? "/forgot-password"
+                : `/forgot-password?tenant=${encodeURIComponent(tenantSlug)}`
+            }
             className="muted"
             style={{ textAlign: "center", display: "block" }}
           >
             Forgot password?
           </a>
           <a
-            href={`/resend-verification?tenant=${encodeURIComponent(tenantSlug)}`}
+            href={
+              tenantSlug === "default"
+                ? "/resend-verification"
+                : `/resend-verification?tenant=${encodeURIComponent(tenantSlug)}`
+            }
             className="muted"
             style={{ textAlign: "center", display: "block" }}
           >
             Resend verification email
           </a>
           <a href="/signup" className="muted" style={{ textAlign: "center", display: "block" }}>
-            Create a workspace account
-          </a>
-          <a
-            href={`/join?tenant=${encodeURIComponent(tenantSlug)}`}
-            className="muted"
-            style={{ textAlign: "center", display: "block" }}
-          >
-            Join an existing workspace
+            Create an account
           </a>
         </form>
       </div>

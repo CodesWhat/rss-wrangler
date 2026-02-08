@@ -48,7 +48,6 @@ import {
   type ResetPasswordRequest,
   type RequestAccountDeletion,
   type Settings,
-  type SignupRequest,
   type StatsPeriod,
   type Topic,
   type UpdateFeedRequest,
@@ -62,7 +61,8 @@ import {
 
 export type SignupResult =
   | { status: "authenticated"; tokens: AuthTokens }
-  | { status: "verification_required" };
+  | { status: "verification_required" }
+  | { status: "pending_approval" };
 
 const API_BASE_URL =
   typeof window !== "undefined"
@@ -354,29 +354,6 @@ export async function login(req: LoginRequest): Promise<AuthTokens> {
   return tokens;
 }
 
-export async function signup(req: SignupRequest): Promise<SignupResult> {
-  const res = await fetch(`${API_BASE_URL}/v1/auth/signup`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) {
-    if (res.status === 409) {
-      const message = await res.text();
-      throw new Error(message || "Account already exists");
-    }
-    throw new Error("Signup failed");
-  }
-
-  if (res.status === 202) {
-    return { status: "verification_required" };
-  }
-
-  const tokens = authTokensSchema.parse(await res.json());
-  storeTokens(tokens);
-  return { status: "authenticated", tokens };
-}
-
 export async function joinWorkspace(req: JoinWorkspaceRequest): Promise<SignupResult> {
   const res = await fetch(`${API_BASE_URL}/v1/auth/join`, {
     method: "POST",
@@ -402,6 +379,12 @@ export async function joinWorkspace(req: JoinWorkspaceRequest): Promise<SignupRe
   }
 
   if (res.status === 202) {
+    const body = (await res.json().catch(() => null)) as
+      | { pendingApproval?: boolean; verificationRequired?: boolean }
+      | null;
+    if (body?.pendingApproval) {
+      return { status: "pending_approval" };
+    }
     return { status: "verification_required" };
   }
 
