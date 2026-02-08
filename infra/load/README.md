@@ -8,6 +8,7 @@ Phase 0 hosted readiness requires repeatable synthetic load tests with explicit 
 - `infra/load/profiles/phase0-worker-slo-baseline.json`: worker queue lag/success thresholds (pg-boss metrics).
 - `infra/load/users.example.json`: credential input format for load users.
 - `infra/load/results/*.json`: generated run artifacts.
+- `scripts/load/calibrate-slo-thresholds.mjs`: threshold calibration from repeated gate artifacts.
 
 ## Preconditions
 
@@ -47,6 +48,23 @@ node scripts/load/check-worker-slo.mjs \
   --database-url "$DATABASE_URL"
 ```
 
+5. Calibrate thresholds from historical successful gate runs (dry-run):
+
+```bash
+node scripts/load/calibrate-slo-thresholds.mjs \
+  --results-dir infra/load/results \
+  --min-runs 3 \
+  --max-runs 10
+```
+
+6. Apply calibrated thresholds directly to profile files:
+
+```bash
+node scripts/load/calibrate-slo-thresholds.mjs \
+  --results-dir infra/load/results \
+  --write-profiles true
+```
+
 ## Exit behavior
 
 - Exit code `0`: all configured SLO checks passed.
@@ -59,3 +77,4 @@ The gate writes timestamped JSON artifacts to `infra/load/results/` and prints a
 - `feed_add` scenarios create unique synthetic feed URLs under `https://loadtest.invalid/...`.
 - `cluster_mark_read` and `cluster_save` scenarios require existing clusters; if none exist they are recorded as skipped.
 - Worker SLO check reads `pgboss.job` (and `pgboss.archive` when present).
+- Calibration reads `gate-*.json` artifacts and uses only successful runs.

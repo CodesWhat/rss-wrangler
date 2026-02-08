@@ -21,6 +21,7 @@ import {
   type ChangePasswordRequest,
   type ClusterCard,
   type ClusterFeedbackRequest,
+  type CreateWorkspaceInviteRequest,
   type CreateAnnotationRequest,
   type CreateFilterRuleRequest,
   type Digest,
@@ -42,6 +43,8 @@ import {
   type Topic,
   type UpdateFeedRequest,
   type UpdateSettingsRequest,
+  type WorkspaceInvite,
+  workspaceInviteSchema,
 } from "@rss-wrangler/contracts";
 
 export type SignupResult =
@@ -352,6 +355,13 @@ export async function joinWorkspace(req: JoinWorkspaceRequest): Promise<SignupRe
     if (res.status === 404) {
       throw new Error("Workspace not found");
     }
+    if (res.status === 403) {
+      throw new Error("Invite code required");
+    }
+    if (res.status === 400) {
+      const message = await res.text();
+      throw new Error(message || "Invalid invite code");
+    }
     if (res.status === 409) {
       const message = await res.text();
       throw new Error(message || "Account already exists");
@@ -484,6 +494,80 @@ export async function getAccountDataExportStatus(): Promise<AccountDataExportSta
   const payload = await requestJson<unknown>("/v1/account/data-export");
   if (!payload) return null;
   return accountDataExportStatusSchema.parse(payload);
+}
+
+export async function listWorkspaceInvites(): Promise<WorkspaceInvite[]> {
+  const payload = await requestJson<unknown>("/v1/account/invites");
+  if (!payload || !Array.isArray(payload)) {
+    return [];
+  }
+  return payload.map((entry) => workspaceInviteSchema.parse(entry));
+}
+
+export async function createWorkspaceInvite(
+  req: CreateWorkspaceInviteRequest
+): Promise<{ ok: true; invite: WorkspaceInvite } | { ok: false; error: string }> {
+  const attempt = async (): Promise<Response> => {
+    const headers = await authedHeaders(true);
+    return fetch(`${API_BASE_URL}/v1/account/invites`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(req),
+    });
+  };
+
+  try {
+    let response = await attempt();
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        response = await attempt();
+      }
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return { ok: false, error: message || "Invite creation failed" };
+    }
+
+    const invite = workspaceInviteSchema.parse(await response.json());
+    return { ok: true, invite };
+  } catch {
+    return { ok: false, error: "Invite creation failed" };
+  }
+}
+
+export async function revokeWorkspaceInvite(
+  inviteId: string
+): Promise<{ ok: true; invite: WorkspaceInvite } | { ok: false; error: string }> {
+  const attempt = async (): Promise<Response> => {
+    const headers = await authedHeaders(true);
+    return fetch(`${API_BASE_URL}/v1/account/invites/${encodeURIComponent(inviteId)}/revoke`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({}),
+    });
+  };
+
+  try {
+    let response = await attempt();
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        response = await attempt();
+      }
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return { ok: false, error: message || "Invite revoke failed" };
+    }
+
+    const invite = workspaceInviteSchema.parse(await response.json());
+    return { ok: true, invite };
+  } catch {
+    return { ok: false, error: "Invite revoke failed" };
+  }
 }
 
 export async function requestAccountDeletion(

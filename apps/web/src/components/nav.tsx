@@ -33,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/digest", sidebarLabel: "digest", bottomLabel: "DIGEST", icon: FileTextIcon },
   { href: "/sources", sidebarLabel: "sources", icon: RssIcon },
   { href: "/stats", sidebarLabel: "stats", icon: BarChartIcon },
+  { href: "/account/invites", sidebarLabel: "invites", icon: FileTextIcon },
   { href: "/account/data-export", sidebarLabel: "export", icon: FileTextIcon },
   { href: "/settings", sidebarLabel: "settings", bottomLabel: "CONFIG", icon: SettingsIcon },
 ];

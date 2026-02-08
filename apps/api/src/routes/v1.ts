@@ -3,6 +3,7 @@ import {
   clusterFeedbackRequestSchema,
   accountDataExportStatusSchema,
   changePasswordRequestSchema,
+  createWorkspaceInviteRequestSchema,
   createAnnotationRequestSchema,
   createFilterRuleRequestSchema,
   eventsBatchRequestSchema,
@@ -40,6 +41,7 @@ const feedIdParams = z.object({ id: z.string().uuid() });
 const filterIdParams = z.object({ id: z.string().uuid() });
 const annotationIdParams = z.object({ id: z.string().uuid() });
 const topicIdParams = z.object({ id: z.string().uuid() });
+const inviteIdParams = z.object({ id: z.string().uuid() });
 
 const authRefreshSchema = z.object({
   refreshToken: z.string().min(1)
@@ -122,6 +124,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     if (result === "tenant_not_found") {
       return reply.notFound("workspace not found");
+    }
+    if (result === "invite_required") {
+      return reply.forbidden("invite code required");
+    }
+    if (result === "invalid_invite_code") {
+      return reply.badRequest("invalid or expired invite code");
     }
     if (result === "username_taken") {
       return reply.conflict("username already exists");
@@ -541,6 +549,38 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.notFound("no pending deletion request");
       }
       return result;
+    });
+
+    protectedRoutes.get("/v1/account/invites", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      const invites = await auth.listWorkspaceInvites(authContext.userId, authContext.tenantId);
+      return invites.map((invite) => workspaceInviteSchema.parse(invite));
+    });
+
+    protectedRoutes.post("/v1/account/invites", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      const payload = createWorkspaceInviteRequestSchema.parse(request.body);
+      const invite = await auth.createWorkspaceInvite(authContext.userId, authContext.tenantId, payload);
+      return workspaceInviteSchema.parse(invite);
+    });
+
+    protectedRoutes.post("/v1/account/invites/:id/revoke", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const { id } = inviteIdParams.parse(request.params);
+      const invite = await auth.revokeWorkspaceInvite(authContext.userId, authContext.tenantId, id);
+      if (!invite) {
+        return reply.notFound("pending invite not found");
+      }
+      return workspaceInviteSchema.parse(invite);
     });
 
     protectedRoutes.get("/v1/account/data-export", async (request) => {

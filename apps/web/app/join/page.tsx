@@ -10,14 +10,19 @@ export default function JoinWorkspacePage() {
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tenant = params.get("tenant");
+    const invite = params.get("invite");
     if (tenant) {
       setTenantSlug(tenant);
+    }
+    if (invite) {
+      setInviteCode(invite);
     }
   }, []);
 
@@ -26,7 +31,13 @@ export default function JoinWorkspacePage() {
     setError("");
     setSubmitting(true);
     try {
-      const result = await joinWorkspace({ tenantSlug, email, username, password });
+      const result = await joinWorkspace({
+        tenantSlug,
+        email,
+        username,
+        password,
+        inviteCode: inviteCode.trim() ? inviteCode.trim() : undefined
+      });
       if (result.status === "verification_required") {
         const notice = "Check your email to verify your account before signing in.";
         router.replace(
@@ -92,6 +103,16 @@ export default function JoinWorkspacePage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="input"
+          />
+
+          <label htmlFor="inviteCode">Invite code</label>
+          <input
+            id="inviteCode"
+            type="text"
+            value={inviteCode}
+            onChange={(e) => setInviteCode(e.target.value)}
+            className="input"
+            placeholder="Paste invite code (required for private workspaces)"
           />
 
           {error ? <p className="error-text">{error}</p> : null}

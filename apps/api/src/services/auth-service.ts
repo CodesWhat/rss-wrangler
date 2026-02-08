@@ -4,12 +4,14 @@ import type { Pool, PoolClient } from "pg";
 import type {
   AccountDataExportStatus,
   AccountDeletionStatus,
+  CreateWorkspaceInviteRequest,
   ForgotPasswordRequest,
   JoinWorkspaceRequest,
   RequestAccountDeletion,
   ResendVerificationRequest,
   ResetPasswordRequest,
-  SignupRequest
+  SignupRequest,
+  WorkspaceInvite
 } from "@rss-wrangler/contracts";
 import type { ApiEnv } from "../config/env";
 import { createEmailService } from "./email-service";
@@ -425,7 +427,15 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
   async function joinWorkspace(
     payload: JoinWorkspaceRequest
-  ): Promise<TokenSet | "tenant_not_found" | "username_taken" | "email_taken" | "verification_required"> {
+  ): Promise<
+    | TokenSet
+    | "tenant_not_found"
+    | "invite_required"
+    | "invalid_invite_code"
+    | "username_taken"
+    | "email_taken"
+    | "verification_required"
+  > {
     const tenantId = await resolveTenantIdBySlug(payload.tenantSlug);
     if (!tenantId) {
       return "tenant_not_found";
@@ -433,8 +443,64 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
     const username = payload.username.trim();
     const email = payload.email.trim().toLowerCase();
+    const inviteCode = payload.inviteCode?.trim();
 
     try {
+      const existingCountResult = await withTenantClient(tenantId, async (client) => {
+        return client.query<{ cnt: string }>(
+          `SELECT COUNT(*)::text AS cnt
+           FROM user_account
+           WHERE tenant_id = $1`,
+          [tenantId]
+        );
+      });
+      const existingCount = Number.parseInt(existingCountResult.rows[0]?.cnt ?? "0", 10);
+
+      let inviteId: string | null = null;
+      if (existingCount > 0) {
+        if (!inviteCode) {
+          return "invite_required";
+        }
+
+        const inviteHash = hashToken(inviteCode);
+        const inviteResult = await withTenantClient(tenantId, async (client) => {
+          // Normalize expired pending invites before lookup.
+          await client.query(
+            `UPDATE workspace_invite
+             SET status = 'expired'
+             WHERE tenant_id = $1
+               AND status = 'pending'
+               AND expires_at <= NOW()`,
+            [tenantId]
+          );
+
+          return client.query<{
+            id: string;
+            email: string | null;
+          }>(
+            `SELECT id, email
+             FROM workspace_invite
+             WHERE tenant_id = $1
+               AND invite_code_hash = $2
+               AND status = 'pending'
+               AND expires_at > NOW()
+             LIMIT 1`,
+            [tenantId, inviteHash]
+          );
+        });
+
+        const invite = inviteResult.rows[0];
+        if (!invite) {
+          return "invalid_invite_code";
+        }
+
+        if (invite.email && invite.email.toLowerCase() !== email) {
+          return "invalid_invite_code";
+        }
+
+        inviteId = invite.id;
+      }
+
       const existingUser = await withTenantClient(tenantId, async (client) => {
         return client.query(
           `SELECT id
@@ -477,6 +543,22 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         throw new Error("user creation failed");
       }
 
+      if (inviteId) {
+        await withTenantClient(tenantId, async (client) => {
+          await client.query(
+            `UPDATE workspace_invite
+             SET status = 'consumed',
+                 consumed_at = NOW(),
+                 consumed_by_user_id = $3
+             WHERE id = $1
+               AND tenant_id = $2
+               AND status = 'pending'
+               AND expires_at > NOW()`,
+            [inviteId, tenantId, userId]
+          );
+        });
+      }
+
       await sendVerificationEmail(tenantId, userId, email, username);
 
       if (env.REQUIRE_EMAIL_VERIFICATION) {
@@ -494,6 +576,136 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       }
       throw err;
     }
+  }
+
+  async function createWorkspaceInvite(
+    userId: string,
+    tenantId: string,
+    payload: CreateWorkspaceInviteRequest
+  ): Promise<WorkspaceInvite> {
+    const inviteCode = randomBytes(24).toString("hex");
+    const inviteCodeHash = hashToken(inviteCode);
+    const invitedEmail = payload.email?.trim().toLowerCase() ?? null;
+
+    const tenantResult = await withTenantClient(tenantId, async (client) => {
+      return client.query<{ slug: string }>(
+        `SELECT slug
+         FROM tenant
+         WHERE id = $1
+         LIMIT 1`,
+        [tenantId]
+      );
+    });
+    const tenantSlug = tenantResult.rows[0]?.slug;
+    if (!tenantSlug) {
+      throw new Error("tenant not found for invite");
+    }
+
+    const insert = await withTenantClient(tenantId, async (client) => {
+      return client.query<{
+        id: string;
+        email: string | null;
+        status: "pending" | "consumed" | "revoked" | "expired";
+        created_at: Date;
+        expires_at: Date;
+        consumed_at: Date | null;
+        revoked_at: Date | null;
+      }>(
+        `INSERT INTO workspace_invite (
+           tenant_id,
+           created_by_user_id,
+           invite_code_hash,
+           email,
+           status,
+           expires_at
+         )
+         VALUES (
+           $1,
+           $2,
+           $3,
+           $4,
+           'pending',
+           NOW() + ($5::text || ' days')::interval
+         )
+         RETURNING id, email, status, created_at, expires_at, consumed_at, revoked_at`,
+        [tenantId, userId, inviteCodeHash, invitedEmail, payload.expiresInDays]
+      );
+    });
+
+    const row = insert.rows[0];
+    if (!row) {
+      throw new Error("failed to create workspace invite");
+    }
+
+    const inviteUrl = buildAppUrl(
+      `/join?tenant=${encodeURIComponent(tenantSlug)}&invite=${encodeURIComponent(inviteCode)}`
+    );
+
+    return toWorkspaceInvite(row, inviteCode, inviteUrl);
+  }
+
+  async function listWorkspaceInvites(userId: string, tenantId: string): Promise<WorkspaceInvite[]> {
+    void userId;
+    const result = await withTenantClient(tenantId, async (client) => {
+      await client.query(
+        `UPDATE workspace_invite
+         SET status = 'expired'
+         WHERE tenant_id = $1
+           AND status = 'pending'
+           AND expires_at <= NOW()`,
+        [tenantId]
+      );
+
+      return client.query<{
+        id: string;
+        email: string | null;
+        status: "pending" | "consumed" | "revoked" | "expired";
+        created_at: Date;
+        expires_at: Date;
+        consumed_at: Date | null;
+        revoked_at: Date | null;
+      }>(
+        `SELECT id, email, status, created_at, expires_at, consumed_at, revoked_at
+         FROM workspace_invite
+         WHERE tenant_id = $1
+         ORDER BY created_at DESC
+         LIMIT 100`,
+        [tenantId]
+      );
+    });
+
+    return result.rows.map((row) => toWorkspaceInvite(row));
+  }
+
+  async function revokeWorkspaceInvite(
+    userId: string,
+    tenantId: string,
+    inviteId: string
+  ): Promise<WorkspaceInvite | null> {
+    const result = await withTenantClient(tenantId, async (client) => {
+      return client.query<{
+        id: string;
+        email: string | null;
+        status: "pending" | "consumed" | "revoked" | "expired";
+        created_at: Date;
+        expires_at: Date;
+        consumed_at: Date | null;
+        revoked_at: Date | null;
+      }>(
+        `UPDATE workspace_invite
+         SET status = 'revoked',
+             revoked_at = NOW(),
+             revoked_by_user_id = $3
+         WHERE id = $1
+           AND tenant_id = $2
+           AND status = 'pending'
+         RETURNING id, email, status, created_at, expires_at, consumed_at, revoked_at`,
+        [inviteId, tenantId, userId]
+      );
+    });
+
+    const row = result.rows[0];
+    return row ? toWorkspaceInvite(row) : null;
   }
 
   async function changePassword(
@@ -1433,6 +1645,9 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     requestPasswordReset,
     resetPassword,
     changePassword,
+    createWorkspaceInvite,
+    listWorkspaceInvites,
+    revokeWorkspaceInvite,
     getAccountDeletionStatus,
     requestAccountDeletion,
     cancelAccountDeletion,
@@ -1441,6 +1656,32 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     getAccountDataExportPayload,
     refresh,
     logout
+  };
+}
+
+function toWorkspaceInvite(
+  row: {
+    id: string;
+    email: string | null;
+    status: "pending" | "consumed" | "revoked" | "expired";
+    created_at: Date;
+    expires_at: Date;
+    consumed_at: Date | null;
+    revoked_at: Date | null;
+  },
+  inviteCode: string | null = null,
+  inviteUrl: string | null = null
+): WorkspaceInvite {
+  return {
+    id: row.id,
+    email: row.email,
+    status: row.status,
+    inviteCode,
+    inviteUrl,
+    createdAt: row.created_at.toISOString(),
+    expiresAt: row.expires_at.toISOString(),
+    consumedAt: row.consumed_at?.toISOString() ?? null,
+    revokedAt: row.revoked_at?.toISOString() ?? null
   };
 }
 

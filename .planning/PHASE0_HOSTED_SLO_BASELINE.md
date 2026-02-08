@@ -68,6 +68,34 @@ Optional:
 - Gate exits with code `0` only when API + worker SLO checks pass.
 - Gate exits with code `1` when any SLO check fails.
 
+## Threshold Calibration Workflow
+
+Calibration is handled by `scripts/load/calibrate-slo-thresholds.mjs`.
+
+Input expectations:
+- At least 3 successful `gate-*.json` artifacts in `infra/load/results/`.
+- Each gate artifact must reference both API and worker reports.
+
+Default policy:
+- Uses the most recent successful runs (up to 10).
+- Latency thresholds: `run-p95(95th percentile) * 1.15`.
+- Error-rate thresholds: `run-p95(95th percentile) * 1.25 + 0.001` (capped at `0.05`).
+- Minimum request/terminal-job floors: `run-p50 * 0.85`.
+- Queue lag and queued-jobs thresholds: `run-p95 * 1.2`.
+- Success-rate minimums: `run-p05 - 0.005` (floored at `0.90`).
+
+Commands:
+
+```bash
+# Dry-run calibration report only
+node scripts/load/calibrate-slo-thresholds.mjs --results-dir infra/load/results
+
+# Apply calibrated values to profile files
+node scripts/load/calibrate-slo-thresholds.mjs \
+  --results-dir infra/load/results \
+  --write-profiles true
+```
+
 ## Operational Notes
 
 - `feed_add` uses unique synthetic URLs under `https://loadtest.invalid/...` so each request is isolated.
