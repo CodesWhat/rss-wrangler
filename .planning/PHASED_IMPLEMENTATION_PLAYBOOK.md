@@ -18,7 +18,7 @@ Execution tracker (must complete before net-new Phase 0 feature slices):
 
 - [x] `phase-lead-agent` + `senior-review-agent`: lock architecture decision in planning docs.
 - [x] `frontend-dev-agent` + `accessibility-qa-agent`: remove workspace inputs from auth screens and fix auth header alignment issues.
-- [ ] `backend-dev-agent` + `contracts-agent`: default tenant scope internally (`default`) and remove/soft-deprecate workspace-required auth payloads.
+- [x] `backend-dev-agent` + `contracts-agent`: default tenant scope internally (`default`) and remove/soft-deprecate workspace-required auth payloads.
 - [ ] `backend-dev-agent` + `sre-cost-agent`: shift entitlements/billing wording + contract surfaces to user-account subscriptions (not workspace-facing plans).
 - [ ] `qa-test-agent` + `playwright-qa-agent` + `lint-conformity-agent` + `tech-debt-agent`: run full gates, close regressions, and update pass card evidence.
 
