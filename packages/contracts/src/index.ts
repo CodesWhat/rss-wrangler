@@ -440,6 +440,37 @@ export const tenantEntitlementsSchema = z.object({
 });
 export type TenantEntitlements = z.infer<typeof tenantEntitlementsSchema>;
 
+// ---------- Billing ----------
+
+export const hostedPlanIdSchema = z.enum(["pro", "pro_ai"]);
+export type HostedPlanId = z.infer<typeof hostedPlanIdSchema>;
+
+export const billingCheckoutRequestSchema = z.object({
+  planId: hostedPlanIdSchema
+});
+export type BillingCheckoutRequest = z.infer<typeof billingCheckoutRequestSchema>;
+
+export const billingCheckoutResponseSchema = z.object({
+  url: z.string().url()
+});
+export type BillingCheckoutResponse = z.infer<typeof billingCheckoutResponseSchema>;
+
+export const billingPortalResponseSchema = z.object({
+  url: z.string().url()
+});
+export type BillingPortalResponse = z.infer<typeof billingPortalResponseSchema>;
+
+export const billingOverviewSchema = z.object({
+  planId: planIdSchema,
+  subscriptionStatus: planSubscriptionStatusSchema,
+  trialEndsAt: z.string().datetime().nullable(),
+  currentPeriodEndsAt: z.string().datetime().nullable(),
+  cancelAtPeriodEnd: z.boolean(),
+  customerPortalUrl: z.string().url().nullable(),
+  checkoutEnabled: z.boolean()
+});
+export type BillingOverview = z.infer<typeof billingOverviewSchema>;
+
 export const recordEventsResponseSchema = z.object({
   accepted: z.number().int().min(0),
   deduped: z.number().int().min(0)
@@ -567,6 +598,10 @@ export const apiRoutes = {
   accountDataExportRequest: "/v1/account/data-export/request",
   accountDataExportDownload: "/v1/account/data-export/download",
   accountEntitlements: "/v1/account/entitlements",
+  billingOverview: "/v1/billing",
+  billingCheckout: "/v1/billing/checkout",
+  billingPortal: "/v1/billing/portal",
+  billingWebhook: "/v1/billing/webhooks/lemon-squeezy",
   opmlImport: "/v1/opml/import",
   opmlExport: "/v1/opml/export",
   search: "/v1/search",

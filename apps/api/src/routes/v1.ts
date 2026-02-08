@@ -2,6 +2,10 @@ import {
   addFeedRequestSchema,
   clusterFeedbackRequestSchema,
   accountDataExportStatusSchema,
+  billingCheckoutRequestSchema,
+  billingCheckoutResponseSchema,
+  billingOverviewSchema,
+  billingPortalResponseSchema,
   changePasswordRequestSchema,
   createWorkspaceInviteRequestSchema,
   createAnnotationRequestSchema,
@@ -39,6 +43,7 @@ import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 import { getTenantEntitlements } from "../plugins/entitlements";
 import { createAuthService } from "../services/auth-service";
+import { createBillingService } from "../services/billing-service";
 import { parseOpml } from "../services/opml-parser";
 import { PostgresStore } from "../services/postgres-store";
 import { validateFeedUrl } from "../services/url-validator";
@@ -67,6 +72,7 @@ const verifyEmailQuerySchema = z.object({
 
 export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }) => {
   const auth = createAuthService(app, env, app.pg);
+  const billing = createBillingService(env, app.pg, app.log);
 
   async function releaseTenantClient(request: { dbClient?: { query: (sql: string, params?: unknown[]) => Promise<unknown>; release: () => void } }) {
     if (!request.dbClient) {
@@ -86,6 +92,42 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
   }
 
   app.get("/health", async () => ({ ok: true, service: "api" }));
+
+  app.post("/v1/billing/webhooks/lemon-squeezy", {
+    config: {
+      rawBody: true,
+      rateLimit: {
+        max: 300,
+        timeWindow: "1 minute"
+      }
+    }
+  }, async (request, reply) => {
+    const signatureHeader = Array.isArray(request.headers["x-signature"])
+      ? request.headers["x-signature"][0]
+      : request.headers["x-signature"];
+
+    if (typeof request.rawBody !== "string" || request.rawBody.length === 0) {
+      return reply.badRequest("missing raw webhook body");
+    }
+
+    const result = await billing.processWebhook(request.rawBody, signatureHeader);
+    if (!result.ok) {
+      if (result.error === "invalid_signature") {
+        return reply.unauthorized(result.message);
+      }
+      if (result.error === "invalid_payload") {
+        return reply.badRequest(result.message);
+      }
+      return reply.code(503).send({ error: result.error, message: result.message });
+    }
+
+    return {
+      ok: true,
+      duplicate: result.duplicate,
+      status: result.status,
+      eventName: result.eventName
+    };
+  });
 
   app.post("/v1/auth/login", {
     config: {
@@ -825,6 +867,57 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     protectedRoutes.get("/v1/account/entitlements", async (request) => {
       const entitlements = await entitlementsFor(request);
       return tenantEntitlementsSchema.parse(entitlements);
+    });
+
+    protectedRoutes.get("/v1/billing", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const overview = await billing.getOverview(authContext.tenantId);
+      return billingOverviewSchema.parse(overview);
+    });
+
+    protectedRoutes.post("/v1/billing/checkout", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const payload = billingCheckoutRequestSchema.parse(request.body);
+      const result = await billing.createCheckout({
+        tenantId: authContext.tenantId,
+        userId: authContext.userId,
+        planId: payload.planId
+      });
+
+      if (!result.ok) {
+        if (result.error === "not_configured") {
+          return reply.code(503).send({ error: result.error, message: result.message });
+        }
+        return reply.code(502).send({ error: result.error, message: result.message });
+      }
+
+      return billingCheckoutResponseSchema.parse({ url: result.url });
+    });
+
+    protectedRoutes.get("/v1/billing/portal", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+
+      const result = await billing.getPortal(authContext.tenantId);
+      if (!result.ok) {
+        if (result.error === "not_found") {
+          return reply.notFound(result.message);
+        }
+        if (result.error === "not_configured") {
+          return reply.code(503).send({ error: result.error, message: result.message });
+        }
+        return reply.code(502).send({ error: result.error, message: result.message });
+      }
+
+      return billingPortalResponseSchema.parse({ url: result.url });
     });
 
     protectedRoutes.get("/v1/settings", async (request) => {

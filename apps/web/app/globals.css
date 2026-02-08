@@ -2386,3 +2386,56 @@ select {
     align-items: flex-start;
   }
 }
+
+/* ========================================
+   BILLING
+   ======================================== */
+.billing-overview {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.billing-current-plan {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.billing-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.billing-plans {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.billing-plan-card {
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3);
+  display: grid;
+  gap: var(--sp-2);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.billing-plan-title {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.billing-plan-price {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .billing-plans {
+    grid-template-columns: 1fr;
+  }
+}

@@ -4,8 +4,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { ProtectedRoute } from "@/components/protected-route";
 import { NotificationToggle } from "@/components/notification-toggle";
 import {
+  createBillingCheckout,
   cancelAccountDeletion,
   changePassword,
+  getBillingOverview,
+  getBillingPortalUrl,
   getAccountDeletionStatus,
   requestAccountDeletion,
   getSettings,
@@ -30,6 +33,8 @@ import type {
   AccountDeletionStatus,
   FilterType,
   FilterMode,
+  BillingOverview,
+  HostedPlanId,
   WorkspaceMember,
   MembershipPolicy,
   UserRole,
@@ -369,6 +374,159 @@ function MembersSection() {
   );
 }
 
+function formatPlanLabel(planId: BillingOverview["planId"]): string {
+  if (planId === "pro_ai") return "Pro + AI";
+  if (planId === "pro") return "Pro";
+  return "Free";
+}
+
+function formatBillingStatus(status: BillingOverview["subscriptionStatus"]): string {
+  if (status === "trialing") return "Trialing";
+  if (status === "past_due") return "Past due";
+  if (status === "canceled") return "Canceled";
+  return "Active";
+}
+
+function BillingSection() {
+  const [overview, setOverview] = useState<BillingOverview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyPlan, setBusyPlan] = useState<HostedPlanId | null>(null);
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setShowSuccess(params.get("billing") === "success");
+  }, []);
+
+  useEffect(() => {
+    async function load() {
+      const data = await getBillingOverview();
+      if (!data) {
+        setError("Failed to load billing details.");
+      } else {
+        setOverview(data);
+      }
+      setLoading(false);
+    }
+
+    load();
+  }, []);
+
+  async function handleUpgrade(planId: HostedPlanId) {
+    setError("");
+    setBusyPlan(planId);
+    const result = await createBillingCheckout(planId);
+    if (!result.ok) {
+      setError(result.error);
+      setBusyPlan(null);
+      return;
+    }
+    window.location.assign(result.url);
+  }
+
+  async function handlePortal() {
+    setError("");
+    setPortalBusy(true);
+    const result = await getBillingPortalUrl();
+    if (!result.ok) {
+      setError(result.error);
+      setPortalBusy(false);
+      return;
+    }
+    window.location.assign(result.url);
+  }
+
+  if (loading) {
+    return (
+      <section className="section-card" id="billing">
+        <h2>Billing</h2>
+        <p className="muted">Loading billing details...</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="section-card" id="billing">
+      <h2>Billing</h2>
+      <p className="muted">Manage your hosted plan and billing portal access.</p>
+
+      {showSuccess && (
+        <p className="key-status key-status-active" style={{ display: "inline-flex", marginTop: "var(--sp-2)" }}>
+          Checkout completed. Refreshing plan status may take a few seconds.
+        </p>
+      )}
+
+      {error && <p className="error-text">{error}</p>}
+
+      {overview ? (
+        <div className="billing-overview">
+          <div className="billing-current-plan">
+            <span className="badge badge-approved">Current plan: {formatPlanLabel(overview.planId)}</span>
+            <span className="badge">{formatBillingStatus(overview.subscriptionStatus)}</span>
+            {overview.cancelAtPeriodEnd && <span className="badge badge-pending">Cancels at period end</span>}
+          </div>
+
+          {overview.currentPeriodEndsAt && (
+            <p className="muted">
+              Current period ends {new Date(overview.currentPeriodEndsAt).toLocaleDateString()}.
+            </p>
+          )}
+
+          <div className="billing-actions">
+            <button
+              type="button"
+              className="button button-small"
+              disabled={portalBusy}
+              onClick={handlePortal}
+            >
+              {portalBusy ? "Opening..." : "Open billing portal"}
+            </button>
+          </div>
+
+          <div className="billing-plans">
+            <div className="billing-plan-card">
+              <div className="billing-plan-title">Pro</div>
+              <div className="billing-plan-price">$7 / month</div>
+              <p className="muted">Unlimited feeds, faster polling, full-text search.</p>
+              <button
+                type="button"
+                className="button button-primary button-small"
+                disabled={!overview.checkoutEnabled || busyPlan !== null || overview.planId === "pro"}
+                onClick={() => handleUpgrade("pro")}
+              >
+                {busyPlan === "pro" ? "Redirecting..." : overview.planId === "pro" ? "Current plan" : "Upgrade to Pro"}
+              </button>
+            </div>
+
+            <div className="billing-plan-card">
+              <div className="billing-plan-title">Pro + AI</div>
+              <div className="billing-plan-price">$14 / month</div>
+              <p className="muted">Everything in Pro plus summaries, digests, and AI ranking features.</p>
+              <button
+                type="button"
+                className="button button-primary button-small"
+                disabled={!overview.checkoutEnabled || busyPlan !== null || overview.planId === "pro_ai"}
+                onClick={() => handleUpgrade("pro_ai")}
+              >
+                {busyPlan === "pro_ai" ? "Redirecting..." : overview.planId === "pro_ai" ? "Current plan" : "Upgrade to Pro + AI"}
+              </button>
+            </div>
+          </div>
+
+          {!overview.checkoutEnabled && (
+            <p className="muted">Checkout is not configured for this deployment yet.</p>
+          )}
+        </div>
+      ) : (
+        <p className="muted">Billing details unavailable.</p>
+      )}
+    </section>
+  );
+}
+
 function maskKey(key: string): string {
   if (!key) return "";
   if (key.length <= 8) return "\u2022".repeat(key.length);
@@ -600,6 +758,7 @@ function SettingsContent() {
   const sections = [
     { id: "ai-provider", label: "AI Provider" },
     { id: "general", label: "General" },
+    { id: "billing", label: "Billing" },
     { id: "members", label: "Members" },
     { id: "account", label: "Account" },
     { id: "account-deletion", label: "Danger Zone" },
@@ -812,6 +971,8 @@ function SettingsContent() {
           </button>
         </form>
       </section>
+
+      <BillingSection />
 
       {/* Members */}
       <MembersSection />

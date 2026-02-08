@@ -2,6 +2,7 @@ import cors from "@fastify/cors";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
+import fastifyRawBody from "fastify-raw-body";
 import Fastify from "fastify";
 import { ZodError } from "zod";
 import { loadEnv } from "./config/env";
@@ -19,6 +20,12 @@ async function start() {
   });
 
   await app.register(sensible);
+  await app.register(fastifyRawBody, {
+    field: "rawBody",
+    global: false,
+    encoding: "utf8",
+    runFirst: true
+  });
   await app.register(cors, {
     origin: env.API_CORS_ORIGIN === "*" ? true : env.API_CORS_ORIGIN.split(",")
   });

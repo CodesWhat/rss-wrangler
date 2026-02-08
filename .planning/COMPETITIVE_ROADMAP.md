@@ -278,13 +278,13 @@ Features that only power users want or that only one app has.
 | Multi-tenant data model + isolation strategy | ⚠️ Partial | Tenant IDs + RLS + tenant DB context are in place; hosted org/admin workflows still pending |
 | Hosted auth + onboarding flow | ⚠️ Partial | Signup/login/join, recovery, onboarding wizard, invite-token controls, owner/member roles, membership policy, member approval workflow, and Settings Members UI are live; richer bootstrap remains |
 | Hosted account management + compliance controls | ⚠️ Partial | Password reset/change, account deletion lifecycle automation, and baseline account export are live; completion notifications + export hardening remain |
-| Entitlements + plan-limit middleware baseline | ⚠️ Partial | Plan defaults + API/worker feed/search/ingest gates landed; billing sync and broader coverage remain |
+| Entitlements + plan-limit middleware baseline | ⚠️ Partial | Plan defaults + API/worker feed/search/ingest gates landed; billing webhook sync now lands plan updates into entitlements, broader coverage/usage UX remain |
 | Hosted performance/load testing + SLO baseline | ✅ Implemented | Load harness, SLO policy, and calibration workflow are in repo |
-| Billing foundation (Lemon Squeezy + plan management UX) | ❌ Missing | Not started |
+| Billing foundation (Lemon Squeezy + plan management UX) | ⚠️ Partial | Checkout + signed webhook sync + billing overview/portal APIs + settings/pricing surfaces shipped; in-app cancel/reactivate UX and annual variants remain |
 | Consent + CMP baseline (hosted) | ❌ Missing | Not started |
 | Hosted SaaS offering (dogfood pilot) | ⚠️ Pending | Infra/provider decisions locked; hosted pilot execution still pending |
 
-**Immediate next slice:** Lemon Squeezy billing foundation (subscription lifecycle, webhook sync, pricing page, upgrade flow).
+**Immediate next slice:** Consent + CMP baseline (strictly-necessary default, persistent privacy settings, region-aware gating for non-essential scripts).
 
 ### Phase 0: Hosted SaaS Pilot & Cost Model
 

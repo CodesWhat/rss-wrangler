@@ -21,7 +21,13 @@ const envSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().min(3).optional(),
   VAPID_PUBLIC_KEY: z.string().optional(),
-  VAPID_PRIVATE_KEY: z.string().optional()
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  LEMON_SQUEEZY_API_BASE_URL: z.string().url().default("https://api.lemonsqueezy.com/v1"),
+  LEMON_SQUEEZY_API_KEY: z.string().optional(),
+  LEMON_SQUEEZY_STORE_ID: z.string().optional(),
+  LEMON_SQUEEZY_WEBHOOK_SECRET: z.string().optional(),
+  LEMON_SQUEEZY_VARIANT_PRO: z.string().optional(),
+  LEMON_SQUEEZY_VARIANT_PRO_AI: z.string().optional()
 }).refine(
   (env) => env.AUTH_JWT_SECRET !== "change-me-change-me",
   { message: "AUTH_JWT_SECRET must not use the placeholder value", path: ["AUTH_JWT_SECRET"] }

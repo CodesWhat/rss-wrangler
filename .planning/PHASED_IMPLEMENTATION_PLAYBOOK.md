@@ -64,7 +64,7 @@ Implementation notes:
 
 - Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, tenant join flow, account data-export baseline, invite-token controls, account-deletion automation, and hosted load/SLO baseline + calibration.
 - Phase 0 in progress: member approval policy/roles and entitlements hardening beyond baseline limits.
-- Still open for hosted launch: Lemon Squeezy billing lifecycle, consent/CMP baseline, and hosted dogfood rollout.
+- Still open for hosted launch: billing polish (cancel/reactivate UX + annual variants + webhook alerting), consent/CMP baseline, and hosted dogfood rollout.
 
 ---
 

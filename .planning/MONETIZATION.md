@@ -161,8 +161,8 @@ user_id -> plan -> features -> limits
 ### Current Phase 0 Snapshot (2026-02-08)
 
 - Hosted foundations are in-progress with shipped slices for onboarding wizard, tenant join, invite-token onboarding guard, password recovery/verification, account-export baseline, account-deletion automation, and load/SLO tooling.
-- Entitlements are baseline-only today (feed/search/ingest gates exist) and still need billing-webhook sync + broader route coverage + hosted upgrade UX.
-- Billing (Lemon Squeezy), consent/CMP, and hosted dogfood rollout remain open.
+- Entitlements are partial: feed/search/ingest gates are live and now sync with Lemon webhook plan changes; broader route coverage + usage UX remain.
+- Billing foundation is partial-live: checkout/webhook sync/pricing/portal handoff shipped. Consent/CMP and hosted dogfood rollout remain open.
 
 ### What we need to build
 
@@ -177,9 +177,9 @@ user_id -> plan -> features -> limits
 - [ ] Hosted account deletion workflow (self-serve request, confirmation, grace window, hard purge SLA + worker job) *(partial: request/cancel + worker automation shipped; completion notifications pending)*
 - [ ] Hosted self-serve data download request (GDPR-style export request + delivery lifecycle) *(partial: request/status/download baseline shipped; workerization + retention pending)*
 - [x] Hosted load-testing harness + SLO budgets (multi-tenant API + worker scenarios, pass/fail thresholds) **(Phase 0 mandatory for hosted launch)**
-- [ ] Lemon Squeezy integration (web payments, Merchant of Record) **(Phase 0 mandatory for hosted launch)**
-- [ ] Plan selection UI (pricing page, upgrade flow) **(Phase 0 mandatory for hosted launch)**
-- [ ] Plan management UI (change/cancel/reactivate + billing portal handoff) **(Phase 0 mandatory for hosted launch)**
+- [ ] Lemon Squeezy integration (web payments, Merchant of Record) **(Phase 0 mandatory for hosted launch)** *(partial: checkout + signed webhook sync + subscription mapping shipped)*
+- [ ] Plan selection UI (pricing page, upgrade flow) **(Phase 0 mandatory for hosted launch)** *(partial: pricing page + upgrade checkout redirects shipped)*
+- [ ] Plan management UI (change/cancel/reactivate + billing portal handoff) **(Phase 0 mandatory for hosted launch)** *(partial: billing overview + portal handoff shipped; explicit in-app cancel/reactivate controls pending)*
 - [ ] Sponsored-story feed primitives (new `sponsored` item type, mandatory label/style, frequency caps, and feature flag default OFF)
 - [ ] Hosted consent baseline for cookies/storage (`necessary` by default + persistent "Privacy settings" reopen + consent withdrawal flow)
 - [ ] Region-aware gating for non-essential scripts and CMP adapter (if Google ads target EEA/UK/CH, use Google-certified CMP path)

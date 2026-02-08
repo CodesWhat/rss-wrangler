@@ -8,6 +8,7 @@ declare module "fastify" {
       role?: string;
     };
     dbClient?: PoolClient;
+    rawBody?: string;
   }
 
   interface FastifyInstance {

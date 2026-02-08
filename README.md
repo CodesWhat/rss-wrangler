@@ -98,6 +98,11 @@ See `infra/.env.example` for the full list. Key variables:
 | `REQUIRE_EMAIL_VERIFICATION` | No | Require verified email before login (`true`/`false`, default: `false`) |
 | `RESEND_API_KEY` | No | Resend API key for transactional emails |
 | `EMAIL_FROM` | No | Sender for verification/reset emails |
+| `LEMON_SQUEEZY_API_KEY` | Hosted only | Lemon Squeezy API key for checkout + portal API calls |
+| `LEMON_SQUEEZY_STORE_ID` | Hosted only | Lemon Squeezy store ID used when creating checkouts |
+| `LEMON_SQUEEZY_WEBHOOK_SECRET` | Hosted only | Shared secret used to verify Lemon webhook signatures |
+| `LEMON_SQUEEZY_VARIANT_PRO` | Hosted only | Variant ID mapped to hosted `pro` plan |
+| `LEMON_SQUEEZY_VARIANT_PRO_AI` | Hosted only | Variant ID mapped to hosted `pro_ai` plan |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `WORKER_POLL_MINUTES` | No | Feed poll interval in minutes (default: 60) |
 | `OPENAI_API_KEY` | No | Required for AI features (summaries, topic classification) |

@@ -3,6 +3,9 @@ import {
   accountDeletionStatusSchema,
   annotationSchema,
   authTokensSchema,
+  billingCheckoutResponseSchema,
+  billingOverviewSchema,
+  billingPortalResponseSchema,
   clusterCardSchema,
   digestSchema,
   feedSchema,
@@ -20,9 +23,11 @@ import {
   type AccountDataExportStatus,
   type Annotation,
   type AuthTokens,
+  type BillingOverview,
   type ChangePasswordRequest,
   type ClusterCard,
   type ClusterFeedbackRequest,
+  type HostedPlanId,
   type CreateWorkspaceInviteRequest,
   type CreateAnnotationRequest,
   type CreateFilterRuleRequest,
@@ -1222,5 +1227,57 @@ export async function updateWorkspacePolicy(
     return { ok: true };
   } catch {
     return { ok: false, error: "Policy update failed" };
+  }
+}
+
+// ---------- Billing ----------
+
+export async function getBillingOverview(): Promise<BillingOverview | null> {
+  const payload = await requestJson<unknown>("/v1/billing");
+  if (!payload) return null;
+  return billingOverviewSchema.parse(payload);
+}
+
+export async function createBillingCheckout(
+  planId: HostedPlanId
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(`${API_BASE_URL}/v1/billing/checkout`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ planId }),
+    });
+
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Checkout failed" };
+    }
+
+    const body = billingCheckoutResponseSchema.parse(await res.json());
+    return { ok: true, url: body.url };
+  } catch {
+    return { ok: false, error: "Checkout failed" };
+  }
+}
+
+export async function getBillingPortalUrl(): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(false);
+    const res = await fetch(`${API_BASE_URL}/v1/billing/portal`, {
+      method: "GET",
+      headers,
+      cache: "no-store"
+    });
+
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Billing portal unavailable" };
+    }
+
+    const body = billingPortalResponseSchema.parse(await res.json());
+    return { ok: true, url: body.url };
+  } catch {
+    return { ok: false, error: "Billing portal unavailable" };
   }
 }
