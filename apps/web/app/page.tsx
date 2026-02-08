@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StoryCard } from "@/components/story-card";
 import { ProtectedRoute } from "@/components/protected-route";
-import { listClusters } from "@/lib/api";
+import { getSettings, listClusters, listFeeds } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { ShortcutsHelp, ShortcutsButton } from "@/components/shortcuts-help";
 import { LayoutToggle, getStoredLayout, storeLayout } from "@/components/layout-toggle";
+import { OnboardingWizard } from "@/components/onboarding-wizard";
 import type { ViewLayout } from "@/components/layout-toggle";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import type { ClusterCard, StorySort } from "@rss-wrangler/contracts";
+import type { AiMode, ClusterCard, StorySort } from "@rss-wrangler/contracts";
+
+const ONBOARDING_DISMISSED_KEY = "rss_onboarding_dismissed";
 
 function HomeFeed() {
   const [clusters, setClusters] = useState<ClusterCard[]>([]);
@@ -21,12 +24,36 @@ function HomeFeed() {
   const [layout, setLayout] = useState<ViewLayout>("card");
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [showHelp, setShowHelp] = useState(false);
+  const [showDigestBanner, setShowDigestBanner] = useState(true);
+  const [showEmptyBanner, setShowEmptyBanner] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(true);
+  const [setupLoading, setSetupLoading] = useState(true);
+  const [feedsCount, setFeedsCount] = useState(0);
+  const [initialAiMode, setInitialAiMode] = useState<AiMode>("off");
   const sentinelRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
 
   // Load layout preference from localStorage on mount
   useEffect(() => {
     setLayout(getStoredLayout());
+  }, []);
+
+  useEffect(() => {
+    const dismissed = localStorage.getItem(ONBOARDING_DISMISSED_KEY) === "1";
+    setShowOnboarding(!dismissed);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([listFeeds(), getSettings()]).then(([feeds, settings]) => {
+      if (cancelled) return;
+      setFeedsCount(feeds.length);
+      setInitialAiMode(settings.aiMode);
+      setSetupLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function handleLayoutChange(newLayout: ViewLayout) {
@@ -104,21 +131,31 @@ function HomeFeed() {
     setClusters((prev) => prev.filter((c) => c.id !== id));
   }
 
-  async function handleRefresh() {
+  function dismissOnboarding() {
+    setShowOnboarding(false);
+    localStorage.setItem(ONBOARDING_DISMISSED_KEY, "1");
+  }
+
+  function reopenOnboarding() {
+    setShowOnboarding(true);
+    localStorage.removeItem(ONBOARDING_DISMISSED_KEY);
+  }
+
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     const result = await listClusters({ limit: 20, state: "unread", sort });
     setClusters(result.data);
     setCursor(result.nextCursor);
     setSelectedIndex(-1);
     setRefreshing(false);
-  }
+  }, [sort]);
 
-  function scrollToCard(index: number) {
+  const scrollToCard = useCallback((index: number) => {
     const el = cardRefs.current.get(index);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
-  }
+  }, []);
 
   // Keyboard shortcut actions
   const shortcutActions = useMemo(
@@ -180,10 +217,12 @@ function HomeFeed() {
         if (searchInput) searchInput.focus();
       },
     }),
-    [clusters.length, selectedIndex]
+    [clusters.length, selectedIndex, handleRefresh, scrollToCard]
   );
 
   useKeyboardShortcuts(shortcutActions);
+
+  const shouldShowOnboarding = !setupLoading && feedsCount === 0 && showOnboarding;
 
   return (
     <>
@@ -224,20 +263,80 @@ function HomeFeed() {
         </div>
       </div>
 
-      <section className="banner">
-        <div>
-          <strong>Digest available when away or backlog is high.</strong>
-          <p>Default triggers: away 24h or unread backlog 50 clusters.</p>
-        </div>
-        <a href="/digest" className="button button-secondary">
-          Open digest
-        </a>
-      </section>
+      {showDigestBanner && (
+        <section className="banner">
+          <div>
+            <strong>Digest available when away or backlog is high.</strong>
+            <p>Default triggers: away 24h or unread backlog 50 clusters.</p>
+          </div>
+          <div className="row">
+            <a href="/digest" className="button button-secondary">
+              Open digest
+            </a>
+            <button
+              type="button"
+              className="banner-dismiss"
+              onClick={() => setShowDigestBanner(false)}
+              aria-label="Dismiss"
+            >
+              &times;
+            </button>
+          </div>
+        </section>
+      )}
 
       {loading ? (
         <p className="muted">Loading stories...</p>
-      ) : clusters.length === 0 ? (
-        <p className="muted">No unread stories. Add some feeds in Sources.</p>
+      ) : shouldShowOnboarding ? (
+        <OnboardingWizard
+          feedsCount={feedsCount}
+          initialAiMode={initialAiMode}
+          onFeedsCountChange={setFeedsCount}
+          onDismiss={dismissOnboarding}
+        />
+      ) : clusters.length === 0 && feedsCount === 0 && showEmptyBanner ? (
+        <section className="banner">
+          <div>
+            <strong>No sources configured yet.</strong>
+            <p>Run guided setup, or add feeds manually in Sources.</p>
+          </div>
+          <div className="row">
+            <button type="button" className="button button-secondary" onClick={reopenOnboarding}>
+              Start setup
+            </button>
+            <a href="/sources" className="button button-secondary">
+              Sources
+            </a>
+            <button
+              type="button"
+              className="banner-dismiss"
+              onClick={() => setShowEmptyBanner(false)}
+              aria-label="Dismiss"
+            >
+              &times;
+            </button>
+          </div>
+        </section>
+      ) : clusters.length === 0 && showEmptyBanner ? (
+        <section className="banner">
+          <div>
+            <strong>No unread stories.</strong>
+            <p>Add some feeds in Sources to get started.</p>
+          </div>
+          <div className="row">
+            <a href="/sources" className="button button-secondary">
+              Sources
+            </a>
+            <button
+              type="button"
+              className="banner-dismiss"
+              onClick={() => setShowEmptyBanner(false)}
+              aria-label="Dismiss"
+            >
+              &times;
+            </button>
+          </div>
+        </section>
       ) : (
         <section className="cards" aria-label="Story cards">
           {clusters.map((cluster, i) => (

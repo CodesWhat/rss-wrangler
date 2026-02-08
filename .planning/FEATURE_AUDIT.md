@@ -193,7 +193,7 @@ Audited: 2026-02-07
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Multi-tenant data model (`tenant_id` + isolation) | ⚠️ | `tenant_id` added across core auth + content tables (feed/item/cluster/cluster_member/read_state/filter/event/digest/topic/feed_topic/annotation/push), tenant-scoped API store queries and worker pipeline writes/reads, DB-level RLS policies enabled/forced, and request/job-level tenant DB context propagation (`app.tenant_id`) added for API protected routes + worker pipeline/digest paths. Remaining gaps: hosted org/team model, tenant-admin tooling, and broader hosted observability around context propagation failures. |
-| Hosted auth + onboarding flow | ⚠️ | Tenant-aware auth expanded with hosted signup endpoint (`/v1/auth/signup`), tenant slug + name bootstrap, tenant-scoped login (`tenantSlug`), email verification endpoints (`/v1/auth/verify-email`, resend flow), and basic signup page. Remaining gaps: invite/join flows and first-run guided onboarding wizard. |
+| Hosted auth + onboarding flow | ⚠️ | Tenant-aware auth expanded with hosted signup endpoint (`/v1/auth/signup`), tenant slug + name bootstrap, tenant-scoped login (`tenantSlug`), email verification endpoints (`/v1/auth/verify-email`, resend flow), basic signup page, and first-run onboarding wizard on Home for empty-feed workspaces (add URL/OPML/discover, optional interests starter feeds, AI opt-in preference). Remaining gaps: invite/join flows and persistent server-side onboarding completion state. |
 | Hosted account settings: password change/reset | ✅ | Self-serve password change shipped (`/v1/account/password` + Settings UI account section). Password reset flow shipped (forgot/reset endpoints + web forms + email token lifecycle). |
 | Hosted account deletion workflow | ⚠️ | Baseline self-serve request/cancel flow shipped (`/v1/account/deletion*` + settings danger-zone UI). Grace window automation, audit notifications, and hard-purge job still missing. |
 | Hosted self-serve data download request (GDPR-style) | ❌ | No account-level data-download request flow with async delivery/completion status |
@@ -213,16 +213,16 @@ Audited: 2026-02-07
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Guided onboarding wizard (first-run) | ❌ | First-time users land in an empty feed state; no guided setup for OPML import, directory browse, topic picks, or AI opt-in explanation |
+| Guided onboarding wizard (first-run) | ⚠️ | Baseline wizard shipped on Home for empty-feed workspaces with setup paths (add URL, OPML import, discover), optional interests starter feeds, and AI mode opt-in. Remaining gaps: server-side completion tracking and richer topic-to-folder/filter bootstrap logic. |
 
 ---
 
 ## SUMMARY COUNTS
 
 - ✅ IMPLEMENTED: 36
-- ⚠️ PARTIAL: 13
+- ⚠️ PARTIAL: 14
 - 🔲 STUB: 6
-- ❌ MISSING: 55
+- ❌ MISSING: 54
 
 ## TOP PRIORITY GAPS (from spec)
 
@@ -236,12 +236,12 @@ Audited: 2026-02-07
 8. **Pipeline has no resilience** - no circuit breaker, dead-letter, or explicit retries
 9. **+N outlets and folder labels not shown on cards**
 10. **Missing card actions** - mute keyword, prefer/mute source
-11. **Hosted multi-tenancy + onboarding not implemented** - required before hosted public launch
+11. **Hosted onboarding still incomplete** - invite/join flows and persistent completion state needed before hosted public launch
 12. **Hosted billing flow not implemented** - Lemon Squeezy + upgrade/plan management required before hosted launch
 13. **Feed discovery + directory seeding missing** - need one-time DB seed from feed-directory.json + discovery engine for URL → candidates
 14. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail
 15. **Accessibility baseline missing** - no explicit WCAG 2.2 AA coverage for semantics, keyboard/focus, contrast, and screen-reader validation
 16. **Data portability bundle missing** - no export beyond OPML for saved items, annotations, training signals, and filters/rules
 17. **Hosted account management/compliance missing** - account deletion lifecycle automation and GDPR-style data download request flow still missing
-18. **Guided onboarding missing** - first-time users hit an empty-state feed with no setup wizard
+18. **Guided onboarding is baseline-only** - wizard exists, but server-side completion state and deeper topic bootstrap are still missing
 19. **Hosted load testing missing** - no repeatable multi-tenant performance tests or SLO-based launch gate

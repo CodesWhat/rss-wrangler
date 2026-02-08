@@ -626,25 +626,31 @@ export async function updateFeed(
   return feedSchema.parse(payload);
 }
 
-export async function importOpml(file: File): Promise<{ imported: number } | null> {
-  const formData = new FormData();
-  formData.append("file", file);
-
-  const token = await ensureValidToken();
-  const headers = new Headers();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-
-  try {
-    const res = await fetch(`${API_BASE_URL}/v1/opml/import`, {
-      method: "POST",
-      headers,
-      body: formData,
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as { imported: number };
-  } catch {
+export async function importOpml(
+  file: File
+): Promise<{ imported: number; skipped: number; total: number } | null> {
+  const xml = await file.text();
+  const payload = await requestJson<unknown>("/v1/opml/import", {
+    method: "POST",
+    body: JSON.stringify({ opml: xml }),
+  });
+  if (!payload || typeof payload !== "object") {
     return null;
   }
+
+  const imported = Number((payload as { imported?: unknown }).imported ?? 0);
+  const skipped = Number((payload as { skipped?: unknown }).skipped ?? 0);
+  const total = Number((payload as { total?: unknown }).total ?? imported + skipped);
+
+  if (
+    Number.isNaN(imported) ||
+    Number.isNaN(skipped) ||
+    Number.isNaN(total)
+  ) {
+    return null;
+  }
+
+  return { imported, skipped, total };
 }
 
 // ---------- Filters ----------
