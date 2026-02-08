@@ -196,7 +196,7 @@ Audited: 2026-02-07
 | Hosted auth + onboarding flow | ⚠️ | Tenant-aware auth expanded with hosted signup endpoint (`/v1/auth/signup`), tenant slug + name bootstrap, tenant-scoped login (`tenantSlug`), email verification endpoints (`/v1/auth/verify-email`, resend flow), basic signup page, and first-run onboarding wizard on Home for empty-feed workspaces (add URL/OPML/discover, optional interests starter feeds, AI opt-in preference). Remaining gaps: invite/join flows and persistent server-side onboarding completion state. |
 | Hosted account settings: password change/reset | ✅ | Self-serve password change shipped (`/v1/account/password` + Settings UI account section). Password reset flow shipped (forgot/reset endpoints + web forms + email token lifecycle). |
 | Hosted account deletion workflow | ⚠️ | Baseline self-serve request/cancel flow shipped (`/v1/account/deletion*` + settings danger-zone UI). Grace window automation, audit notifications, and hard-purge job still missing. |
-| Hosted self-serve data download request (GDPR-style) | ❌ | No account-level data-download request flow with async delivery/completion status |
+| Hosted self-serve data download request (GDPR-style) | ⚠️ | Baseline shipped: account data export request/status/download endpoints (`/v1/account/data-export*`), tenant-scoped export-request persistence, and protected frontend export page. Remaining gaps: move processing to durable worker queue, add completion notifications, and enforce retention/purge for generated bundles. |
 | Entitlements + plan-aware limit enforcement | ❌ | No plan gate middleware or per-user quota checks in API/worker paths |
 | Hosted performance/load testing + SLO baselines | ❌ | No scripted multi-tenant load profiles, no launch SLO/error-budget thresholds, and no repeatable perf gate for hosted readiness |
 | Billing integration (Lemon Squeezy + pricing/upgrade + plan management UI) | ❌ | No Lemon Squeezy subscription/webhook integration and no hosted pricing/upgrade/plan-management surface |
@@ -220,9 +220,9 @@ Audited: 2026-02-07
 ## SUMMARY COUNTS
 
 - ✅ IMPLEMENTED: 36
-- ⚠️ PARTIAL: 14
+- ⚠️ PARTIAL: 15
 - 🔲 STUB: 6
-- ❌ MISSING: 54
+- ❌ MISSING: 53
 
 ## TOP PRIORITY GAPS (from spec)
 
@@ -242,6 +242,6 @@ Audited: 2026-02-07
 14. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail
 15. **Accessibility baseline missing** - no explicit WCAG 2.2 AA coverage for semantics, keyboard/focus, contrast, and screen-reader validation
 16. **Data portability bundle missing** - no export beyond OPML for saved items, annotations, training signals, and filters/rules
-17. **Hosted account management/compliance missing** - account deletion lifecycle automation and GDPR-style data download request flow still missing
+17. **Hosted account management/compliance still incomplete** - account deletion lifecycle automation and export worker/notification/retention hardening still missing
 18. **Guided onboarding is baseline-only** - wizard exists, but server-side completion state and deeper topic bootstrap are still missing
 19. **Hosted load testing missing** - no repeatable multi-tenant performance tests or SLO-based launch gate

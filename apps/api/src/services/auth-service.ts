@@ -2,6 +2,7 @@ import { randomBytes, randomUUID, createHash, timingSafeEqual } from "node:crypt
 import type { FastifyInstance } from "fastify";
 import type { Pool, PoolClient } from "pg";
 import type {
+  AccountDataExportStatus,
   AccountDeletionStatus,
   ForgotPasswordRequest,
   RequestAccountDeletion,
@@ -634,6 +635,459 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     };
   }
 
+  async function getAccountDataExportStatus(
+    userId: string,
+    tenantId: string
+  ): Promise<AccountDataExportStatus | null> {
+    const result = await withTenantClient(tenantId, async (client) => {
+      return client.query<{
+        id: string;
+        status: "pending" | "processing" | "completed" | "failed";
+        requested_at: Date;
+        started_at: Date | null;
+        completed_at: Date | null;
+        failed_at: Date | null;
+        error_message: string | null;
+        file_size_bytes: number | null;
+      }>(
+        `SELECT id, status, requested_at, started_at, completed_at, failed_at, error_message, file_size_bytes
+         FROM account_data_export_request
+         WHERE tenant_id = $1
+           AND user_id = $2
+         ORDER BY requested_at DESC
+         LIMIT 1`,
+        [tenantId, userId]
+      );
+    });
+
+    const row = result.rows[0];
+    return row ? toAccountDataExportStatus(row) : null;
+  }
+
+  async function requestAccountDataExport(
+    userId: string,
+    tenantId: string
+  ): Promise<AccountDataExportStatus> {
+    const active = await withTenantClient(tenantId, async (client) => {
+      return client.query<{
+        id: string;
+        status: "pending" | "processing" | "completed" | "failed";
+        requested_at: Date;
+        started_at: Date | null;
+        completed_at: Date | null;
+        failed_at: Date | null;
+        error_message: string | null;
+        file_size_bytes: number | null;
+      }>(
+        `SELECT id, status, requested_at, started_at, completed_at, failed_at, error_message, file_size_bytes
+         FROM account_data_export_request
+         WHERE tenant_id = $1
+           AND user_id = $2
+           AND status IN ('pending', 'processing')
+         ORDER BY requested_at DESC
+         LIMIT 1`,
+        [tenantId, userId]
+      );
+    });
+
+    if (active.rows[0]) {
+      return toAccountDataExportStatus(active.rows[0]);
+    }
+
+    const insert = await withTenantClient(tenantId, async (client) => {
+      return client.query<{
+        id: string;
+        status: "pending" | "processing" | "completed" | "failed";
+        requested_at: Date;
+        started_at: Date | null;
+        completed_at: Date | null;
+        failed_at: Date | null;
+        error_message: string | null;
+        file_size_bytes: number | null;
+      }>(
+        `INSERT INTO account_data_export_request (tenant_id, user_id, status)
+         VALUES ($1, $2, 'pending')
+         RETURNING id, status, requested_at, started_at, completed_at, failed_at, error_message, file_size_bytes`,
+        [tenantId, userId]
+      );
+    });
+
+    const row = insert.rows[0];
+    if (!row) {
+      throw new Error("failed to create account data export request");
+    }
+
+    void processAccountDataExportRequest(tenantId, userId, row.id);
+    return toAccountDataExportStatus(row);
+  }
+
+  async function processAccountDataExportRequest(
+    tenantId: string,
+    userId: string,
+    requestId: string
+  ): Promise<void> {
+    const claimed = await withTenantClient(tenantId, async (client) => {
+      return client.query<{ id: string }>(
+        `UPDATE account_data_export_request
+         SET status = 'processing',
+             started_at = NOW(),
+             failed_at = NULL,
+             error_message = NULL
+         WHERE id = $1
+           AND tenant_id = $2
+           AND user_id = $3
+           AND status = 'pending'
+         RETURNING id`,
+        [requestId, tenantId, userId]
+      );
+    });
+
+    if (!claimed.rows[0]) {
+      return;
+    }
+
+    try {
+      const exportPayload = await buildAccountDataExportPayload(tenantId, userId);
+      const payloadJson = JSON.stringify(exportPayload);
+      const fileSizeBytes = Buffer.byteLength(payloadJson, "utf8");
+
+      await withTenantClient(tenantId, async (client) => {
+        await client.query(
+          `UPDATE account_data_export_request
+           SET status = 'completed',
+               completed_at = NOW(),
+               failed_at = NULL,
+               error_message = NULL,
+               export_payload = $4::jsonb,
+               file_size_bytes = $5
+           WHERE id = $1
+             AND tenant_id = $2
+             AND user_id = $3`,
+          [requestId, tenantId, userId, payloadJson, fileSizeBytes]
+        );
+      });
+
+      app.log.info(
+        { tenantId, userId, requestId, fileSizeBytes },
+        "account data export completed"
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
+      await withTenantClient(tenantId, async (client) => {
+        await client.query(
+          `UPDATE account_data_export_request
+           SET status = 'failed',
+               failed_at = NOW(),
+               error_message = $4
+           WHERE id = $1
+             AND tenant_id = $2
+             AND user_id = $3`,
+          [requestId, tenantId, userId, message.slice(0, 500)]
+        );
+      });
+
+      app.log.error(
+        { err: error, tenantId, userId, requestId },
+        "account data export failed"
+      );
+    }
+  }
+
+  async function buildAccountDataExportPayload(
+    tenantId: string,
+    userId: string
+  ): Promise<Record<string, unknown>> {
+    return withTenantClient(tenantId, async (client) => {
+      const userResult = await client.query<{
+        id: string;
+        username: string;
+        email: string | null;
+        created_at: Date;
+        last_login_at: Date | null;
+        email_verified_at: Date | null;
+      }>(
+        `SELECT id, username, email, created_at, last_login_at, email_verified_at
+         FROM user_account
+         WHERE tenant_id = $1
+           AND id = $2
+         LIMIT 1`,
+        [tenantId, userId]
+      );
+      const user = userResult.rows[0];
+      if (!user) {
+        throw new Error("account not found for export");
+      }
+
+      const settingsResult = await client.query<{ data: unknown }>(
+        `SELECT data
+         FROM app_settings
+         WHERE tenant_id = $1
+           AND key = 'main'
+         LIMIT 1`,
+        [tenantId]
+      );
+
+      const folderRows = await client.query<{
+        id: string;
+        name: string;
+        created_at: Date;
+      }>(
+        `SELECT id, name, created_at
+         FROM folder
+         ORDER BY name ASC`
+      );
+
+      const feedRows = await client.query<{
+        id: string;
+        url: string;
+        title: string;
+        site_url: string | null;
+        folder_id: string;
+        weight: "prefer" | "neutral" | "deprioritize";
+        classification_status: "pending_classification" | "classified" | "approved";
+        created_at: Date;
+        last_polled_at: Date | null;
+      }>(
+        `SELECT id, url, title, site_url, folder_id, weight, classification_status, created_at, last_polled_at
+         FROM feed
+         WHERE tenant_id = $1
+         ORDER BY created_at DESC`,
+        [tenantId]
+      );
+
+      const feedTopicRows = await client.query<{
+        feed_id: string;
+        topic_id: string;
+        topic_name: string;
+        status: "pending" | "approved" | "rejected";
+        confidence: string;
+        proposed_at: Date;
+        resolved_at: Date | null;
+      }>(
+        `SELECT ft.feed_id, ft.topic_id, t.name AS topic_name, ft.status, ft.confidence::text, ft.proposed_at, ft.resolved_at
+         FROM feed_topic ft
+         JOIN topic t ON t.id = ft.topic_id
+         WHERE ft.tenant_id = $1
+         ORDER BY ft.proposed_at DESC`,
+        [tenantId]
+      );
+
+      const filterRows = await client.query<{
+        id: string;
+        pattern: string;
+        type: "phrase" | "regex";
+        mode: "mute" | "block";
+        breakout_enabled: boolean;
+        created_at: Date;
+      }>(
+        `SELECT id, pattern, type, mode, breakout_enabled, created_at
+         FROM filter_rule
+         WHERE tenant_id = $1
+         ORDER BY created_at DESC`,
+        [tenantId]
+      );
+
+      const savedRows = await client.query<{
+        cluster_id: string;
+        saved_at: Date;
+        title: string | null;
+        summary: string | null;
+        url: string | null;
+        canonical_url: string | null;
+        published_at: Date | null;
+        source_title: string | null;
+        source_url: string | null;
+      }>(
+        `SELECT
+           rs.cluster_id,
+           rs.saved_at,
+           i.title,
+           i.summary,
+           i.url,
+           i.canonical_url,
+           i.published_at,
+           f.title AS source_title,
+           f.url AS source_url
+         FROM read_state rs
+         JOIN cluster c
+           ON c.id = rs.cluster_id
+          AND c.tenant_id = rs.tenant_id
+         LEFT JOIN item i
+           ON i.id = c.rep_item_id
+          AND i.tenant_id = c.tenant_id
+         LEFT JOIN feed f
+           ON f.id = i.feed_id
+          AND f.tenant_id = i.tenant_id
+         WHERE rs.tenant_id = $1
+           AND rs.saved_at IS NOT NULL
+         ORDER BY rs.saved_at DESC`,
+        [tenantId]
+      );
+
+      const annotationRows = await client.query<{
+        id: string;
+        cluster_id: string;
+        highlighted_text: string;
+        note: string | null;
+        color: string;
+        created_at: Date;
+      }>(
+        `SELECT id, cluster_id, highlighted_text, note, color, created_at
+         FROM annotation
+         WHERE tenant_id = $1
+         ORDER BY created_at DESC`,
+        [tenantId]
+      );
+
+      const eventRows = await client.query<{
+        id: string;
+        idempotency_key: string;
+        ts: Date;
+        type: string;
+        payload_json: unknown;
+      }>(
+        `SELECT id, idempotency_key, ts, type, payload_json
+         FROM event
+         WHERE tenant_id = $1
+         ORDER BY ts DESC`,
+        [tenantId]
+      );
+
+      const digestRows = await client.query<{
+        id: string;
+        created_at: Date;
+        start_ts: Date;
+        end_ts: Date;
+        title: string;
+        body: string;
+        entries_json: unknown;
+      }>(
+        `SELECT id, created_at, start_ts, end_ts, title, body, entries_json
+         FROM digest
+         WHERE tenant_id = $1
+         ORDER BY created_at DESC`,
+        [tenantId]
+      );
+
+      return {
+        schemaVersion: 1,
+        generatedAt: new Date().toISOString(),
+        tenantId,
+        account: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          createdAt: user.created_at.toISOString(),
+          emailVerifiedAt: user.email_verified_at?.toISOString() ?? null,
+          lastLoginAt: user.last_login_at?.toISOString() ?? null
+        },
+        settings: settingsResult.rows[0]?.data ?? {},
+        folders: folderRows.rows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          createdAt: row.created_at.toISOString()
+        })),
+        feeds: feedRows.rows.map((row) => ({
+          id: row.id,
+          url: row.url,
+          title: row.title,
+          siteUrl: row.site_url,
+          folderId: row.folder_id,
+          weight: row.weight,
+          classificationStatus: row.classification_status,
+          createdAt: row.created_at.toISOString(),
+          lastPolledAt: row.last_polled_at?.toISOString() ?? null
+        })),
+        feedTopics: feedTopicRows.rows.map((row) => ({
+          feedId: row.feed_id,
+          topicId: row.topic_id,
+          topicName: row.topic_name,
+          status: row.status,
+          confidence: Number(row.confidence),
+          proposedAt: row.proposed_at.toISOString(),
+          resolvedAt: row.resolved_at?.toISOString() ?? null
+        })),
+        filters: filterRows.rows.map((row) => ({
+          id: row.id,
+          pattern: row.pattern,
+          type: row.type,
+          mode: row.mode,
+          breakoutEnabled: row.breakout_enabled,
+          createdAt: row.created_at.toISOString()
+        })),
+        savedItems: savedRows.rows.map((row) => ({
+          clusterId: row.cluster_id,
+          savedAt: row.saved_at.toISOString(),
+          title: row.title,
+          summary: row.summary,
+          url: row.url,
+          canonicalUrl: row.canonical_url,
+          publishedAt: row.published_at?.toISOString() ?? null,
+          sourceTitle: row.source_title,
+          sourceUrl: row.source_url
+        })),
+        annotations: annotationRows.rows.map((row) => ({
+          id: row.id,
+          clusterId: row.cluster_id,
+          highlightedText: row.highlighted_text,
+          note: row.note,
+          color: row.color,
+          createdAt: row.created_at.toISOString()
+        })),
+        events: eventRows.rows.map((row) => ({
+          id: row.id,
+          idempotencyKey: row.idempotency_key,
+          ts: row.ts.toISOString(),
+          type: row.type,
+          payload: row.payload_json
+        })),
+        digests: digestRows.rows.map((row) => ({
+          id: row.id,
+          createdAt: row.created_at.toISOString(),
+          startTs: row.start_ts.toISOString(),
+          endTs: row.end_ts.toISOString(),
+          title: row.title,
+          body: row.body,
+          entries: row.entries_json
+        }))
+      } satisfies Record<string, unknown>;
+    });
+  }
+
+  async function getAccountDataExportPayload(
+    userId: string,
+    tenantId: string
+  ): Promise<{ payload: unknown; requestedAt: string; completedAt: string } | null> {
+    const result = await withTenantClient(tenantId, async (client) => {
+      return client.query<{
+        export_payload: unknown;
+        requested_at: Date;
+        completed_at: Date;
+      }>(
+        `SELECT export_payload, requested_at, completed_at
+         FROM account_data_export_request
+         WHERE tenant_id = $1
+           AND user_id = $2
+           AND status = 'completed'
+           AND export_payload IS NOT NULL
+         ORDER BY completed_at DESC NULLS LAST, requested_at DESC
+         LIMIT 1`,
+        [tenantId, userId]
+      );
+    });
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    return {
+      payload: row.export_payload,
+      requestedAt: row.requested_at.toISOString(),
+      completedAt: row.completed_at.toISOString()
+    };
+  }
+
   async function resendEmailVerification(
     payload: ResendVerificationRequest
   ): Promise<"ok" | "already_verified"> {
@@ -907,8 +1361,33 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     getAccountDeletionStatus,
     requestAccountDeletion,
     cancelAccountDeletion,
+    getAccountDataExportStatus,
+    requestAccountDataExport,
+    getAccountDataExportPayload,
     refresh,
     logout
+  };
+}
+
+function toAccountDataExportStatus(row: {
+  id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  requested_at: Date;
+  started_at: Date | null;
+  completed_at: Date | null;
+  failed_at: Date | null;
+  error_message: string | null;
+  file_size_bytes: number | null;
+}): AccountDataExportStatus {
+  return {
+    id: row.id,
+    status: row.status,
+    requestedAt: row.requested_at.toISOString(),
+    startedAt: row.started_at?.toISOString() ?? null,
+    completedAt: row.completed_at?.toISOString() ?? null,
+    failedAt: row.failed_at?.toISOString() ?? null,
+    errorMessage: row.error_message,
+    fileSizeBytes: row.file_size_bytes
   };
 }
 

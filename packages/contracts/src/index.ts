@@ -281,6 +281,18 @@ export const accountDeletionStatusSchema = z.object({
 });
 export type AccountDeletionStatus = z.infer<typeof accountDeletionStatusSchema>;
 
+export const accountDataExportStatusSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["pending", "processing", "completed", "failed"]),
+  requestedAt: z.string().datetime(),
+  startedAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable(),
+  failedAt: z.string().datetime().nullable(),
+  errorMessage: z.string().nullable(),
+  fileSizeBytes: z.number().int().nonnegative().nullable()
+});
+export type AccountDataExportStatus = z.infer<typeof accountDataExportStatusSchema>;
+
 export const authTokensSchema = z.object({
   accessToken: z.string(),
   refreshToken: z.string(),
@@ -447,6 +459,9 @@ export const apiRoutes = {
   accountDeletionStatus: "/v1/account/deletion",
   accountDeletionRequest: "/v1/account/deletion/request",
   accountDeletionCancel: "/v1/account/deletion/cancel",
+  accountDataExportStatus: "/v1/account/data-export",
+  accountDataExportRequest: "/v1/account/data-export/request",
+  accountDataExportDownload: "/v1/account/data-export/download",
   opmlImport: "/v1/opml/import",
   opmlExport: "/v1/opml/export",
   search: "/v1/search",

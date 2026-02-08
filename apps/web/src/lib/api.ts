@@ -1,4 +1,5 @@
 import {
+  accountDataExportStatusSchema,
   accountDeletionStatusSchema,
   annotationSchema,
   authTokensSchema,
@@ -14,6 +15,7 @@ import {
   settingsSchema,
   topicSchema,
   type AccountDeletionStatus,
+  type AccountDataExportStatus,
   type Annotation,
   type AuthTokens,
   type ChangePasswordRequest,
@@ -451,6 +453,12 @@ export async function getAccountDeletionStatus(): Promise<AccountDeletionStatus 
   return accountDeletionStatusSchema.parse(payload);
 }
 
+export async function getAccountDataExportStatus(): Promise<AccountDataExportStatus | null> {
+  const payload = await requestJson<unknown>("/v1/account/data-export");
+  if (!payload) return null;
+  return accountDataExportStatusSchema.parse(payload);
+}
+
 export async function requestAccountDeletion(
   req: RequestAccountDeletion
 ): Promise<{ ok: true; status: AccountDeletionStatus } | { ok: false; error: string }> {
@@ -481,6 +489,82 @@ export async function requestAccountDeletion(
     return { ok: true, status };
   } catch {
     return { ok: false, error: "Request failed" };
+  }
+}
+
+export async function requestAccountDataExport(): Promise<
+  { ok: true; status: AccountDataExportStatus } | { ok: false; error: string }
+> {
+  const attempt = async (): Promise<Response> => {
+    const headers = await authedHeaders(true);
+    return fetch(`${API_BASE_URL}/v1/account/data-export/request`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({}),
+    });
+  };
+
+  try {
+    let response = await attempt();
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        response = await attempt();
+      }
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return { ok: false, error: message || "Export request failed" };
+    }
+
+    const status = accountDataExportStatusSchema.parse(await response.json());
+    return { ok: true, status };
+  } catch {
+    return { ok: false, error: "Export request failed" };
+  }
+}
+
+export async function downloadAccountDataExport(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const attempt = async (): Promise<Response> => {
+    const headers = await authedHeaders(false);
+    return fetch(`${API_BASE_URL}/v1/account/data-export/download`, {
+      method: "GET",
+      headers,
+      cache: "no-store",
+    });
+  };
+
+  try {
+    let response = await attempt();
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        response = await attempt();
+      }
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return { ok: false, error: message || "Download failed" };
+    }
+
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const disposition = response.headers.get("content-disposition");
+    const filename = parseDownloadFilename(disposition) ?? "rss-wrangler-account-export.json";
+
+    const anchor = document.createElement("a");
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(objectUrl);
+
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Download failed" };
   }
 }
 
@@ -527,6 +611,14 @@ export async function logout(): Promise<void> {
     // best-effort
   }
   clearTokens();
+}
+
+function parseDownloadFilename(contentDisposition: string | null): string | null {
+  if (!contentDisposition) {
+    return null;
+  }
+  const match = /filename="([^"]+)"/i.exec(contentDisposition);
+  return match?.[1] ?? null;
 }
 
 // ---------- Clusters ----------

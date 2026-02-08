@@ -1,6 +1,7 @@
 import {
   addFeedRequestSchema,
   clusterFeedbackRequestSchema,
+  accountDataExportStatusSchema,
   changePasswordRequestSchema,
   createAnnotationRequestSchema,
   createFilterRuleRequestSchema,
@@ -519,6 +520,44 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.notFound("no pending deletion request");
       }
       return result;
+    });
+
+    protectedRoutes.get("/v1/account/data-export", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      return auth.getAccountDataExportStatus(authContext.userId, authContext.tenantId);
+    });
+
+    protectedRoutes.post("/v1/account/data-export/request", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      const status = await auth.requestAccountDataExport(authContext.userId, authContext.tenantId);
+      return accountDataExportStatusSchema.parse(status);
+    });
+
+    protectedRoutes.get("/v1/account/data-export/download", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+
+      const download = await auth.getAccountDataExportPayload(authContext.userId, authContext.tenantId);
+      if (!download) {
+        return reply.notFound("no completed account export found");
+      }
+
+      const iso = download.completedAt.replace(/[:]/g, "-").replace(/\.\d{3}Z$/, "Z");
+      const filename = `rss-wrangler-account-export-${iso}.json`;
+      const body = JSON.stringify(download.payload, null, 2);
+
+      return reply
+        .header("Content-Type", "application/json; charset=utf-8")
+        .header("Content-Disposition", `attachment; filename="${filename}"`)
+        .send(body);
     });
 
     protectedRoutes.get("/v1/settings", async (request) => {
