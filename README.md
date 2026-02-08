@@ -95,6 +95,7 @@ Health checks run from inside containers, so they are not affected by local proc
 | `npm run test:coverage:policy` | Check coverage policy gates |
 | `npm run typecheck` | Type-check all packages |
 | `npm run lint` | Lint all packages |
+| `npm run hosted:smoke -- --base-url <api-url>` | Hosted smoke checks (health/auth/settings) |
 
 ## Environment Variables
 

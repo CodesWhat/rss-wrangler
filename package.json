@@ -24,6 +24,7 @@
     "orbstack:up": "docker compose -f infra/docker-compose.yml up --build -d",
     "orbstack:down": "docker compose -f infra/docker-compose.yml down",
     "orbstack:smoke": "bash scripts/orbstack-smoke.sh",
+    "hosted:smoke": "node scripts/load/run-hosted-smoke.mjs",
     "backfill:enrichment": "tsx scripts/backfill-enrichment.ts",
     "push:vapid:keys": "node scripts/generate-vapid-keys.js",
     "hooks:install": "lefthook install",

@@ -67,6 +67,21 @@ Use `render.free.yaml` to verify hosted auth, billing, consent, and basic web/AP
 Use `render.yaml` for realistic hosted testing and cost tracking.
 This is the first point where p95 latency, ingestion, and background job behavior are meaningful.
 
+### Hosted smoke verification (post-deploy)
+
+After deploy, run a fast verification pass before load/SLO gates:
+
+```bash
+npm run hosted:smoke -- \
+  --base-url https://<api-service>.onrender.com \
+  --web-url https://<web-service>.onrender.com \
+  --username <smoke-user> \
+  --password <smoke-password> \
+  --tenant-slug default
+```
+
+Report output: `infra/load/results/latest-hosted-smoke.json`
+
 ### Notes
 
 - API runs migrations automatically on startup via:
