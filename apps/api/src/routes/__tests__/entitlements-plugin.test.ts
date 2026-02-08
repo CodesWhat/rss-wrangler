@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { getTenantEntitlements } from "../../plugins/entitlements.js";
+import { getAccountEntitlements } from "../../plugins/entitlements.js";
 
-describe("getTenantEntitlements", () => {
+describe("getAccountEntitlements", () => {
   it("returns free defaults when tenant has no subscription row", async () => {
     const query = vi
       .fn()
@@ -10,7 +10,7 @@ describe("getTenantEntitlements", () => {
       .mockResolvedValueOnce({ rows: [] })
       .mockResolvedValueOnce({ rows: [{ usage_date: "2026-02-08" }] });
 
-    const result = await getTenantEntitlements({ query }, "tenant-1");
+    const result = await getAccountEntitlements({ query }, "tenant-1");
 
     expect(result).toEqual({
       planId: "free",
@@ -44,7 +44,7 @@ describe("getTenantEntitlements", () => {
       .mockResolvedValueOnce({ rows: [{ usage_date: "2026-02-08", items_ingested_count: 142 }] })
       .mockResolvedValueOnce({ rows: [{ usage_date: "2026-02-08" }] });
 
-    const result = await getTenantEntitlements({ query }, "tenant-1");
+    const result = await getAccountEntitlements({ query }, "tenant-1");
 
     expect(result).toEqual({
       planId: "pro_ai",

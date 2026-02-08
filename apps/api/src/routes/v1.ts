@@ -1,5 +1,6 @@
 import {
   addFeedRequestSchema,
+  accountEntitlementsSchema,
   clusterFeedbackRequestSchema,
   accountDataExportStatusSchema,
   billingCheckoutRequestSchema,
@@ -28,7 +29,6 @@ import {
   opmlImportResponseSchema,
   searchQuerySchema,
   statsQuerySchema,
-  tenantEntitlementsSchema,
   updateFeedRequestSchema,
   updateFilterRuleRequestSchema,
   updatePrivacyConsentRequestSchema,
@@ -43,7 +43,7 @@ import {
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiEnv } from "../config/env";
-import { getTenantEntitlements } from "../plugins/entitlements";
+import { getAccountEntitlements } from "../plugins/entitlements";
 import { createAuthService } from "../services/auth-service";
 import { createBillingService } from "../services/billing-service";
 import { parseOpml } from "../services/opml-parser";
@@ -303,7 +303,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     const entitlementsFor = async (request: FastifyRequest) => {
       const { tenantId, dbClient } = tenantContextFor(request);
-      return getTenantEntitlements(dbClient, tenantId);
+      return getAccountEntitlements(dbClient, tenantId);
     };
 
     protectedRoutes.get("/v1/clusters", async (request) => {
@@ -869,7 +869,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.get("/v1/account/entitlements", async (request) => {
       const entitlements = await entitlementsFor(request);
-      return tenantEntitlementsSchema.parse(entitlements);
+      return accountEntitlementsSchema.parse(entitlements);
     });
 
     protectedRoutes.get("/v1/billing", async (request, reply) => {

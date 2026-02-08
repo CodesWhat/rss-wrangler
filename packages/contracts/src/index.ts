@@ -431,7 +431,7 @@ export const opmlImportResponseSchema = z.object({
 });
 export type OpmlImportResponse = z.infer<typeof opmlImportResponseSchema>;
 
-export const tenantEntitlementsSchema = z.object({
+export const accountEntitlementsSchema = z.object({
   planId: planIdSchema,
   subscriptionStatus: planSubscriptionStatusSchema,
   trialEndsAt: z.string().datetime().nullable(),
@@ -446,7 +446,7 @@ export const tenantEntitlementsSchema = z.object({
     feeds: z.number().int().min(0)
   })
 });
-export type TenantEntitlements = z.infer<typeof tenantEntitlementsSchema>;
+export type AccountEntitlements = z.infer<typeof accountEntitlementsSchema>;
 
 // ---------- Billing ----------
 

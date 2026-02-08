@@ -1,4 +1,4 @@
-import type { PlanId, PlanSubscriptionStatus, SearchMode, TenantEntitlements } from "@rss-wrangler/contracts";
+import type { AccountEntitlements, PlanId, PlanSubscriptionStatus, SearchMode } from "@rss-wrangler/contracts";
 
 type Queryable = {
   query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
@@ -46,7 +46,10 @@ function normalizePlanStatus(raw: string | null | undefined): PlanSubscriptionSt
   return "active";
 }
 
-export async function getTenantEntitlements(client: Queryable, tenantId: string): Promise<TenantEntitlements> {
+export async function getAccountEntitlements(
+  client: Queryable,
+  tenantId: string
+): Promise<AccountEntitlements> {
   const planResult = await client.query<{
     plan_id: string;
     status: string;

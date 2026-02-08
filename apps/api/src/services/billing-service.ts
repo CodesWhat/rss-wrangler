@@ -433,7 +433,7 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
       return {
         ok: false,
         error: "not_found",
-        message: "No active hosted subscription found for this workspace."
+        message: "No active hosted subscription found for this account."
       };
     }
 
