@@ -236,9 +236,29 @@ export const joinWorkspaceRequestSchema = z.object({
   tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
   email: z.string().trim().email().max(320),
   username: z.string().trim().min(1).max(64),
-  password: z.string().min(8)
+  password: z.string().min(8),
+  inviteCode: z.string().trim().min(12).max(256).optional()
 });
 export type JoinWorkspaceRequest = z.infer<typeof joinWorkspaceRequestSchema>;
+
+export const createWorkspaceInviteRequestSchema = z.object({
+  email: z.string().trim().email().max(320).optional(),
+  expiresInDays: z.number().int().min(1).max(30).default(7)
+});
+export type CreateWorkspaceInviteRequest = z.infer<typeof createWorkspaceInviteRequestSchema>;
+
+export const workspaceInviteSchema = z.object({
+  id: z.string().uuid(),
+  email: z.string().email().nullable(),
+  status: z.enum(["pending", "consumed", "revoked", "expired"]),
+  inviteCode: z.string().nullable(),
+  inviteUrl: z.string().url().nullable(),
+  createdAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+  consumedAt: z.string().datetime().nullable(),
+  revokedAt: z.string().datetime().nullable()
+});
+export type WorkspaceInvite = z.infer<typeof workspaceInviteSchema>;
 
 export const signupResponseSchema = z.object({
   verificationRequired: z.boolean().default(false),
@@ -469,6 +489,8 @@ export const apiRoutes = {
   accountDeletionStatus: "/v1/account/deletion",
   accountDeletionRequest: "/v1/account/deletion/request",
   accountDeletionCancel: "/v1/account/deletion/cancel",
+  accountInvites: "/v1/account/invites",
+  accountInviteRevoke: "/v1/account/invites/:id/revoke",
   accountDataExportStatus: "/v1/account/data-export",
   accountDataExportRequest: "/v1/account/data-export/request",
   accountDataExportDownload: "/v1/account/data-export/download",

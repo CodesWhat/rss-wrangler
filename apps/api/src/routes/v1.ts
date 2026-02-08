@@ -24,7 +24,8 @@ import {
   statsQuerySchema,
   updateFeedRequestSchema,
   updateFilterRuleRequestSchema,
-  updateSettingsRequestSchema
+  updateSettingsRequestSchema,
+  workspaceInviteSchema
 } from "@rss-wrangler/contracts";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";

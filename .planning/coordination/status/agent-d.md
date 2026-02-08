@@ -1,14 +1,14 @@
 # Agent D Status
 
 - Agent: `agent-d`
-- Current slice: `phase0/load-slo-calibration`
-- Status: `done`
-- Updated: `2026-02-08T19:25:52Z`
+- Current slice: `phase0/load-slo-trend-reporting`
+- Status: `in_progress`
+- Updated: `2026-02-08T19:27:53Z`
 
 ## Scope
 
-- Calibrate SLO thresholds from repeated hosted runs.
-- Publish tuned baseline notes and operator guidance.
+- Add repeatable SLO trend reporting from historical gate artifacts.
+- Publish weekly drift-report workflow and operator guidance.
 
 ## Progress Log
 
@@ -21,6 +21,7 @@
 - Updated load/SLO runbooks with calibration workflow and policy.
 - Verified calibration script with synthetic gate artifacts (3-run dry-run).
 - Ran gate suite for calibration slice (`lint`, `typecheck`, `test`, `coverage policy`, `debt scan`, `build`).
+- Marked `phase0/load-slo-calibration` as done and claimed next slice `phase0/load-slo-trend-reporting`.
 
 ## Handoffs
 
