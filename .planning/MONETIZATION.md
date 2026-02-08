@@ -148,7 +148,7 @@ user_id -> plan -> features -> limits
 ## Launch Plan
 
 1. Start with **Free + Pro** (single plan, easy to explain)
-2. Complete hosted foundation first: **multi-tenancy + hosted auth/onboarding + account management/compliance controls + entitlements enforcement**
+2. Complete hosted foundation first: **single-product multi-user auth/onboarding + account management/compliance controls + per-user entitlements enforcement**
 3. Run an internal **hosted dogfood pilot + synthetic load tests** to measure real cost/user/day and calibrate limits (feeds/items/day/retention/index size)
 4. Add **annual billing** early
 5. Add **usage-based add-ons** only when cost pressure appears
@@ -160,7 +160,8 @@ user_id -> plan -> features -> limits
 
 ### Current Phase 0 Snapshot (2026-02-08)
 
-- Hosted foundations are in-progress with shipped slices for onboarding wizard, tenant join, invite-token onboarding guard, password recovery/verification, account-export baseline, account-deletion automation, and load/SLO tooling.
+- Hosted foundations are in-progress with shipped slices for onboarding wizard, invite-token onboarding guard, password recovery/verification, account-export baseline, account-deletion automation, and load/SLO tooling.
+- Identity model alignment is now explicit: hosted and self-host auth UX should be workspace-free (single product, direct user accounts).
 - Entitlements are partial: feed/search/ingest gates are live and now sync with Lemon webhook plan changes; broader route coverage + usage UX remain.
 - Billing foundation is partial-live: checkout/webhook sync/pricing/portal handoff shipped. Consent baseline is now partial-live; hosted dogfood rollout remains open.
 - Deployment bootstrap is in place: Render blueprints exist for free smoke (`render.free.yaml`) and dogfood baseline (`render.yaml`), awaiting first live run.
@@ -170,14 +171,14 @@ user_id -> plan -> features -> limits
 - [ ] Entitlements service (user -> plan -> features -> limits) *(partial: baseline service and plan defaults exist)*
 - [ ] Free tier enforcement (feed count limit, refresh throttle, search restriction) *(partial: feed/import/search/ingest baseline gates exist)*
 - [ ] Limit dimensions model (feeds, items/day, retention, search index bytes) + per-plan defaults *(partial: feeds/items/day/search mode/min poll modeled)*
-- [ ] Usage metering pipeline (daily counters + rollups per user/tenant) *(partial: daily ingest + feed-count usage baseline exists)*
+- [ ] Usage metering pipeline (daily counters + rollups per user) *(partial: daily ingest + feed-count usage baseline exists)*
 - [ ] Quota enforcement middleware (soft warning + hard cap behavior) *(partial: hard caps in API/worker baseline, warning UX pending)*
-- [ ] Hosted auth via Better Auth (signup/login/password reset/email verify/MFA/orgs + initial tenant bootstrap)
+- [ ] Hosted auth via Better Auth (signup/login/password reset/email verify/MFA) with workspace-free UX
 - [x] Guided product onboarding wizard (first-run: OPML import / starter directory / add URL + optional topic picks + AI opt-in explanation) *(baseline shipped; deeper bootstrap still pending)*
 - [x] Hosted account settings: password change/reset flow (provided by Better Auth)
 - [ ] Hosted account deletion workflow (self-serve request, confirmation, grace window, hard purge SLA + worker job) *(partial: request/cancel + worker automation shipped; completion notifications pending)*
 - [ ] Hosted self-serve data download request (GDPR-style export request + delivery lifecycle) *(partial: request/status/download baseline shipped; workerization + retention pending)*
-- [x] Hosted load-testing harness + SLO budgets (multi-tenant API + worker scenarios, pass/fail thresholds) **(Phase 0 mandatory for hosted launch)**
+- [x] Hosted load-testing harness + SLO budgets (hosted API + worker scenarios, pass/fail thresholds) **(Phase 0 mandatory for hosted launch)**
 - [ ] Lemon Squeezy integration (web payments, Merchant of Record) **(Phase 0 mandatory for hosted launch)** *(partial: checkout + signed webhook sync + subscription mapping shipped)*
 - [ ] Plan selection UI (pricing page, upgrade flow) **(Phase 0 mandatory for hosted launch)** *(partial: pricing page + upgrade checkout redirects shipped)*
 - [ ] Plan management UI (change/cancel/reactivate + billing portal handoff) **(Phase 0 mandatory for hosted launch)** *(partial: billing overview + portal handoff shipped; explicit in-app cancel/reactivate controls pending)*
@@ -191,7 +192,7 @@ user_id -> plan -> features -> limits
 ### What we DON'T need yet
 
 - App Store / Play billing (PWA-first, no native apps planned)
-- Team billing (single-user for now)
+- Team billing (org billing not needed yet)
 - Lifetime tier (evaluate after launch)
 - Self-host licensing (open source = all features free when self-hosted)
 
@@ -370,10 +371,10 @@ Self-hosted mode: entitlements always return `true` for everything. No license c
 - Keep consent state auditable and versioned to support policy changes
 
 ### Hosted SaaS Cost Tracking Pilot
-- Recommended first step: run your own hosted deployment and use it as a dogfood tenant to gather real cost baselines
-- Track per-user/tenant metrics: feeds count, items ingested/day, retained items, search index bytes, and worker/runtime cost
+- Recommended first step: run your own hosted deployment and use it as a dogfood account to gather real cost baselines
+- Track per-user metrics: feeds count, items ingested/day, retained items, search index bytes, and worker/runtime cost
 - Use measured p50/p95 usage to set Free/Pro defaults instead of guessing
-- Add scripted synthetic load profiles (multi-tenant read/write + ingest pipeline) to validate p95 latency/error budgets before public launch
+- Add scripted synthetic load profiles (hosted read/write + ingest pipeline) to validate p95 latency/error budgets before public launch
 - Start with soft limits + warnings; move to hard limits once UX and thresholds are stable
 
 ### What We Store Server-Side
@@ -393,7 +394,7 @@ Self-hosted mode: entitlements always return `true` for everything. No license c
 | Decision | Choice | Date |
 |----------|--------|------|
 | Auth provider | Better Auth (MIT, npm library in Fastify process, $0 cost) | 2026-02-07 |
-| Multi-tenancy model | Row-level security (tenant_id on all tables, Postgres RLS policies) | 2026-02-07 |
+| Identity/isolation model (v1) | Single-product multi-user UX. No workspace field in auth screens. Keep `tenant_id` scaffolding internal during transition with default tenant scope. | 2026-02-08 |
 | OPML import gating | Free (import allowed, feed count cap enforced, clear upsell moment) | 2026-02-07 |
 | AI pricing model | Defer until dogfood pilot. Direction: $7/mo Pro, $14/mo Pro+AI | 2026-02-07 |
 | Deployment platform | Render (separate services: web, API, worker, Postgres) | 2026-02-07 |
@@ -452,19 +453,22 @@ All major pricing and limits questions resolved. Remaining:
 - Hosted users pay for convenience + managed infra + included AI compute
 - PWA is the primary mobile experience (bookmark to home screen)
 
-## Multi-Tenancy Notes
+## Identity & Isolation Notes
 
-Self-hosted = single-user (current architecture). Hosted service needs:
+Product model:
 
-- [ ] Multi-tenant user isolation via **row-level security** (tenant_id + RLS policies) — **LOCKED**
-- [ ] User registration + onboarding flow via **Better Auth** (signup/login/email verify/orgs) — **LOCKED**
+- Self-hosted = single instance, one bootstrap admin, many users.
+- Hosted = one Wrangler product, many direct user accounts (Free/Pro/Pro+AI per user).
+- Workspace slug is not a user-facing concept in v1 auth UX.
+
+Phase 0 mandatory scope for launch readiness:
+
+- [ ] Workspace-free auth UI/UX (login/signup/recovery/verification)
+- [ ] User registration + onboarding via **Better Auth** (signup/login/email verify/MFA) — **LOCKED**
 - [ ] Hosted account settings (password change/reset) via **Better Auth** — **LOCKED**
 - [ ] Hosted account deletion flow (self-serve request + purge lifecycle)
 - [ ] Hosted self-serve data download requests (GDPR-style)
-- [ ] Plan/entitlement enforcement middleware
-- [ ] Shared infrastructure (one worker pool serving all tenants)
-- [ ] Per-tenant resource limits (feeds, storage, AI tokens)
+- [ ] Plan/entitlement enforcement middleware (per-user)
+- [ ] Shared infrastructure (one worker pool serving all users)
 - [ ] Transactional email via **Resend** — **LOCKED**
 - [ ] All services on **Render** (web + API + worker + Postgres) — **LOCKED**
-
-Decision: treat this section as **Phase 0 mandatory scope** for hosted launch readiness.

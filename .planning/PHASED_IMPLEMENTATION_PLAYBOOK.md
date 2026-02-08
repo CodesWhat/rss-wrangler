@@ -5,6 +5,32 @@
 
 ---
 
+## Priority Tracker: Identity Model Alignment (Locked 2026-02-08)
+
+Locked architecture for Phase 0:
+
+- Self-hosted: single instance, one bootstrap admin, many users with isolated feeds/settings.
+- Hosted SaaS: one Wrangler product, many direct user accounts (Free/Pro/Pro+AI per user).
+- Workspace slug is not a user-facing auth concept in v1 (no workspace field in login/signup/recovery).
+- Existing tenant scaffolding may remain internal during transition, but UX and contracts must be workspace-free.
+
+Execution tracker (must complete before net-new Phase 0 feature slices):
+
+- [x] `phase-lead-agent` + `senior-review-agent`: lock architecture decision in planning docs.
+- [ ] `frontend-dev-agent` + `accessibility-qa-agent`: remove workspace inputs from auth screens and fix auth header alignment issues.
+- [ ] `backend-dev-agent` + `contracts-agent`: default tenant scope internally (`default`) and remove/soft-deprecate workspace-required auth payloads.
+- [ ] `backend-dev-agent` + `sre-cost-agent`: shift entitlements/billing wording + contract surfaces to user-account subscriptions (not workspace-facing plans).
+- [ ] `qa-test-agent` + `playwright-qa-agent` + `lint-conformity-agent` + `tech-debt-agent`: run full gates, close regressions, and update pass card evidence.
+
+Done criteria for this tracker:
+
+1. No auth page asks for workspace/tenant input.
+2. Signup/login/reset/verification flows succeed in Docker self-host smoke and hosted smoke.
+3. Planning docs consistently describe single-product multi-user hosted model.
+4. Existing tenant columns are treated as internal implementation detail only.
+
+---
+
 ## Why This Exists
 
 `COMPETITIVE_ROADMAP.md` defines what to build.  
@@ -46,7 +72,7 @@ This is the default provider stack until hosted usage requires paid upgrades.
 Implementation notes:
 - Keep queueing on `pg-boss` backed by Postgres to avoid introducing an additional queue vendor in Phase 0.
 - All services deploy to Render as separate services: Web (Next.js static/SSR), API (Fastify + Better Auth), Worker (pg-boss jobs), Postgres.
-- Better Auth runs inside the Fastify process — no separate auth service. Provides: signup, login, password reset, email verification, MFA (TOTP), organizations (multi-tenant), session management. Uses existing Postgres for auth tables.
+- Better Auth runs inside the Fastify process — no separate auth service. Provides: signup, login, password reset, email verification, MFA (TOTP), and session management. Uses existing Postgres for auth tables.
 - Resend handles transactional email (password reset, email verification). Free tier covers early launch.
 - Self-hosted mode: keep existing env-based bootstrap (`AUTH_USERNAME`/`AUTH_PASSWORD`) as simple alternative. Better Auth is the hosted auth path.
 - Self-hosted distribution: Docker Compose (API + Worker + Postgres + Web in one compose file).
@@ -62,8 +88,8 @@ Implementation notes:
 
 ## Current Status Snapshot (2026-02-08)
 
-- Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, tenant join flow, account data-export baseline, invite-token controls, member approval policy/roles, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline, consent/CMP baseline, self-host Docker/OrbStack smoke hardening, and hosted post-deploy smoke verification tooling.
-- Phase 0 in progress: entitlements hardening beyond baseline limits and hosted dogfood rollout readiness.
+- Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, account data-export baseline, invite-token controls, member approval policy/roles, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline, consent/CMP baseline, self-host Docker/OrbStack smoke hardening, and hosted post-deploy smoke verification tooling.
+- Phase 0 in progress: identity model alignment (workspace-free auth UX/contracts), entitlements hardening beyond baseline limits, and hosted dogfood rollout readiness.
 - Still open for hosted launch: billing polish (cancel/reactivate UX + annual variants + webhook alerting), CMP adapter + script-gating verification, and first hosted dogfood telemetry run.
 - Deployment readiness update: Render blueprint profiles now exist (`render.free.yaml` smoke, `render.yaml` dogfood baseline); next action is first live deploy + telemetry validation.
 
@@ -161,7 +187,7 @@ This codebase is AI-managed. Lint policy is tuned for signal over noise:
 
 | Phase | Required Agents | Optional Agents | Exit Gate |
 |---|---|---|---|
-| Phase 0: Hosted SaaS Pilot | `phase-lead-agent`, `backend-dev-agent`, `frontend-dev-agent`, `data-migration-agent`, `sre-cost-agent`, `security-risk-agent`, `qa-test-agent`, `playwright-qa-agent`, `accessibility-qa-agent`, `lint-conformity-agent`, `tech-debt-agent`, `senior-review-agent` | `ai-pipeline-agent` | Multi-tenancy + hosted auth/onboarding + account management/compliance controls + entitlements/limits + load-test/SLO baseline + Lemon Squeezy billing foundation + consent/CMP baseline for non-essential scripts + telemetry dashboards verified |
+| Phase 0: Hosted SaaS Pilot | `phase-lead-agent`, `backend-dev-agent`, `frontend-dev-agent`, `data-migration-agent`, `sre-cost-agent`, `security-risk-agent`, `qa-test-agent`, `playwright-qa-agent`, `accessibility-qa-agent`, `lint-conformity-agent`, `tech-debt-agent`, `senior-review-agent` | `ai-pipeline-agent` | Single-product multi-user auth/onboarding + account management/compliance controls + entitlements/limits + load-test/SLO baseline + Lemon Squeezy billing foundation + consent/CMP baseline for non-essential scripts + telemetry dashboards verified |
 | Phase 1: Core Reading Experience | `phase-lead-agent`, `frontend-dev-agent`, `backend-dev-agent`, `qa-test-agent`, `playwright-qa-agent`, `accessibility-qa-agent`, `lint-conformity-agent`, `tech-debt-agent`, `senior-review-agent` | `data-migration-agent`, `security-risk-agent` | Reader UX baseline complete, guided onboarding is live, and key gaps from audit top-10 reduced |
 | Phase 2: Ranking & Personalization | `phase-lead-agent`, `backend-dev-agent`, `frontend-dev-agent`, `qa-test-agent`, `playwright-qa-agent`, `lint-conformity-agent`, `tech-debt-agent`, `senior-review-agent` | `data-migration-agent`, `ai-pipeline-agent` | Ranking uses intended signals with explainability and regression coverage |
 | Phase 3: AI Power Features | `phase-lead-agent`, `ai-pipeline-agent`, `backend-dev-agent`, `frontend-dev-agent`, `qa-test-agent`, `playwright-qa-agent`, `lint-conformity-agent`, `tech-debt-agent`, `senior-review-agent` | `sre-cost-agent`, `security-risk-agent` | Provider abstraction + AI gating + budget controls validated |
@@ -197,7 +223,7 @@ This codebase is AI-managed. Lint policy is tuned for signal over noise:
 3. Refactors/chore moves are separate from behavior changes.
 4. Tests for a behavior change are in the same commit as that behavior change.
 5. Formatting-only changes are separate, and should not be mixed into feature commits.
-6. Commit message must identify the slice and intent using `phaseX/slice: intent`; optional emoji prefix is allowed (for example: `phase0/tenant-core: scope read_state by tenant` or `✨ phase0/tenant-core: scope read_state by tenant`).
+6. Commit message must identify the slice and intent using `phaseX/slice: intent`; optional emoji prefix is allowed (for example: `phase0/auth-model: remove workspace input from login` or `✨ phase0/auth-model: remove workspace input from login`).
 
 ---
 
