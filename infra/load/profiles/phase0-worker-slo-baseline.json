@@ -1,0 +1,32 @@
+{
+  "name": "phase0-worker-slo-baseline",
+  "windowMinutes": 60,
+  "queues": [
+    "poll-feeds",
+    "process-feed",
+    "generate-digest"
+  ],
+  "globalSlo": {
+    "queueLagP95Ms": 120000,
+    "maxQueuedJobs": 2500,
+    "successRateMin": 0.98,
+    "minTerminalJobs": 50
+  },
+  "queueSlo": {
+    "poll-feeds": {
+      "queueLagP95Ms": 60000,
+      "maxQueuedJobs": 25,
+      "successRateMin": 0.99
+    },
+    "process-feed": {
+      "queueLagP95Ms": 120000,
+      "maxQueuedJobs": 2400,
+      "successRateMin": 0.97
+    },
+    "generate-digest": {
+      "queueLagP95Ms": 300000,
+      "maxQueuedJobs": 10,
+      "successRateMin": 0.95
+    }
+  }
+}

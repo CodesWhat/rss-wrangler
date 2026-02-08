@@ -1,0 +1,9 @@
+{
+  "users": [
+    {
+      "tenantSlug": "default",
+      "username": "admin",
+      "password": "replace-with-real-password"
+    }
+  ]
+}

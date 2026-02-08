@@ -1,0 +1,125 @@
+{
+  "name": "phase0-hosted-api-baseline",
+  "durationSeconds": 180,
+  "warmupSeconds": 20,
+  "virtualUsers": 12,
+  "thinkTimeMs": {
+    "min": 20,
+    "max": 180
+  },
+  "globalSlo": {
+    "minRequests": 1200,
+    "p95Ms": 700,
+    "errorRateMax": 0.015
+  },
+  "scenarios": [
+    {
+      "op": "clusters_unread",
+      "weight": 26,
+      "slo": {
+        "minRequests": 250,
+        "p95Ms": 550,
+        "errorRateMax": 0.01
+      }
+    },
+    {
+      "op": "clusters_latest",
+      "weight": 14,
+      "slo": {
+        "minRequests": 150,
+        "p95Ms": 550,
+        "errorRateMax": 0.01
+      }
+    },
+    {
+      "op": "settings_get",
+      "weight": 8,
+      "slo": {
+        "minRequests": 80,
+        "p95Ms": 350,
+        "errorRateMax": 0.01
+      }
+    },
+    {
+      "op": "feeds_list",
+      "weight": 8,
+      "slo": {
+        "minRequests": 80,
+        "p95Ms": 400,
+        "errorRateMax": 0.01
+      }
+    },
+    {
+      "op": "folders_list",
+      "weight": 6,
+      "slo": {
+        "minRequests": 60,
+        "p95Ms": 350,
+        "errorRateMax": 0.01
+      }
+    },
+    {
+      "op": "digests_list",
+      "weight": 6,
+      "slo": {
+        "minRequests": 60,
+        "p95Ms": 450,
+        "errorRateMax": 0.01
+      }
+    },
+    {
+      "op": "stats_get",
+      "weight": 6,
+      "slo": {
+        "minRequests": 60,
+        "p95Ms": 500,
+        "errorRateMax": 0.01
+      }
+    },
+    {
+      "op": "events_post",
+      "weight": 8,
+      "slo": {
+        "minRequests": 80,
+        "p95Ms": 650,
+        "errorRateMax": 0.02
+      }
+    },
+    {
+      "op": "settings_patch",
+      "weight": 6,
+      "slo": {
+        "minRequests": 60,
+        "p95Ms": 650,
+        "errorRateMax": 0.02
+      }
+    },
+    {
+      "op": "cluster_mark_read",
+      "weight": 6,
+      "slo": {
+        "minRequests": 60,
+        "p95Ms": 700,
+        "errorRateMax": 0.02
+      }
+    },
+    {
+      "op": "cluster_save",
+      "weight": 4,
+      "slo": {
+        "minRequests": 40,
+        "p95Ms": 700,
+        "errorRateMax": 0.02
+      }
+    },
+    {
+      "op": "feed_add",
+      "weight": 6,
+      "slo": {
+        "minRequests": 40,
+        "p95Ms": 800,
+        "errorRateMax": 0.03
+      }
+    }
+  ]
+}
