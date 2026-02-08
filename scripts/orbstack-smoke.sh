@@ -136,3 +136,20 @@ done
 log "stack smoke check passed"
 log "services:"
 docker compose "${COMPOSE_ARGS[@]}" ps
+
+WEB_CONTAINER_NAME="$(docker compose "${COMPOSE_ARGS[@]}" ps -q web || true)"
+API_CONTAINER_NAME="$(docker compose "${COMPOSE_ARGS[@]}" ps -q api || true)"
+
+if [ -n "$WEB_CONTAINER_NAME" ]; then
+  WEB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$WEB_CONTAINER_NAME" 2>/dev/null || true)"
+  if [ -n "$WEB_IP" ]; then
+    log "web direct URL: http://$WEB_IP:3000"
+  fi
+fi
+
+if [ -n "$API_CONTAINER_NAME" ]; then
+  API_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$API_CONTAINER_NAME" 2>/dev/null || true)"
+  if [ -n "$API_IP" ]; then
+    log "api direct URL: http://$API_IP:4000"
+  fi
+fi

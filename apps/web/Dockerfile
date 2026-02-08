@@ -1,6 +1,11 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
+ARG NEXT_PUBLIC_API_BASE_URL
+ARG NEXT_PUBLIC_DEV_BEARER_TOKEN
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NEXT_PUBLIC_DEV_BEARER_TOKEN=$NEXT_PUBLIC_DEV_BEARER_TOKEN
+
 COPY package.json tsconfig.base.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/web/package.json apps/web/package.json
