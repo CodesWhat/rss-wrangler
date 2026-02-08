@@ -29,6 +29,7 @@ import {
   type ForgotPasswordRequest,
   type FilterRule,
   type Folder,
+  type JoinWorkspaceRequest,
   type ListClustersQuery,
   type LoginRequest,
   type ReadingStats,
@@ -330,6 +331,32 @@ export async function signup(req: SignupRequest): Promise<SignupResult> {
       throw new Error(message || "Account already exists");
     }
     throw new Error("Signup failed");
+  }
+
+  if (res.status === 202) {
+    return { status: "verification_required" };
+  }
+
+  const tokens = authTokensSchema.parse(await res.json());
+  storeTokens(tokens);
+  return { status: "authenticated", tokens };
+}
+
+export async function joinWorkspace(req: JoinWorkspaceRequest): Promise<SignupResult> {
+  const res = await fetch(`${API_BASE_URL}/v1/auth/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error("Workspace not found");
+    }
+    if (res.status === 409) {
+      const message = await res.text();
+      throw new Error(message || "Account already exists");
+    }
+    throw new Error("Join failed");
   }
 
   if (res.status === 202) {

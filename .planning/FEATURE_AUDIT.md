@@ -193,7 +193,7 @@ Audited: 2026-02-07
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Multi-tenant data model (`tenant_id` + isolation) | ⚠️ | `tenant_id` added across core auth + content tables (feed/item/cluster/cluster_member/read_state/filter/event/digest/topic/feed_topic/annotation/push), tenant-scoped API store queries and worker pipeline writes/reads, DB-level RLS policies enabled/forced, and request/job-level tenant DB context propagation (`app.tenant_id`) added for API protected routes + worker pipeline/digest paths. Remaining gaps: hosted org/team model, tenant-admin tooling, and broader hosted observability around context propagation failures. |
-| Hosted auth + onboarding flow | ⚠️ | Tenant-aware auth expanded with hosted signup endpoint (`/v1/auth/signup`), tenant slug + name bootstrap, tenant-scoped login (`tenantSlug`), email verification endpoints (`/v1/auth/verify-email`, resend flow), basic signup page, and first-run onboarding wizard on Home for empty-feed workspaces (add URL/OPML/discover, optional interests starter feeds, AI opt-in preference). Wizard completion now persists server-side via settings (`onboardingCompletedAt`). Remaining gaps: invite/join flows and richer workspace bootstrap on completion. |
+| Hosted auth + onboarding flow | ⚠️ | Tenant-aware auth includes workspace-owner signup (`/v1/auth/signup`), tenant join path (`/v1/auth/join` + join page), tenant-scoped login (`tenantSlug`), email verification endpoints (`/v1/auth/verify-email`, resend flow), and first-run onboarding wizard (URL/OPML/discover, starter interests, AI opt-in). Wizard completion now persists server-side via settings (`onboardingCompletedAt`). Remaining gaps: invite-token/member approval controls and richer workspace bootstrap on completion. |
 | Hosted account settings: password change/reset | ✅ | Self-serve password change shipped (`/v1/account/password` + Settings UI account section). Password reset flow shipped (forgot/reset endpoints + web forms + email token lifecycle). |
 | Hosted account deletion workflow | ⚠️ | Baseline self-serve request/cancel flow shipped (`/v1/account/deletion*` + settings danger-zone UI). Grace window automation, audit notifications, and hard-purge job still missing. |
 | Hosted self-serve data download request (GDPR-style) | ⚠️ | Baseline shipped: account data export request/status/download endpoints (`/v1/account/data-export*`), tenant-scoped export-request persistence, and protected frontend export page. Remaining gaps: move processing to durable worker queue, add completion notifications, and enforce retention/purge for generated bundles. |
@@ -236,7 +236,7 @@ Audited: 2026-02-07
 8. **Pipeline has no resilience** - no circuit breaker, dead-letter, or explicit retries
 9. **+N outlets and folder labels not shown on cards**
 10. **Missing card actions** - mute keyword, prefer/mute source
-11. **Hosted onboarding still incomplete** - invite/join flows and richer bootstrap logic needed before hosted public launch
+11. **Hosted onboarding still incomplete** - invite-token/member approval controls and richer bootstrap logic needed before hosted public launch
 12. **Hosted billing flow not implemented** - Lemon Squeezy + upgrade/plan management required before hosted launch
 13. **Feed discovery + directory seeding missing** - need one-time DB seed from feed-directory.json + discovery engine for URL → candidates
 14. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail

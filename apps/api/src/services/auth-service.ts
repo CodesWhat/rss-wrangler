@@ -5,6 +5,7 @@ import type {
   AccountDataExportStatus,
   AccountDeletionStatus,
   ForgotPasswordRequest,
+  JoinWorkspaceRequest,
   RequestAccountDeletion,
   ResendVerificationRequest,
   ResetPasswordRequest,
@@ -419,6 +420,79 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         // Best effort reset.
       }
       client.release();
+    }
+  }
+
+  async function joinWorkspace(
+    payload: JoinWorkspaceRequest
+  ): Promise<TokenSet | "tenant_not_found" | "username_taken" | "email_taken" | "verification_required"> {
+    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug);
+    if (!tenantId) {
+      return "tenant_not_found";
+    }
+
+    const username = payload.username.trim();
+    const email = payload.email.trim().toLowerCase();
+
+    try {
+      const existingUser = await withTenantClient(tenantId, async (client) => {
+        return client.query(
+          `SELECT id
+           FROM user_account
+           WHERE tenant_id = $1
+             AND username = $2
+           LIMIT 1`,
+          [tenantId, username]
+        );
+      });
+      if (existingUser.rows.length > 0) {
+        return "username_taken";
+      }
+
+      const existingEmail = await withTenantClient(tenantId, async (client) => {
+        return client.query(
+          `SELECT id
+           FROM user_account
+           WHERE tenant_id = $1
+             AND lower(email) = $2
+           LIMIT 1`,
+          [tenantId, email]
+        );
+      });
+      if (existingEmail.rows.length > 0) {
+        return "email_taken";
+      }
+
+      const insert = await withTenantClient(tenantId, async (client) => {
+        return client.query<{ id: string }>(
+          `INSERT INTO user_account (tenant_id, username, email, password_hash)
+           VALUES ($1, $2, $3, crypt($4, gen_salt('bf')))
+           RETURNING id`,
+          [tenantId, username, email, payload.password]
+        );
+      });
+
+      const userId = insert.rows[0]?.id;
+      if (!userId) {
+        throw new Error("user creation failed");
+      }
+
+      await sendVerificationEmail(tenantId, userId, email, username);
+
+      if (env.REQUIRE_EMAIL_VERIFICATION) {
+        return "verification_required";
+      }
+
+      return issueTokens(userId, username, tenantId);
+    } catch (err) {
+      const pgErr = err as { code?: string; constraint?: string };
+      if (pgErr.code === "23505" && pgErr.constraint === "user_account_tenant_username_uniq") {
+        return "username_taken";
+      }
+      if (pgErr.code === "23505" && pgErr.constraint === "user_account_tenant_email_uniq") {
+        return "email_taken";
+      }
+      throw err;
     }
   }
 
@@ -1353,6 +1427,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   return {
     login,
     signup,
+    joinWorkspace,
     resendEmailVerification,
     verifyEmail,
     requestPasswordReset,

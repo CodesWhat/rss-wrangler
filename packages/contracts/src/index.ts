@@ -232,6 +232,14 @@ export const signupRequestSchema = z.object({
 });
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 
+export const joinWorkspaceRequestSchema = z.object({
+  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  email: z.string().trim().email().max(320),
+  username: z.string().trim().min(1).max(64),
+  password: z.string().min(8)
+});
+export type JoinWorkspaceRequest = z.infer<typeof joinWorkspaceRequestSchema>;
+
 export const signupResponseSchema = z.object({
   verificationRequired: z.boolean().default(false),
   expiresInSeconds: z.number().int().positive().nullable().optional()
@@ -450,6 +458,7 @@ export const apiRoutes = {
   settings: "/v1/settings",
   authLogin: "/v1/auth/login",
   authSignup: "/v1/auth/signup",
+  authJoin: "/v1/auth/join",
   authVerifyEmail: "/v1/auth/verify-email",
   authResendVerification: "/v1/auth/resend-verification",
   authForgotPassword: "/v1/auth/forgot-password",

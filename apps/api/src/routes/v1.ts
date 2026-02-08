@@ -7,6 +7,7 @@ import {
   createFilterRuleRequestSchema,
   eventsBatchRequestSchema,
   forgotPasswordRequestSchema,
+  joinWorkspaceRequestSchema,
   listClustersQuerySchema,
   loginRequestSchema,
   resendVerificationRequestSchema,
@@ -101,6 +102,26 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     if (result === "tenant_slug_taken") {
       return reply.conflict("tenant slug already taken");
+    }
+    if (result === "username_taken") {
+      return reply.conflict("username already exists");
+    }
+    if (result === "email_taken") {
+      return reply.conflict("email already exists");
+    }
+    if (result === "verification_required") {
+      return reply.code(202).send({ verificationRequired: true, expiresInSeconds: null });
+    }
+
+    return result;
+  });
+
+  app.post("/v1/auth/join", async (request, reply) => {
+    const payload = joinWorkspaceRequestSchema.parse(request.body);
+    const result = await auth.joinWorkspace(payload);
+
+    if (result === "tenant_not_found") {
+      return reply.notFound("workspace not found");
     }
     if (result === "username_taken") {
       return reply.conflict("username already exists");

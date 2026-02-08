@@ -98,6 +98,9 @@ export default function SignupPage() {
           <a href="/login" className="muted" style={{ textAlign: "center", display: "block" }}>
             Back to sign in
           </a>
+          <a href="/join" className="muted" style={{ textAlign: "center", display: "block" }}>
+            Join an existing workspace
+          </a>
         </form>
       </div>
     </section>

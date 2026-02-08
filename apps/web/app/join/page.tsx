@@ -1,68 +1,65 @@
 "use client";
 
-import { useAuth } from "@/components/auth-provider";
+import { joinWorkspace } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 
-export default function LoginPage() {
-  const { authenticated, loading, loginUser } = useAuth();
+export default function JoinWorkspacePage() {
   const router = useRouter();
+  const [tenantSlug, setTenantSlug] = useState("");
+  const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [tenantSlug, setTenantSlug] = useState("default");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    setNotice(params.get("notice") ?? "");
     const tenant = params.get("tenant");
     if (tenant) {
       setTenantSlug(tenant);
     }
   }, []);
 
-  useEffect(() => {
-    if (!loading && authenticated) {
-      router.replace("/");
-    }
-  }, [loading, authenticated, router]);
-
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setSubmitting(true);
     try {
-      await loginUser({ username, password, tenantSlug });
+      const result = await joinWorkspace({ tenantSlug, email, username, password });
+      if (result.status === "verification_required") {
+        const notice = "Check your email to verify your account before signing in.";
+        router.replace(
+          `/login?tenant=${encodeURIComponent(tenantSlug)}&notice=${encodeURIComponent(notice)}`
+        );
+        return;
+      }
       router.replace("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Join failed");
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (loading) return null;
-  if (authenticated) return null;
-
   return (
     <section className="login-container">
       <div className="login-card">
         <div className="brand-mark" />
-        <h1 className="brand-name">RSS_WRANGLER</h1>
-        <p className="muted">Sign in to continue</p>
+        <h1 className="brand-name">Join Workspace</h1>
+        <p className="muted">Create your user in an existing workspace</p>
         <form onSubmit={handleSubmit} className="login-form">
-          <label htmlFor="tenantSlug">Workspace</label>
+          <label htmlFor="tenantSlug">Workspace slug</label>
           <input
             id="tenantSlug"
             type="text"
-            autoComplete="organization"
             required
             value={tenantSlug}
-            onChange={(e) => setTenantSlug(e.target.value)}
+            onChange={(e) => setTenantSlug(e.target.value.toLowerCase())}
             className="input"
+            placeholder="acme-news"
           />
+
           <label htmlFor="username">Username</label>
           <input
             id="username"
@@ -73,44 +70,38 @@ export default function LoginPage() {
             onChange={(e) => setUsername(e.target.value)}
             className="input"
           />
+
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="input"
+          />
+
           <label htmlFor="password">Password</label>
           <input
             id="password"
             type="password"
-            autoComplete="current-password"
+            autoComplete="new-password"
             required
+            minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className="input"
           />
-          {notice ? <p className="muted">{notice}</p> : null}
+
           {error ? <p className="error-text">{error}</p> : null}
+
           <button type="submit" className="button button-primary" disabled={submitting}>
-            {submitting ? "Signing in..." : "Sign in"}
+            {submitting ? "Joining..." : "Join workspace"}
           </button>
-          <a
-            href={`/forgot-password?tenant=${encodeURIComponent(tenantSlug)}`}
-            className="muted"
-            style={{ textAlign: "center", display: "block" }}
-          >
-            Forgot password?
-          </a>
-          <a
-            href={`/resend-verification?tenant=${encodeURIComponent(tenantSlug)}`}
-            className="muted"
-            style={{ textAlign: "center", display: "block" }}
-          >
-            Resend verification email
-          </a>
-          <a href="/signup" className="muted" style={{ textAlign: "center", display: "block" }}>
-            Create a workspace account
-          </a>
-          <a
-            href={`/join?tenant=${encodeURIComponent(tenantSlug)}`}
-            className="muted"
-            style={{ textAlign: "center", display: "block" }}
-          >
-            Join an existing workspace
+
+          <a href="/login" className="muted" style={{ textAlign: "center", display: "block" }}>
+            Back to sign in
           </a>
         </form>
       </div>
