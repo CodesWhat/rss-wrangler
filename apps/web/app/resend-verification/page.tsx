@@ -1,0 +1,78 @@
+"use client";
+
+import { resendVerification } from "@/lib/api";
+import { useEffect, useState, type FormEvent } from "react";
+
+export default function ResendVerificationPage() {
+  const [tenantSlug, setTenantSlug] = useState("default");
+  const [email, setEmail] = useState("");
+  const [error, setError] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setTenantSlug(params.get("tenant") ?? "default");
+  }, []);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    setSubmitting(true);
+    const result = await resendVerification({ tenantSlug, email });
+    setSubmitting(false);
+
+    if (!result.ok) {
+      setError(result.error);
+      return;
+    }
+
+    setSubmitted(true);
+  }
+
+  return (
+    <section className="login-container">
+      <div className="login-card">
+        <div className="brand-mark" />
+        <h1 className="brand-name">Resend verification</h1>
+        <p className="muted">Request a new email verification link.</p>
+
+        <form onSubmit={handleSubmit} className="login-form">
+          <label htmlFor="tenantSlug">Workspace</label>
+          <input
+            id="tenantSlug"
+            type="text"
+            required
+            value={tenantSlug}
+            onChange={(event) => setTenantSlug(event.target.value)}
+            className="input"
+          />
+
+          <label htmlFor="email">Email</label>
+          <input
+            id="email"
+            type="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            className="input"
+          />
+
+          {submitted ? (
+            <p className="muted">
+              If an account exists and is not yet verified, a new verification link has been sent.
+            </p>
+          ) : null}
+          {error ? <p className="error-text">{error}</p> : null}
+
+          <button type="submit" className="button button-primary" disabled={submitting}>
+            {submitting ? "Sending..." : "Send verification link"}
+          </button>
+          <a href="/login" className="muted" style={{ textAlign: "center", display: "block" }}>
+            Back to sign in
+          </a>
+        </form>
+      </div>
+    </section>
+  );
+}

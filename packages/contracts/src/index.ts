@@ -206,7 +206,7 @@ export const eventSchema = z.object({
   idempotencyKey: z.string().min(6),
   ts: z.string().datetime(),
   type: z.string().min(1),
-  payload: z.record(z.unknown()).default({})
+  payload: z.record(z.string(), z.unknown()).default({})
 });
 export type Event = z.infer<typeof eventSchema>;
 
@@ -217,9 +217,69 @@ export type EventsBatchRequest = z.infer<typeof eventsBatchRequestSchema>;
 
 export const loginRequestSchema = z.object({
   username: z.string().min(1),
-  password: z.string().min(1)
+  password: z.string().min(1),
+  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/).default("default")
 });
 export type LoginRequest = z.infer<typeof loginRequestSchema>;
+
+export const signupRequestSchema = z.object({
+  tenantName: z.string().trim().min(2).max(100),
+  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  email: z.string().trim().email().max(320),
+  username: z.string().trim().min(1).max(64),
+  password: z.string().min(8)
+});
+export type SignupRequest = z.infer<typeof signupRequestSchema>;
+
+export const signupResponseSchema = z.object({
+  verificationRequired: z.boolean().default(false),
+  expiresInSeconds: z.number().int().positive().nullable().optional()
+});
+export type SignupResponse = z.infer<typeof signupResponseSchema>;
+
+export const changePasswordRequestSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8).max(256)
+});
+export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
+
+export const forgotPasswordRequestSchema = z.object({
+  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  email: z.string().trim().email().max(320)
+});
+export type ForgotPasswordRequest = z.infer<typeof forgotPasswordRequestSchema>;
+
+export const resetPasswordRequestSchema = z.object({
+  token: z.string().min(12).max(512),
+  newPassword: z.string().min(8).max(256)
+});
+export type ResetPasswordRequest = z.infer<typeof resetPasswordRequestSchema>;
+
+export const resendVerificationRequestSchema = z.object({
+  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  email: z.string().trim().email().max(320)
+});
+export type ResendVerificationRequest = z.infer<typeof resendVerificationRequestSchema>;
+
+export const verifyEmailRequestSchema = z.object({
+  token: z.string().min(12).max(512)
+});
+export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
+
+export const requestAccountDeletionSchema = z.object({
+  password: z.string().min(1),
+  confirmText: z.literal("DELETE")
+});
+export type RequestAccountDeletion = z.infer<typeof requestAccountDeletionSchema>;
+
+export const accountDeletionStatusSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["pending", "cancelled", "completed"]),
+  requestedAt: z.string().datetime(),
+  cancelledAt: z.string().datetime().nullable(),
+  completedAt: z.string().datetime().nullable()
+});
+export type AccountDeletionStatus = z.infer<typeof accountDeletionStatusSchema>;
 
 export const authTokensSchema = z.object({
   accessToken: z.string(),
@@ -376,8 +436,17 @@ export const apiRoutes = {
   events: "/v1/events",
   settings: "/v1/settings",
   authLogin: "/v1/auth/login",
+  authSignup: "/v1/auth/signup",
+  authVerifyEmail: "/v1/auth/verify-email",
+  authResendVerification: "/v1/auth/resend-verification",
+  authForgotPassword: "/v1/auth/forgot-password",
+  authResetPassword: "/v1/auth/reset-password",
   authLogout: "/v1/auth/logout",
   authRefresh: "/v1/auth/refresh",
+  accountChangePassword: "/v1/account/password",
+  accountDeletionStatus: "/v1/account/deletion",
+  accountDeletionRequest: "/v1/account/deletion/request",
+  accountDeletionCancel: "/v1/account/deletion/cancel",
   opmlImport: "/v1/opml/import",
   opmlExport: "/v1/opml/export",
   search: "/v1/search",

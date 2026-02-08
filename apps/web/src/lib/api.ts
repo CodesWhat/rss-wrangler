@@ -1,8 +1,8 @@
 import {
+  accountDeletionStatusSchema,
   annotationSchema,
   authTokensSchema,
   clusterCardSchema,
-  clusterDetailSchema,
   digestSchema,
   feedSchema,
   feedTopicSchema,
@@ -13,29 +13,37 @@ import {
   searchQuerySchema,
   settingsSchema,
   topicSchema,
+  type AccountDeletionStatus,
   type Annotation,
   type AuthTokens,
+  type ChangePasswordRequest,
   type ClusterCard,
-  type ClusterDetail,
   type ClusterFeedbackRequest,
   type CreateAnnotationRequest,
   type CreateFilterRuleRequest,
   type Digest,
   type Feed,
   type FeedTopic,
+  type ForgotPasswordRequest,
+  type FilterRule,
   type Folder,
   type ListClustersQuery,
   type LoginRequest,
   type ReadingStats,
-  type SearchQuery,
+  type ResendVerificationRequest,
+  type ResetPasswordRequest,
+  type RequestAccountDeletion,
   type Settings,
+  type SignupRequest,
   type StatsPeriod,
   type Topic,
   type UpdateFeedRequest,
-  type UpdateFilterRuleRequest,
   type UpdateSettingsRequest,
-  type FilterRule,
 } from "@rss-wrangler/contracts";
+
+export type SignupResult =
+  | { status: "authenticated"; tokens: AuthTokens }
+  | { status: "verification_required" };
 
 const API_BASE_URL =
   typeof window !== "undefined"
@@ -69,7 +77,7 @@ function getTokenExpiresAt(): number {
   return tokenExpiresAt;
 }
 
-export function storeTokens(tokens: AuthTokens): void {
+function storeTokens(tokens: AuthTokens): void {
   accessToken = tokens.accessToken;
   refreshTokenValue = tokens.refreshToken;
   tokenExpiresAt = Date.now() + tokens.expiresInSeconds * 1000;
@@ -79,7 +87,7 @@ export function storeTokens(tokens: AuthTokens): void {
   }
 }
 
-export function clearTokens(): void {
+function clearTokens(): void {
   accessToken = null;
   refreshTokenValue = null;
   tokenExpiresAt = 0;
@@ -203,7 +211,9 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
   const headers = await authedHeaders(hasBody);
   if (init?.headers) {
     const extra = new Headers(init.headers);
-    extra.forEach((v, k) => headers.set(k, v));
+    extra.forEach((v, k) => {
+      headers.set(k, v);
+    });
   }
 
   try {
@@ -220,7 +230,9 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
         const retryHeaders = await authedHeaders(hasBody);
         if (init?.headers) {
           const extra = new Headers(init.headers);
-          extra.forEach((v, k) => retryHeaders.set(k, v));
+          extra.forEach((v, k) => {
+            retryHeaders.set(k, v);
+          });
         }
         const retry = await fetch(`${API_BASE_URL}${path}`, {
           ...init,
@@ -294,11 +306,214 @@ export async function login(req: LoginRequest): Promise<AuthTokens> {
     body: JSON.stringify(req),
   });
   if (!res.ok) {
+    if (res.status === 403) {
+      throw new Error("Email not verified. Check your inbox or request another verification email.");
+    }
     throw new Error(res.status === 401 ? "Invalid username or password" : "Login failed");
   }
   const tokens = authTokensSchema.parse(await res.json());
   storeTokens(tokens);
   return tokens;
+}
+
+export async function signup(req: SignupRequest): Promise<SignupResult> {
+  const res = await fetch(`${API_BASE_URL}/v1/auth/signup`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    if (res.status === 409) {
+      const message = await res.text();
+      throw new Error(message || "Account already exists");
+    }
+    throw new Error("Signup failed");
+  }
+
+  if (res.status === 202) {
+    return { status: "verification_required" };
+  }
+
+  const tokens = authTokensSchema.parse(await res.json());
+  storeTokens(tokens);
+  return { status: "authenticated", tokens };
+}
+
+export async function resendVerification(
+  req: ResendVerificationRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/v1/auth/resend-verification`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Request failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Request failed" };
+  }
+}
+
+export async function requestPasswordReset(
+  req: ForgotPasswordRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/v1/auth/forgot-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Request failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Request failed" };
+  }
+}
+
+export async function resetPassword(
+  req: ResetPasswordRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/v1/auth/reset-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Reset failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Reset failed" };
+  }
+}
+
+export async function verifyEmail(
+  token: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const url = new URL(`${API_BASE_URL}/v1/auth/verify-email`);
+    url.searchParams.set("token", token);
+    const res = await fetch(url.toString(), { method: "GET" });
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Verification failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Verification failed" };
+  }
+}
+
+export async function changePassword(
+  req: ChangePasswordRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const attempt = async (): Promise<Response> => {
+    const headers = await authedHeaders(true);
+    return fetch(`${API_BASE_URL}/v1/account/password`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(req),
+    });
+  };
+
+  try {
+    let response = await attempt();
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        response = await attempt();
+      }
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return { ok: false, error: message || "Password update failed" };
+    }
+
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Password update failed" };
+  }
+}
+
+export async function getAccountDeletionStatus(): Promise<AccountDeletionStatus | null> {
+  const payload = await requestJson<unknown>("/v1/account/deletion");
+  if (!payload) return null;
+  return accountDeletionStatusSchema.parse(payload);
+}
+
+export async function requestAccountDeletion(
+  req: RequestAccountDeletion
+): Promise<{ ok: true; status: AccountDeletionStatus } | { ok: false; error: string }> {
+  const attempt = async (): Promise<Response> => {
+    const headers = await authedHeaders(true);
+    return fetch(`${API_BASE_URL}/v1/account/deletion/request`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(req),
+    });
+  };
+
+  try {
+    let response = await attempt();
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        response = await attempt();
+      }
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return { ok: false, error: message || "Request failed" };
+    }
+
+    const status = accountDeletionStatusSchema.parse(await response.json());
+    return { ok: true, status };
+  } catch {
+    return { ok: false, error: "Request failed" };
+  }
+}
+
+export async function cancelAccountDeletion(): Promise<
+  { ok: true; status: AccountDeletionStatus } | { ok: false; error: string }
+> {
+  const attempt = async (): Promise<Response> => {
+    const headers = await authedHeaders(true);
+    return fetch(`${API_BASE_URL}/v1/account/deletion/cancel`, {
+      method: "POST",
+      headers,
+    });
+  };
+
+  try {
+    let response = await attempt();
+    if (response.status === 401) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        response = await attempt();
+      }
+    }
+
+    if (!response.ok) {
+      const message = await response.text();
+      return { ok: false, error: message || "Cancel failed" };
+    }
+
+    const status = accountDeletionStatusSchema.parse(await response.json());
+    return { ok: true, status };
+  } catch {
+    return { ok: false, error: "Cancel failed" };
+  }
 }
 
 export async function logout(): Promise<void> {
@@ -347,12 +562,6 @@ export async function listClusters(
       : null;
 
   return { data, nextCursor };
-}
-
-export async function getClusterDetail(id: string): Promise<ClusterDetail | null> {
-  const payload = await requestJson<unknown>(`/v1/clusters/${encodeURIComponent(id)}`);
-  if (!payload) return null;
-  return clusterDetailSchema.parse(payload);
 }
 
 export async function markClusterRead(id: string): Promise<boolean> {
@@ -449,18 +658,6 @@ export async function listFilters(): Promise<FilterRule[]> {
 export async function createFilter(body: CreateFilterRuleRequest): Promise<FilterRule | null> {
   const payload = await requestJson<unknown>("/v1/filters", {
     method: "POST",
-    body: JSON.stringify(body),
-  });
-  if (!payload) return null;
-  return filterRuleSchema.parse(payload);
-}
-
-export async function updateFilter(
-  id: string,
-  body: UpdateFilterRuleRequest
-): Promise<FilterRule | null> {
-  const payload = await requestJson<unknown>(`/v1/filters/${encodeURIComponent(id)}`, {
-    method: "PATCH",
     body: JSON.stringify(body),
   });
   if (!payload) return null;
@@ -571,30 +768,6 @@ export async function createAnnotation(
   return annotationSchema.parse(payload);
 }
 
-export async function listAnnotations(clusterId: string): Promise<Annotation[]> {
-  const payload = await requestJson<unknown>(
-    `/v1/clusters/${encodeURIComponent(clusterId)}/annotations`
-  );
-  if (!payload || !Array.isArray(payload)) return [];
-  return payload.map((entry) => annotationSchema.parse(entry));
-}
-
-export async function deleteAnnotation(id: string): Promise<boolean> {
-  const res = await requestJson<unknown>(
-    `/v1/annotations/${encodeURIComponent(id)}`,
-    { method: "DELETE" }
-  );
-  return res !== null;
-}
-
-// ---------- Feed Discovery ----------
-
-export async function getFeedSuggestions(): Promise<string[]> {
-  const payload = await requestJson<unknown>("/v1/feeds/suggestions");
-  if (!payload || !Array.isArray((payload as { categories?: unknown }).categories)) return [];
-  return (payload as { categories: string[] }).categories;
-}
-
 // ---------- Push Notifications ----------
 
 export async function getVapidKey(): Promise<string | null> {
@@ -642,22 +815,6 @@ export async function listTopics(): Promise<Topic[]> {
   const payload = await requestJson<unknown>("/v1/topics");
   if (!payload || !Array.isArray(payload)) return [];
   return payload.map((entry) => topicSchema.parse(entry));
-}
-
-export async function renameTopic(topicId: string, name: string): Promise<Topic | null> {
-  const payload = await requestJson<unknown>(`/v1/topics/${encodeURIComponent(topicId)}`, {
-    method: "PATCH",
-    body: JSON.stringify({ name }),
-  });
-  if (!payload) return null;
-  return topicSchema.parse(payload);
-}
-
-export async function deleteTopic(topicId: string): Promise<boolean> {
-  const res = await requestJson<unknown>(`/v1/topics/${encodeURIComponent(topicId)}`, {
-    method: "DELETE",
-  });
-  return res !== null;
 }
 
 // ---------- Feed Topic Classifications ----------

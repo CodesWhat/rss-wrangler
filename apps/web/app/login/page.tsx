@@ -9,8 +9,15 @@ export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [tenantSlug, setTenantSlug] = useState("default");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setNotice(params.get("notice") ?? "");
+  }, []);
 
   useEffect(() => {
     if (!loading && authenticated) {
@@ -23,7 +30,7 @@ export default function LoginPage() {
     setError("");
     setSubmitting(true);
     try {
-      await loginUser({ username, password });
+      await loginUser({ username, password, tenantSlug });
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -42,6 +49,16 @@ export default function LoginPage() {
         <h1 className="brand-name">RSS_WRANGLER</h1>
         <p className="muted">Sign in to continue</p>
         <form onSubmit={handleSubmit} className="login-form">
+          <label htmlFor="tenantSlug">Workspace</label>
+          <input
+            id="tenantSlug"
+            type="text"
+            autoComplete="organization"
+            required
+            value={tenantSlug}
+            onChange={(e) => setTenantSlug(e.target.value)}
+            className="input"
+          />
           <label htmlFor="username">Username</label>
           <input
             id="username"
@@ -62,10 +79,28 @@ export default function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             className="input"
           />
+          {notice ? <p className="muted">{notice}</p> : null}
           {error ? <p className="error-text">{error}</p> : null}
           <button type="submit" className="button button-primary" disabled={submitting}>
             {submitting ? "Signing in..." : "Sign in"}
           </button>
+          <a
+            href={`/forgot-password?tenant=${encodeURIComponent(tenantSlug)}`}
+            className="muted"
+            style={{ textAlign: "center", display: "block" }}
+          >
+            Forgot password?
+          </a>
+          <a
+            href={`/resend-verification?tenant=${encodeURIComponent(tenantSlug)}`}
+            className="muted"
+            style={{ textAlign: "center", display: "block" }}
+          >
+            Resend verification email
+          </a>
+          <a href="/signup" className="muted" style={{ textAlign: "center", display: "block" }}>
+            Create a workspace account
+          </a>
         </form>
       </div>
     </section>

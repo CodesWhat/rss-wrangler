@@ -9,8 +9,17 @@ const envSchema = z.object({
   AUTH_JWT_SECRET: z.string().min(32),
   AUTH_USERNAME: z.string().min(1),
   AUTH_PASSWORD: z.string().min(8),
+  APP_BASE_URL: z.string().url().default("http://localhost:3000"),
   ACCESS_TOKEN_TTL: z.string().default("15m"),
   REFRESH_TOKEN_TTL: z.string().default("30d"),
+  PASSWORD_RESET_TOKEN_TTL: z.string().default("1h"),
+  EMAIL_VERIFICATION_TOKEN_TTL: z.string().default("24h"),
+  REQUIRE_EMAIL_VERIFICATION: z
+    .enum(["true", "false"])
+    .default("false")
+    .transform((value) => value === "true"),
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM: z.string().min(3).optional(),
   VAPID_PUBLIC_KEY: z.string().optional(),
   VAPID_PRIVATE_KEY: z.string().optional()
 }).refine(
