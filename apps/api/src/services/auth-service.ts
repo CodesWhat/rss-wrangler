@@ -7,11 +7,14 @@ import type {
   CreateWorkspaceInviteRequest,
   ForgotPasswordRequest,
   JoinWorkspaceRequest,
+  MembershipPolicy,
   RequestAccountDeletion,
   ResendVerificationRequest,
   ResetPasswordRequest,
   SignupRequest,
-  WorkspaceInvite
+  UserRole,
+  WorkspaceInvite,
+  WorkspaceMember
 } from "@rss-wrangler/contracts";
 import type { ApiEnv } from "../config/env";
 import { createEmailService } from "./email-service";
@@ -251,7 +254,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     username: string,
     password: string,
     tenantSlug = "default"
-  ): Promise<TokenSet | "email_not_verified" | null> {
+  ): Promise<TokenSet | "email_not_verified" | "pending_approval" | "suspended" | null> {
     const tenantId = await resolveTenantIdBySlug(tenantSlug);
     if (!tenantId) {
       return null;
@@ -259,8 +262,8 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
     // First try DB-backed user lookup
     const rows = await withTenantClient(tenantId, async (client) => {
-      const result = await client.query(
-        `SELECT id, tenant_id, username, email, email_verified_at, password_hash
+      const result = await client.query<UserAccountRow & { status: string }>(
+        `SELECT id, tenant_id, username, email, email_verified_at, password_hash, status
          FROM user_account
          WHERE username = $1
            AND tenant_id = $2`,
@@ -269,7 +272,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return result.rows;
     });
     if (rows.length > 0) {
-      const user = rows[0] as UserAccountRow;
+      const user = rows[0] as UserAccountRow & { status: string };
       // Verify password using pgcrypto's crypt function
       const verifyResult = await withTenantClient(tenantId, async (client) => {
         return client.query(
@@ -283,6 +286,12 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       const isValid = (verifyResult.rows[0] as { valid: boolean } | undefined)?.valid === true;
       if (!isValid) {
         return null;
+      }
+      if (user.status === "pending_approval") {
+        return "pending_approval";
+      }
+      if (user.status === "suspended") {
+        return "suspended";
       }
       if (env.REQUIRE_EMAIL_VERIFICATION && user.email && !user.email_verified_at) {
         return "email_not_verified";
@@ -378,8 +387,8 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       }
 
       const userInsert = await client.query<{ id: string }>(
-        `INSERT INTO user_account (tenant_id, username, email, password_hash)
-         VALUES ($1, $2, $3, crypt($4, gen_salt('bf')))
+        `INSERT INTO user_account (tenant_id, username, email, password_hash, role)
+         VALUES ($1, $2, $3, crypt($4, gen_salt('bf')), 'owner')
          RETURNING id`,
         [tenantId, username, email, payload.password]
       );
@@ -435,6 +444,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     | "username_taken"
     | "email_taken"
     | "verification_required"
+    | "pending_approval"
   > {
     const tenantId = await resolveTenantIdBySlug(payload.tenantSlug);
     if (!tenantId) {
@@ -529,12 +539,28 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         return "email_taken";
       }
 
+      // Look up membership policy for the tenant
+      const policyResult = await withTenantClient(tenantId, async (client) => {
+        return client.query<{ membership_policy: string }>(
+          `SELECT membership_policy
+           FROM tenant
+           WHERE id = $1
+           LIMIT 1`,
+          [tenantId]
+        );
+      });
+      const membershipPolicy = policyResult.rows[0]?.membership_policy ?? "invite_only";
+
+      // Determine initial user status based on policy
+      const needsApproval = membershipPolicy === "approval_required";
+      const userStatus = needsApproval ? "pending_approval" : "active";
+
       const insert = await withTenantClient(tenantId, async (client) => {
         return client.query<{ id: string }>(
-          `INSERT INTO user_account (tenant_id, username, email, password_hash)
-           VALUES ($1, $2, $3, crypt($4, gen_salt('bf')))
+          `INSERT INTO user_account (tenant_id, username, email, password_hash, role, status)
+           VALUES ($1, $2, $3, crypt($4, gen_salt('bf')), 'member', $5)
            RETURNING id`,
-          [tenantId, username, email, payload.password]
+          [tenantId, username, email, payload.password, userStatus]
         );
       });
 
@@ -561,6 +587,10 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
       await sendVerificationEmail(tenantId, userId, email, username);
 
+      if (needsApproval) {
+        return "pending_approval";
+      }
+
       if (env.REQUIRE_EMAIL_VERIFICATION) {
         return "verification_required";
       }
@@ -582,7 +612,12 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     userId: string,
     tenantId: string,
     payload: CreateWorkspaceInviteRequest
-  ): Promise<WorkspaceInvite> {
+  ): Promise<WorkspaceInvite | "not_owner"> {
+    const actorRole = await getUserRole(userId, tenantId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+
     const inviteCode = randomBytes(24).toString("hex");
     const inviteCodeHash = hashToken(inviteCode);
     const invitedEmail = payload.email?.trim().toLowerCase() ?? null;
@@ -681,7 +716,12 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     userId: string,
     tenantId: string,
     inviteId: string
-  ): Promise<WorkspaceInvite | null> {
+  ): Promise<WorkspaceInvite | "not_owner" | null> {
+    const actorRole = await getUserRole(userId, tenantId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+
     const result = await withTenantClient(tenantId, async (client) => {
       return client.query<{
         id: string;
@@ -1636,6 +1676,320 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     }
   }
 
+  async function getUserRole(userId: string, tenantId: string): Promise<string | null> {
+    const result = await withTenantClient(tenantId, async (client) => {
+      return client.query<{ role: string }>(
+        `SELECT role
+         FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2
+         LIMIT 1`,
+        [userId, tenantId]
+      );
+    });
+    return result.rows[0]?.role ?? null;
+  }
+
+  async function getUserRoleAndStatus(
+    userId: string,
+    tenantId: string
+  ): Promise<{ role: string; status: string } | null> {
+    const result = await withTenantClient(tenantId, async (client) => {
+      return client.query<{ role: string; status: string }>(
+        `SELECT role, status
+         FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2
+         LIMIT 1`,
+        [userId, tenantId]
+      );
+    });
+    return result.rows[0] ?? null;
+  }
+
+  async function listMembers(tenantId: string): Promise<WorkspaceMember[]> {
+    const result = await withTenantClient(tenantId, async (client) => {
+      return client.query<{
+        id: string;
+        username: string;
+        email: string | null;
+        role: string;
+        status: string;
+        created_at: Date;
+        last_login_at: Date | null;
+      }>(
+        `SELECT id, username, email, role, status, created_at, last_login_at
+         FROM user_account
+         WHERE tenant_id = $1
+         ORDER BY created_at ASC`,
+        [tenantId]
+      );
+    });
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      username: row.username,
+      email: row.email,
+      role: row.role as UserRole,
+      status: row.status as WorkspaceMember["status"],
+      joinedAt: row.created_at.toISOString(),
+      lastLoginAt: row.last_login_at?.toISOString() ?? null
+    }));
+  }
+
+  async function approveMember(
+    actorUserId: string,
+    tenantId: string,
+    targetUserId: string
+  ): Promise<WorkspaceMember | "not_owner" | "user_not_found" | "not_pending"> {
+    const actorRole = await getUserRole(actorUserId, tenantId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+
+    return withTenantClient(tenantId, async (client) => {
+      const targetResult = await client.query<{
+        id: string;
+        username: string;
+        email: string | null;
+        role: string;
+        status: string;
+        created_at: Date;
+        last_login_at: Date | null;
+      }>(
+        `SELECT id, username, email, role, status, created_at, last_login_at
+         FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2
+         LIMIT 1`,
+        [targetUserId, tenantId]
+      );
+
+      const target = targetResult.rows[0];
+      if (!target) {
+        return "user_not_found";
+      }
+      if (target.status !== "pending_approval") {
+        return "not_pending";
+      }
+
+      await client.query(
+        `UPDATE user_account
+         SET status = 'active'
+         WHERE id = $1
+           AND tenant_id = $2`,
+        [targetUserId, tenantId]
+      );
+
+      await client.query(
+        `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
+         VALUES ($1, $2, $3, 'approved', '{}'::jsonb)`,
+        [tenantId, targetUserId, actorUserId]
+      );
+
+      return {
+        id: target.id,
+        username: target.username,
+        email: target.email,
+        role: target.role as UserRole,
+        status: "active" as const,
+        joinedAt: target.created_at.toISOString(),
+        lastLoginAt: target.last_login_at?.toISOString() ?? null
+      };
+    });
+  }
+
+  async function rejectMember(
+    actorUserId: string,
+    tenantId: string,
+    targetUserId: string
+  ): Promise<"ok" | "not_owner" | "user_not_found" | "not_pending"> {
+    const actorRole = await getUserRole(actorUserId, tenantId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+
+    return withTenantClient(tenantId, async (client) => {
+      const targetResult = await client.query<{ id: string; status: string }>(
+        `SELECT id, status
+         FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2
+         LIMIT 1`,
+        [targetUserId, tenantId]
+      );
+
+      const target = targetResult.rows[0];
+      if (!target) {
+        return "user_not_found";
+      }
+      if (target.status !== "pending_approval") {
+        return "not_pending";
+      }
+
+      await client.query(
+        `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
+         VALUES ($1, $2, $3, 'rejected', '{}'::jsonb)`,
+        [tenantId, targetUserId, actorUserId]
+      );
+
+      await client.query(
+        `DELETE FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2`,
+        [targetUserId, tenantId]
+      );
+
+      return "ok";
+    });
+  }
+
+  async function removeMember(
+    actorUserId: string,
+    tenantId: string,
+    targetUserId: string
+  ): Promise<"ok" | "not_owner" | "user_not_found" | "cannot_modify_self"> {
+    const actorRole = await getUserRole(actorUserId, tenantId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+
+    if (actorUserId === targetUserId) {
+      return "cannot_modify_self";
+    }
+
+    return withTenantClient(tenantId, async (client) => {
+      const targetResult = await client.query<{ id: string }>(
+        `SELECT id
+         FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2
+         LIMIT 1`,
+        [targetUserId, tenantId]
+      );
+
+      if (targetResult.rows.length === 0) {
+        return "user_not_found";
+      }
+
+      await client.query(
+        `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
+         VALUES ($1, $2, $3, 'removed', '{}'::jsonb)`,
+        [tenantId, targetUserId, actorUserId]
+      );
+
+      await client.query(
+        `DELETE FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2`,
+        [targetUserId, tenantId]
+      );
+
+      return "ok";
+    });
+  }
+
+  async function updateMemberRole(
+    actorUserId: string,
+    tenantId: string,
+    targetUserId: string,
+    newRole: UserRole
+  ): Promise<WorkspaceMember | "not_owner" | "user_not_found" | "cannot_modify_self"> {
+    const actorRole = await getUserRole(actorUserId, tenantId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+
+    if (actorUserId === targetUserId) {
+      return "cannot_modify_self";
+    }
+
+    return withTenantClient(tenantId, async (client) => {
+      const targetResult = await client.query<{
+        id: string;
+        username: string;
+        email: string | null;
+        role: string;
+        status: string;
+        created_at: Date;
+        last_login_at: Date | null;
+      }>(
+        `SELECT id, username, email, role, status, created_at, last_login_at
+         FROM user_account
+         WHERE id = $1
+           AND tenant_id = $2
+         LIMIT 1`,
+        [targetUserId, tenantId]
+      );
+
+      const target = targetResult.rows[0];
+      if (!target) {
+        return "user_not_found";
+      }
+
+      await client.query(
+        `UPDATE user_account
+         SET role = $3
+         WHERE id = $1
+           AND tenant_id = $2`,
+        [targetUserId, tenantId, newRole]
+      );
+
+      await client.query(
+        `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
+         VALUES ($1, $2, $3, 'role_changed', $4::jsonb)`,
+        [tenantId, targetUserId, actorUserId, JSON.stringify({ oldRole: target.role, newRole })]
+      );
+
+      return {
+        id: target.id,
+        username: target.username,
+        email: target.email,
+        role: newRole,
+        status: target.status as WorkspaceMember["status"],
+        joinedAt: target.created_at.toISOString(),
+        lastLoginAt: target.last_login_at?.toISOString() ?? null
+      };
+    });
+  }
+
+  async function getMembershipPolicy(tenantId: string): Promise<MembershipPolicy | null> {
+    const result = await withTenantClient(tenantId, async (client) => {
+      return client.query<{ membership_policy: string }>(
+        `SELECT membership_policy
+         FROM tenant
+         WHERE id = $1
+         LIMIT 1`,
+        [tenantId]
+      );
+    });
+
+    const row = result.rows[0];
+    return row ? (row.membership_policy as MembershipPolicy) : null;
+  }
+
+  async function updateMembershipPolicy(
+    actorUserId: string,
+    tenantId: string,
+    policy: MembershipPolicy
+  ): Promise<MembershipPolicy | "not_owner"> {
+    const actorRole = await getUserRole(actorUserId, tenantId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+
+    await withTenantClient(tenantId, async (client) => {
+      await client.query(
+        `UPDATE tenant
+         SET membership_policy = $2
+         WHERE id = $1`,
+        [tenantId, policy]
+      );
+    });
+
+    return policy;
+  }
+
   return {
     login,
     signup,
@@ -1655,7 +2009,15 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     requestAccountDataExport,
     getAccountDataExportPayload,
     refresh,
-    logout
+    logout,
+    getUserRoleAndStatus,
+    listMembers,
+    approveMember,
+    rejectMember,
+    removeMember,
+    updateMemberRole,
+    getMembershipPolicy,
+    updateMembershipPolicy
   };
 }
 

@@ -13,6 +13,14 @@ import {
   listFilters,
   createFilter,
   deleteFilter,
+  listMembers,
+  approveMember,
+  rejectMember,
+  removeMember,
+  updateMemberRole,
+  getWorkspacePolicy,
+  updateWorkspacePolicy,
+  getCurrentUserId,
 } from "@/lib/api";
 import type {
   Settings,
@@ -22,7 +30,344 @@ import type {
   AccountDeletionStatus,
   FilterType,
   FilterMode,
+  WorkspaceMember,
+  MembershipPolicy,
+  UserRole,
 } from "@rss-wrangler/contracts";
+
+function relativeTime(iso: string | null): string {
+  if (!iso) return "Never";
+  const diff = Date.now() - new Date(iso).getTime();
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(months / 12);
+  return `${years}y ago`;
+}
+
+function MembersSection() {
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  const [policy, setPolicy] = useState<MembershipPolicy>("invite_only");
+  const [policyDraft, setPolicyDraft] = useState<MembershipPolicy>("invite_only");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [policySaving, setPolicySaving] = useState(false);
+  const [policySaved, setPolicySaved] = useState(false);
+  const [actionBusy, setActionBusy] = useState<Set<string>>(new Set());
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [memberList, workspacePolicy] = await Promise.all([
+          listMembers(),
+          getWorkspacePolicy(),
+        ]);
+        setMembers(memberList);
+        setPolicy(workspacePolicy);
+        setPolicyDraft(workspacePolicy);
+        setCurrentUserId(getCurrentUserId());
+      } catch {
+        setError("Failed to load members.");
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const currentMember = members.find((m) => m.id === currentUserId);
+  const isOwner = currentMember?.role === "owner";
+  const pendingMembers = members.filter((m) => m.status === "pending_approval");
+  const activeMembers = members.filter((m) => m.status !== "pending_approval");
+
+  function markBusy(id: string) {
+    setActionBusy((prev) => new Set(prev).add(id));
+  }
+
+  function clearBusy(id: string) {
+    setActionBusy((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  async function handleApprove(id: string) {
+    markBusy(id);
+    setMembers((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, status: "active" as const } : m))
+    );
+    const result = await approveMember(id);
+    if (!result.ok) {
+      setMembers((prev) =>
+        prev.map((m) =>
+          m.id === id ? { ...m, status: "pending_approval" as const } : m
+        )
+      );
+      setError(result.error);
+    }
+    clearBusy(id);
+  }
+
+  async function handleReject(id: string) {
+    markBusy(id);
+    const original = members.find((m) => m.id === id);
+    setMembers((prev) => prev.filter((m) => m.id !== id));
+    const result = await rejectMember(id);
+    if (!result.ok) {
+      if (original) {
+        setMembers((prev) => [...prev, original]);
+      }
+      setError(result.error);
+    }
+    clearBusy(id);
+  }
+
+  async function handleRemove(id: string) {
+    setConfirmRemove(null);
+    markBusy(id);
+    const original = members.find((m) => m.id === id);
+    setMembers((prev) => prev.filter((m) => m.id !== id));
+    const result = await removeMember(id);
+    if (!result.ok) {
+      if (original) {
+        setMembers((prev) => [...prev, original]);
+      }
+      setError(result.error);
+    }
+    clearBusy(id);
+  }
+
+  async function handleRoleChange(id: string, newRole: UserRole) {
+    markBusy(id);
+    const oldRole = members.find((m) => m.id === id)?.role;
+    setMembers((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, role: newRole } : m))
+    );
+    const result = await updateMemberRole(id, { role: newRole });
+    if (!result.ok) {
+      setMembers((prev) =>
+        prev.map((m) => (m.id === id ? { ...m, role: oldRole ?? "member" } : m))
+      );
+      setError(result.error);
+    }
+    clearBusy(id);
+  }
+
+  async function handleSavePolicy(e: FormEvent) {
+    e.preventDefault();
+    setPolicySaving(true);
+    setPolicySaved(false);
+    const result = await updateWorkspacePolicy(policyDraft);
+    if (result.ok) {
+      setPolicy(policyDraft);
+      setPolicySaved(true);
+      setTimeout(() => setPolicySaved(false), 2000);
+    } else {
+      setError(result.error);
+      setPolicyDraft(policy);
+    }
+    setPolicySaving(false);
+  }
+
+  if (loading) {
+    return (
+      <section className="section-card" id="members">
+        <h2>Members</h2>
+        <p className="muted">Loading members...</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="section-card" id="members">
+      <h2>
+        Members
+        {policySaved && (
+          <span className="key-status key-status-active saved-indicator-lg">SAVED</span>
+        )}
+      </h2>
+      <p className="muted">Manage workspace members, roles, and membership policy.</p>
+
+      {error && <p className="error-text">{error}</p>}
+
+      {/* Membership Policy (owner only) */}
+      {isOwner && (
+        <form onSubmit={handleSavePolicy} className="settings-form">
+          <label>
+            Membership Policy
+            <select
+              value={policyDraft}
+              onChange={(e) => setPolicyDraft(e.target.value as MembershipPolicy)}
+            >
+              <option value="invite_only">Invite Only — Users need an invite code to join</option>
+              <option value="open">Open — Anyone can join this workspace</option>
+              <option value="approval_required">Approval Required — New members need owner approval after joining</option>
+            </select>
+          </label>
+          <button
+            type="submit"
+            className="button button-primary"
+            disabled={policySaving || policyDraft === policy}
+          >
+            {policySaving ? "Saving..." : policyDraft === policy ? "Policy saved" : "Save policy"}
+          </button>
+        </form>
+      )}
+
+      {/* Pending Approvals */}
+      {pendingMembers.length > 0 && isOwner && (
+        <div className="members-pending-banner">
+          <strong>{pendingMembers.length} member{pendingMembers.length !== 1 ? "s" : ""} awaiting approval</strong>
+          <div className="members-pending-list">
+            {pendingMembers.map((m) => (
+              <div key={m.id} className="members-pending-item">
+                <div className="members-pending-info">
+                  <span className="members-username">{m.username}</span>
+                  <span className="muted">{m.email ?? ""}</span>
+                  <span className="muted">{relativeTime(m.joinedAt)}</span>
+                </div>
+                <div className="members-pending-actions">
+                  <button
+                    type="button"
+                    className="button button-small members-btn-approve"
+                    disabled={actionBusy.has(m.id)}
+                    onClick={() => handleApprove(m.id)}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-small button-danger"
+                    disabled={actionBusy.has(m.id)}
+                    onClick={() => handleReject(m.id)}
+                  >
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Active Members Table */}
+      {activeMembers.length === 0 ? (
+        <p className="muted" style={{ marginTop: "var(--sp-3)" }}>No members yet.</p>
+      ) : (
+        <table className="feed-table members-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Joined</th>
+              <th>Last Active</th>
+              {isOwner && <th></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {activeMembers.map((m) => {
+              const isSelf = m.id === currentUserId;
+              const isMemberOwner = m.role === "owner";
+              return (
+                <tr key={m.id}>
+                  <td>
+                    <span className="members-username">{m.username}</span>
+                    {isSelf && <span className="badge badge-ml-sm">You</span>}
+                  </td>
+                  <td>{m.email ?? "\u2014"}</td>
+                  <td>
+                    {isOwner && !isSelf && !isMemberOwner ? (
+                      <select
+                        className="members-role-select"
+                        value={m.role}
+                        disabled={actionBusy.has(m.id)}
+                        onChange={(e) => handleRoleChange(m.id, e.target.value as UserRole)}
+                      >
+                        <option value="member">Member</option>
+                        <option value="owner">Owner</option>
+                      </select>
+                    ) : (
+                      <span className={`badge ${m.role === "owner" ? "badge-approved" : ""}`}>
+                        {m.role === "owner" ? "Owner" : "Member"}
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <span
+                      className={`badge ${
+                        m.status === "active"
+                          ? "badge-approved"
+                          : m.status === "pending_approval"
+                            ? "badge-pending"
+                            : "badge-rejected"
+                      }`}
+                    >
+                      {m.status === "active"
+                        ? "Active"
+                        : m.status === "pending_approval"
+                          ? "Pending"
+                          : "Suspended"}
+                    </span>
+                  </td>
+                  <td className="muted">{relativeTime(m.joinedAt)}</td>
+                  <td className="muted">{relativeTime(m.lastLoginAt)}</td>
+                  {isOwner && (
+                    <td>
+                      {!isSelf && !isMemberOwner && (
+                        <>
+                          {confirmRemove === m.id ? (
+                            <div className="members-confirm-remove">
+                              <span className="muted">Remove {m.username}?</span>
+                              <button
+                                type="button"
+                                className="button button-small button-danger"
+                                disabled={actionBusy.has(m.id)}
+                                onClick={() => handleRemove(m.id)}
+                              >
+                                Yes
+                              </button>
+                              <button
+                                type="button"
+                                className="button button-small"
+                                onClick={() => setConfirmRemove(null)}
+                              >
+                                No
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              className="button button-small button-danger"
+                              disabled={actionBusy.has(m.id)}
+                              onClick={() => setConfirmRemove(m.id)}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
 
 function maskKey(key: string): string {
   if (!key) return "";
@@ -255,6 +600,7 @@ function SettingsContent() {
   const sections = [
     { id: "ai-provider", label: "AI Provider" },
     { id: "general", label: "General" },
+    { id: "members", label: "Members" },
     { id: "account", label: "Account" },
     { id: "account-deletion", label: "Danger Zone" },
     { id: "notifications", label: "Notifications" },
@@ -466,6 +812,9 @@ function SettingsContent() {
           </button>
         </form>
       </section>
+
+      {/* Members */}
+      <MembersSection />
 
       {/* Account */}
       <section className="section-card" id="account">

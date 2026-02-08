@@ -10,10 +10,12 @@ import {
   filterRuleSchema,
   folderSchema,
   listClustersQuerySchema,
+  membershipPolicySchema,
   readingStatsSchema,
   searchQuerySchema,
   settingsSchema,
   topicSchema,
+  workspaceMemberSchema,
   type AccountDeletionStatus,
   type AccountDataExportStatus,
   type Annotation,
@@ -33,6 +35,7 @@ import {
   type JoinWorkspaceRequest,
   type ListClustersQuery,
   type LoginRequest,
+  type MembershipPolicy,
   type ReadingStats,
   type ResendVerificationRequest,
   type ResetPasswordRequest,
@@ -42,8 +45,10 @@ import {
   type StatsPeriod,
   type Topic,
   type UpdateFeedRequest,
+  type UpdateMemberRequest,
   type UpdateSettingsRequest,
   type WorkspaceInvite,
+  type WorkspaceMember,
   workspaceInviteSchema,
 } from "@rss-wrangler/contracts";
 
@@ -196,6 +201,23 @@ export async function tryRestoreSession(): Promise<boolean> {
   const rt = getRefreshToken();
   if (!rt) return false;
   return refreshAccessToken();
+}
+
+// ---------- JWT helpers ----------
+
+/** Extract the current user ID from the in-memory access token (JWT sub claim). */
+export function getCurrentUserId(): string | null {
+  const token = getAccessToken();
+  if (!token) return null;
+  try {
+    const parts = token.split(".");
+    const encoded = parts[1];
+    if (!encoded) return null;
+    const payload = JSON.parse(atob(encoded.replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.sub === "string" ? payload.sub : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------- Core request helpers ----------
@@ -1085,4 +1107,120 @@ export async function getReadingStats(period: StatsPeriod = "7d"): Promise<Readi
     };
   }
   return readingStatsSchema.parse(payload);
+}
+
+// ---------- Workspace Members ----------
+
+export async function listMembers(): Promise<WorkspaceMember[]> {
+  const payload = await requestJson<unknown>("/v1/account/members");
+  if (!payload || !Array.isArray(payload)) return [];
+  return payload.map((entry) => workspaceMemberSchema.parse(entry));
+}
+
+export async function approveMember(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(
+      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}/approve`,
+      { method: "POST", headers, body: JSON.stringify({}) }
+    );
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Approve failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Approve failed" };
+  }
+}
+
+export async function rejectMember(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(
+      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}/reject`,
+      { method: "POST", headers, body: JSON.stringify({}) }
+    );
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Reject failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Reject failed" };
+  }
+}
+
+export async function removeMember(
+  id: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(
+      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}/remove`,
+      { method: "POST", headers, body: JSON.stringify({}) }
+    );
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Remove failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Remove failed" };
+  }
+}
+
+export async function updateMemberRole(
+  id: string,
+  body: UpdateMemberRequest
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(
+      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}`,
+      { method: "PATCH", headers, body: JSON.stringify(body) }
+    );
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Update failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Update failed" };
+  }
+}
+
+export async function getWorkspacePolicy(): Promise<MembershipPolicy> {
+  const payload = await requestJson<unknown>("/v1/workspace/policy");
+  if (!payload || typeof payload !== "object") return "invite_only";
+  const parsed = (payload as { policy?: unknown }).policy;
+  try {
+    return membershipPolicySchema.parse(parsed);
+  } catch {
+    return "invite_only";
+  }
+}
+
+export async function updateWorkspacePolicy(
+  policy: MembershipPolicy
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(`${API_BASE_URL}/v1/workspace/policy`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify({ policy }),
+    });
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Policy update failed" };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, error: "Policy update failed" };
+  }
 }

@@ -5,6 +5,7 @@ declare module "fastify" {
     authContext?: {
       userId: string;
       tenantId: string;
+      role?: string;
     };
     dbClient?: PoolClient;
   }

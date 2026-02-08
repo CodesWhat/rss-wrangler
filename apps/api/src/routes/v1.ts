@@ -26,8 +26,11 @@ import {
   tenantEntitlementsSchema,
   updateFeedRequestSchema,
   updateFilterRuleRequestSchema,
+  updateMemberRequestSchema,
+  updateMembershipPolicyRequestSchema,
   updateSettingsRequestSchema,
   workspaceInviteSchema,
+  workspaceMemberSchema,
   type ClusterCard,
   type SearchQuery
 } from "@rss-wrangler/contracts";
@@ -48,6 +51,7 @@ const filterIdParams = z.object({ id: z.string().uuid() });
 const annotationIdParams = z.object({ id: z.string().uuid() });
 const topicIdParams = z.object({ id: z.string().uuid() });
 const inviteIdParams = z.object({ id: z.string().uuid() });
+const memberIdParams = z.object({ id: z.string().uuid() });
 
 const authRefreshSchema = z.object({
   refreshToken: z.string().min(1)
@@ -97,6 +101,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     if (tokens === "email_not_verified") {
       return reply.forbidden("email not verified");
     }
+    if (tokens === "pending_approval") {
+      return reply.forbidden("account is pending approval");
+    }
+    if (tokens === "suspended") {
+      return reply.forbidden("account is suspended");
+    }
     if (!tokens) {
       return reply.unauthorized("invalid credentials");
     }
@@ -142,6 +152,9 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     }
     if (result === "email_taken") {
       return reply.conflict("email already exists");
+    }
+    if (result === "pending_approval") {
+      return reply.code(202).send({ pendingApproval: true });
     }
     if (result === "verification_required") {
       return reply.code(202).send({ verificationRequired: true, expiresInSeconds: null });
@@ -621,13 +634,16 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return invites.map((invite) => workspaceInviteSchema.parse(invite));
     });
 
-    protectedRoutes.post("/v1/account/invites", async (request) => {
+    protectedRoutes.post("/v1/account/invites", async (request, reply) => {
       const authContext = request.authContext;
       if (!authContext) {
         throw app.httpErrors.unauthorized("missing auth context");
       }
       const payload = createWorkspaceInviteRequestSchema.parse(request.body);
       const invite = await auth.createWorkspaceInvite(authContext.userId, authContext.tenantId, payload);
+      if (invite === "not_owner") {
+        return reply.forbidden("only workspace owner can perform this action");
+      }
       return workspaceInviteSchema.parse(invite);
     });
 
@@ -638,10 +654,134 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
       const { id } = inviteIdParams.parse(request.params);
       const invite = await auth.revokeWorkspaceInvite(authContext.userId, authContext.tenantId, id);
+      if (invite === "not_owner") {
+        return reply.forbidden("only workspace owner can perform this action");
+      }
       if (!invite) {
         return reply.notFound("pending invite not found");
       }
       return workspaceInviteSchema.parse(invite);
+    });
+
+    // ---------- Member management ----------
+
+    protectedRoutes.get("/v1/account/members", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      const members = await auth.listMembers(authContext.tenantId);
+      return members.map((m) => workspaceMemberSchema.parse(m));
+    });
+
+    protectedRoutes.patch("/v1/account/members/:id", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const { id } = memberIdParams.parse(request.params);
+      const body = updateMemberRequestSchema.parse(request.body);
+
+      if (body.role) {
+        const result = await auth.updateMemberRole(authContext.userId, authContext.tenantId, id, body.role);
+        if (result === "not_owner") {
+          return reply.forbidden("only workspace owner can perform this action");
+        }
+        if (result === "user_not_found") {
+          return reply.notFound("member not found");
+        }
+        if (result === "cannot_modify_self") {
+          return reply.badRequest("cannot modify your own role/status");
+        }
+        return workspaceMemberSchema.parse(result);
+      }
+
+      return reply.badRequest("no update fields provided");
+    });
+
+    protectedRoutes.post("/v1/account/members/:id/approve", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const { id } = memberIdParams.parse(request.params);
+      const result = await auth.approveMember(authContext.userId, authContext.tenantId, id);
+
+      if (result === "not_owner") {
+        return reply.forbidden("only workspace owner can perform this action");
+      }
+      if (result === "user_not_found") {
+        return reply.notFound("member not found");
+      }
+      if (result === "not_pending") {
+        return reply.badRequest("member is not pending approval");
+      }
+      return workspaceMemberSchema.parse(result);
+    });
+
+    protectedRoutes.post("/v1/account/members/:id/reject", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const { id } = memberIdParams.parse(request.params);
+      const result = await auth.rejectMember(authContext.userId, authContext.tenantId, id);
+
+      if (result === "not_owner") {
+        return reply.forbidden("only workspace owner can perform this action");
+      }
+      if (result === "user_not_found") {
+        return reply.notFound("member not found");
+      }
+      if (result === "not_pending") {
+        return reply.badRequest("member is not pending approval");
+      }
+      return { ok: true };
+    });
+
+    protectedRoutes.post("/v1/account/members/:id/remove", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const { id } = memberIdParams.parse(request.params);
+      const result = await auth.removeMember(authContext.userId, authContext.tenantId, id);
+
+      if (result === "not_owner") {
+        return reply.forbidden("only workspace owner can perform this action");
+      }
+      if (result === "user_not_found") {
+        return reply.notFound("member not found");
+      }
+      if (result === "cannot_modify_self") {
+        return reply.badRequest("cannot modify your own role/status");
+      }
+      return { ok: true };
+    });
+
+    // ---------- Workspace policy ----------
+
+    protectedRoutes.get("/v1/workspace/policy", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      const policy = await auth.getMembershipPolicy(authContext.tenantId);
+      return { policy: policy ?? "invite_only" };
+    });
+
+    protectedRoutes.put("/v1/workspace/policy", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      const body = updateMembershipPolicyRequestSchema.parse(request.body);
+      const result = await auth.updateMembershipPolicy(authContext.userId, authContext.tenantId, body.policy);
+
+      if (result === "not_owner") {
+        return reply.forbidden("only workspace owner can perform this action");
+      }
+      return { policy: result };
     });
 
     protectedRoutes.get("/v1/account/data-export", async (request) => {

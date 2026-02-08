@@ -331,6 +331,49 @@ export const accountDataExportStatusSchema = z.object({
 });
 export type AccountDataExportStatus = z.infer<typeof accountDataExportStatusSchema>;
 
+// ---------- Member approval / roles ----------
+
+export const userRoleSchema = z.enum(["owner", "member"]);
+export type UserRole = z.infer<typeof userRoleSchema>;
+
+export const memberStatusSchema = z.enum(["active", "pending_approval", "suspended"]);
+export type MemberStatus = z.infer<typeof memberStatusSchema>;
+
+export const membershipPolicySchema = z.enum(["open", "invite_only", "approval_required"]);
+export type MembershipPolicy = z.infer<typeof membershipPolicySchema>;
+
+export const workspaceMemberSchema = z.object({
+  id: z.string().uuid(),
+  username: z.string(),
+  email: z.string().email().nullable(),
+  role: userRoleSchema,
+  status: memberStatusSchema,
+  joinedAt: z.string().datetime(),
+  lastLoginAt: z.string().datetime().nullable()
+});
+export type WorkspaceMember = z.infer<typeof workspaceMemberSchema>;
+
+export const updateMemberRequestSchema = z.object({
+  role: userRoleSchema.optional(),
+  status: memberStatusSchema.optional()
+});
+export type UpdateMemberRequest = z.infer<typeof updateMemberRequestSchema>;
+
+export const memberEventSchema = z.object({
+  id: z.string().uuid(),
+  targetUserId: z.string().uuid(),
+  actorUserId: z.string().uuid(),
+  eventType: z.enum(["approved", "rejected", "suspended", "role_changed", "removed"]),
+  metadata: z.record(z.string(), z.unknown()).default({}),
+  createdAt: z.string().datetime()
+});
+export type MemberEvent = z.infer<typeof memberEventSchema>;
+
+export const updateMembershipPolicyRequestSchema = z.object({
+  policy: membershipPolicySchema
+});
+export type UpdateMembershipPolicyRequest = z.infer<typeof updateMembershipPolicyRequestSchema>;
+
 export const authTokensSchema = z.object({
   accessToken: z.string(),
   refreshToken: z.string(),
@@ -534,4 +577,10 @@ export const apiRoutes = {
   feedTopicResolve: "/v1/feeds/:id/topics/resolve",
   feedTopicApproveAll: "/v1/feeds/:id/topics/approve-all",
   pendingClassifications: "/v1/feeds/pending",
+  accountMembers: "/v1/account/members",
+  accountMemberUpdate: "/v1/account/members/:id",
+  accountMemberApprove: "/v1/account/members/:id/approve",
+  accountMemberReject: "/v1/account/members/:id/reject",
+  accountMemberRemove: "/v1/account/members/:id/remove",
+  workspacePolicy: "/v1/workspace/policy",
 } as const;

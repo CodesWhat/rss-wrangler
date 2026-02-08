@@ -276,7 +276,7 @@ Features that only power users want or that only one app has.
 | Phase 0 Feature | Current Status | Notes |
 |---|---|---|
 | Multi-tenant data model + isolation strategy | ⚠️ Partial | Tenant IDs + RLS + tenant DB context are in place; hosted org/admin workflows still pending |
-| Hosted auth + onboarding flow | ⚠️ Partial | Signup/login/join, recovery, onboarding wizard, and invite-token join guard are live; role-based member approval still pending |
+| Hosted auth + onboarding flow | ⚠️ Partial | Signup/login/join, recovery, onboarding wizard, invite-token controls, owner/member roles, membership policy, member approval workflow, and Settings Members UI are live; richer bootstrap remains |
 | Hosted account management + compliance controls | ⚠️ Partial | Password reset/change, account deletion lifecycle automation, and baseline account export are live; completion notifications + export hardening remain |
 | Entitlements + plan-limit middleware baseline | ⚠️ Partial | Plan defaults + API/worker feed/search/ingest gates landed; billing sync and broader coverage remain |
 | Hosted performance/load testing + SLO baseline | ✅ Implemented | Load harness, SLO policy, and calibration workflow are in repo |
@@ -284,7 +284,7 @@ Features that only power users want or that only one app has.
 | Consent + CMP baseline (hosted) | ❌ Missing | Not started |
 | Hosted SaaS offering (dogfood pilot) | ⚠️ Pending | Infra/provider decisions locked; hosted pilot execution still pending |
 
-**Immediate next slice:** Invite/member approval controls (owner/admin policy on invite create/revoke + role model baseline).
+**Immediate next slice:** Lemon Squeezy billing foundation (subscription lifecycle, webhook sync, pricing page, upgrade flow).
 
 ### Phase 0: Hosted SaaS Pilot & Cost Model
 
