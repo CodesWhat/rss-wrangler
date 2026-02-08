@@ -20,7 +20,7 @@ Execution tracker (must complete before net-new Phase 0 feature slices):
 - [x] `frontend-dev-agent` + `accessibility-qa-agent`: remove workspace inputs from auth screens and fix auth header alignment issues.
 - [x] `backend-dev-agent` + `contracts-agent`: default tenant scope internally (`default`) and remove/soft-deprecate workspace-required auth payloads.
 - [x] `backend-dev-agent` + `sre-cost-agent`: shift entitlements/billing wording + contract surfaces to user-account subscriptions (not workspace-facing plans).
-- [ ] `qa-test-agent` + `playwright-qa-agent` + `lint-conformity-agent` + `tech-debt-agent`: run full gates, close regressions, and update pass card evidence.
+- [x] `qa-test-agent` + `playwright-qa-agent` + `lint-conformity-agent` + `tech-debt-agent`: run full gates, close regressions, and update pass card evidence.
 
 Done criteria for this tracker:
 
@@ -88,8 +88,8 @@ Implementation notes:
 
 ## Current Status Snapshot (2026-02-08)
 
-- Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, account data-export baseline, invite-token controls, member approval policy/roles, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline, consent/CMP baseline, self-host Docker/OrbStack smoke hardening, and hosted post-deploy smoke verification tooling.
-- Phase 0 in progress: identity model alignment (workspace-free auth UX/contracts), entitlements hardening beyond baseline limits, and hosted dogfood rollout readiness.
+- Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, account data-export baseline, invite-token controls, member approval policy/roles, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline, consent/CMP baseline, self-host Docker/OrbStack smoke hardening, hosted post-deploy smoke verification tooling, and identity model alignment (workspace-free auth UX + account-facing entitlement/billing surface naming).
+- Phase 0 in progress: entitlements hardening beyond baseline limits and hosted dogfood rollout readiness.
 - Still open for hosted launch: billing polish (cancel/reactivate UX + annual variants + webhook alerting), CMP adapter + script-gating verification, and first hosted dogfood telemetry run.
 - Deployment readiness update: Render blueprint profiles now exist (`render.free.yaml` smoke, `render.yaml` dogfood baseline); next action is first live deploy + telemetry validation.
 
