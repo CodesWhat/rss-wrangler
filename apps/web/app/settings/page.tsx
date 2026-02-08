@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { ProtectedRoute } from "@/components/protected-route";
 import { NotificationToggle } from "@/components/notification-toggle";
 import {
+  getAccountEntitlements,
   createBillingCheckout,
   cancelAccountDeletion,
   changePassword,
@@ -31,6 +32,7 @@ import type {
   AiMode,
   AiProvider,
   AccountDeletionStatus,
+  AccountEntitlements,
   FilterType,
   FilterMode,
   BillingOverview,
@@ -387,8 +389,17 @@ function formatBillingStatus(status: BillingOverview["subscriptionStatus"]): str
   return "Active";
 }
 
+function formatLimit(value: number | null): string {
+  return value === null ? "Unlimited" : value.toLocaleString();
+}
+
+function formatSearchMode(mode: AccountEntitlements["searchMode"]): string {
+  return mode === "full_text" ? "Full text" : "Title + source";
+}
+
 function BillingSection() {
   const [overview, setOverview] = useState<BillingOverview | null>(null);
+  const [entitlements, setEntitlements] = useState<AccountEntitlements | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyPlan, setBusyPlan] = useState<HostedPlanId | null>(null);
@@ -403,12 +414,16 @@ function BillingSection() {
 
   useEffect(() => {
     async function load() {
-      const data = await getBillingOverview();
-      if (!data) {
+      const [billingData, entitlementsData] = await Promise.all([
+        getBillingOverview(),
+        getAccountEntitlements()
+      ]);
+      if (!billingData) {
         setError("Failed to load billing details.");
       } else {
-        setOverview(data);
+        setOverview(billingData);
       }
+      setEntitlements(entitlementsData);
       setLoading(false);
     }
 
@@ -468,6 +483,31 @@ function BillingSection() {
             <span className="badge">{formatBillingStatus(overview.subscriptionStatus)}</span>
             {overview.cancelAtPeriodEnd && <span className="badge badge-pending">Cancels at period end</span>}
           </div>
+
+          {entitlements && (
+            <div className="billing-usage-grid">
+              <article className="billing-usage-card">
+                <h3>Feeds</h3>
+                <p className="billing-usage-value">
+                  {entitlements.usage.feeds.toLocaleString()} / {formatLimit(entitlements.feedLimit)}
+                </p>
+              </article>
+              <article className="billing-usage-card">
+                <h3>Items Today</h3>
+                <p className="billing-usage-value">
+                  {entitlements.usage.itemsIngested.toLocaleString()} / {formatLimit(entitlements.itemsPerDayLimit)}
+                </p>
+              </article>
+              <article className="billing-usage-card">
+                <h3>Search</h3>
+                <p className="billing-usage-value">{formatSearchMode(entitlements.searchMode)}</p>
+              </article>
+              <article className="billing-usage-card">
+                <h3>Min Poll</h3>
+                <p className="billing-usage-value">{entitlements.minPollMinutes} min</p>
+              </article>
+            </div>
+          )}
 
           {overview.currentPeriodEndsAt && (
             <p className="muted">

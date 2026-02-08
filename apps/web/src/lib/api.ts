@@ -1,4 +1,5 @@
 import {
+  accountEntitlementsSchema,
   accountDataExportStatusSchema,
   accountDeletionStatusSchema,
   annotationSchema,
@@ -21,6 +22,7 @@ import {
   topicSchema,
   workspaceMemberSchema,
   type AccountDeletionStatus,
+  type AccountEntitlements,
   type AccountDataExportStatus,
   type Annotation,
   type AuthTokens,
@@ -1219,6 +1221,12 @@ export async function updateWorkspacePolicy(
 }
 
 // ---------- Billing ----------
+
+export async function getAccountEntitlements(): Promise<AccountEntitlements | null> {
+  const payload = await requestJson<unknown>("/v1/account/entitlements");
+  if (!payload) return null;
+  return accountEntitlementsSchema.parse(payload);
+}
 
 export async function getBillingOverview(): Promise<BillingOverview | null> {
   const payload = await requestJson<unknown>("/v1/billing");
