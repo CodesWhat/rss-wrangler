@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { preFilterSoftGate, postClusterFilter } from "../filter.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+const TENANT_ID = "tenant-1";
 
 function makePool(queryResults: Record<string, { rows: unknown[] }> = {}) {
   const defaultRules = { rows: [] };
@@ -33,7 +34,7 @@ function makeRules(rules: FilterRule[]) {
 describe("preFilterSoftGate", () => {
   it("returns pass for items when no rules exist", async () => {
     const pool = makePool();
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "Hello world", summary: null },
     ]);
 
@@ -51,7 +52,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "Another crypto scam exposed", summary: null },
     ]);
 
@@ -69,7 +70,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "Latest politics update", summary: null },
     ]);
 
@@ -87,7 +88,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "Security update for linux", summary: null },
     ]);
 
@@ -101,7 +102,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "Cryptocurrency market crash", summary: null },
     ]);
 
@@ -115,7 +116,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "Investment opportunity", summary: "This is actually a scam" },
     ]);
 
@@ -129,7 +130,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "crypto news today", summary: null },
     ]);
 
@@ -143,7 +144,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "Spam alert", summary: null },
       { itemId: "2", title: "Legitimate news", summary: null },
       { itemId: "3", title: "More spam content", summary: null },
@@ -162,7 +163,7 @@ describe("preFilterSoftGate", () => {
       ])
     );
 
-    const results = await preFilterSoftGate(pool, [
+    const results = await preFilterSoftGate(pool, TENANT_ID, [
       { itemId: "1", title: "This is spam", summary: null },
     ]);
 
@@ -177,13 +178,13 @@ describe("preFilterSoftGate", () => {
 describe("postClusterFilter", () => {
   it("does nothing when no cluster ids provided", async () => {
     const pool = makePool();
-    await postClusterFilter(pool, []);
+    await postClusterFilter(pool, TENANT_ID, []);
     expect(pool.query).not.toHaveBeenCalled();
   });
 
   it("does nothing when no filter rules exist", async () => {
     const pool = makePool();
-    await postClusterFilter(pool, ["c1"]);
+    await postClusterFilter(pool, TENANT_ID, ["c1"]);
     // Only the filter_rule query should be called
     expect(pool.query).toHaveBeenCalledTimes(1);
   });
@@ -217,14 +218,14 @@ describe("breakout logic via postClusterFilter", () => {
       { rep_title: "security news: critical vulnerability found", rep_summary: null, rep_feed_weight: "normal", size: 1 }
     );
 
-    await postClusterFilter(pool, ["c1"]);
+    await postClusterFilter(pool, TENANT_ID, ["c1"]);
 
     // Should insert a filter_event with breakout_shown
     const insertCalls = pool.query.mock.calls.filter(
       (c: any[]) => typeof c[0] === "string" && c[0].includes("filter_event")
     );
     expect(insertCalls).toHaveLength(1);
-    expect(insertCalls[0][1]).toEqual(["r1", "c1", "breakout_shown"]);
+    expect(insertCalls[0][1]).toEqual([TENANT_ID, "r1", "c1", "breakout_shown"]);
   });
 
   it("triggers breakout on high reputation source", async () => {
@@ -233,13 +234,13 @@ describe("breakout logic via postClusterFilter", () => {
       { rep_title: "topic discussed", rep_summary: null, rep_feed_weight: "prefer", size: 1 }
     );
 
-    await postClusterFilter(pool, ["c1"]);
+    await postClusterFilter(pool, TENANT_ID, ["c1"]);
 
     const insertCalls = pool.query.mock.calls.filter(
       (c: any[]) => typeof c[0] === "string" && c[0].includes("filter_event")
     );
     expect(insertCalls).toHaveLength(1);
-    expect(insertCalls[0][1]).toEqual(["r1", "c1", "breakout_shown"]);
+    expect(insertCalls[0][1]).toEqual([TENANT_ID, "r1", "c1", "breakout_shown"]);
   });
 
   it("triggers breakout on large cluster size (>= 4)", async () => {
@@ -248,13 +249,13 @@ describe("breakout logic via postClusterFilter", () => {
       { rep_title: "topic discussed", rep_summary: null, rep_feed_weight: "normal", size: 5 }
     );
 
-    await postClusterFilter(pool, ["c1"]);
+    await postClusterFilter(pool, TENANT_ID, ["c1"]);
 
     const insertCalls = pool.query.mock.calls.filter(
       (c: any[]) => typeof c[0] === "string" && c[0].includes("filter_event")
     );
     expect(insertCalls).toHaveLength(1);
-    expect(insertCalls[0][1]).toEqual(["r1", "c1", "breakout_shown"]);
+    expect(insertCalls[0][1]).toEqual([TENANT_ID, "r1", "c1", "breakout_shown"]);
   });
 
   it("does not trigger breakout when cluster size < 4 and no severity/reputation", async () => {
@@ -263,13 +264,13 @@ describe("breakout logic via postClusterFilter", () => {
       { rep_title: "topic discussed casually", rep_summary: null, rep_feed_weight: "normal", size: 2 }
     );
 
-    await postClusterFilter(pool, ["c1"]);
+    await postClusterFilter(pool, TENANT_ID, ["c1"]);
 
     const insertCalls = pool.query.mock.calls.filter(
       (c: any[]) => typeof c[0] === "string" && c[0].includes("filter_event")
     );
     expect(insertCalls).toHaveLength(1);
-    expect(insertCalls[0][1]).toEqual(["r1", "c1", "hidden"]);
+    expect(insertCalls[0][1]).toEqual([TENANT_ID, "r1", "c1", "hidden"]);
   });
 
   it("hides content when breakout is disabled even with severity keyword", async () => {
@@ -278,13 +279,13 @@ describe("breakout logic via postClusterFilter", () => {
       { rep_title: "security breach critical", rep_summary: null, rep_feed_weight: "normal", size: 1 }
     );
 
-    await postClusterFilter(pool, ["c1"]);
+    await postClusterFilter(pool, TENANT_ID, ["c1"]);
 
     const insertCalls = pool.query.mock.calls.filter(
       (c: any[]) => typeof c[0] === "string" && c[0].includes("filter_event")
     );
     expect(insertCalls).toHaveLength(1);
-    expect(insertCalls[0][1]).toEqual(["r1", "c1", "hidden"]);
+    expect(insertCalls[0][1]).toEqual([TENANT_ID, "r1", "c1", "hidden"]);
   });
 
   it("records hidden event for block mode (no breakout possible)", async () => {
@@ -293,12 +294,12 @@ describe("breakout logic via postClusterFilter", () => {
       { rep_title: "blocked topic: critical breach", rep_summary: null, rep_feed_weight: "prefer", size: 10 }
     );
 
-    await postClusterFilter(pool, ["c1"]);
+    await postClusterFilter(pool, TENANT_ID, ["c1"]);
 
     const insertCalls = pool.query.mock.calls.filter(
       (c: any[]) => typeof c[0] === "string" && c[0].includes("filter_event")
     );
     expect(insertCalls).toHaveLength(1);
-    expect(insertCalls[0][1]).toEqual(["r1", "c1", "hidden"]);
+    expect(insertCalls[0][1]).toEqual([TENANT_ID, "r1", "c1", "hidden"]);
   });
 });

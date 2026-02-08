@@ -112,7 +112,9 @@ async function fetchPageMeta(articleUrl: string): Promise<ScrapedMeta> {
       if (done) break;
       html += decoder.decode(value, { stream: true });
     }
-    reader.cancel().catch(() => {});
+    reader.cancel().catch(() => {
+      // Ignore cancellation errors when stream is already closed.
+    });
 
     return {
       ogImage: extractOgImageFromHtml(html),

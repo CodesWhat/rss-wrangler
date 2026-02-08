@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
-import { addFeed, listFeeds, getFeedSuggestions } from "@/lib/api";
+import { addFeed, listFeeds } from "@/lib/api";
 import type { Feed } from "@rss-wrangler/contracts";
-import feedDirectory from "@/data/feed-directory.json";
+import feedDirectory from "@/data/feed-directory.json" with { type: "json" };
 
 interface DirectoryEntry {
   name: string;
@@ -22,14 +22,13 @@ function DiscoverContent() {
   const [search, setSearch] = useState("");
   const [subscribedUrls, setSubscribedUrls] = useState<Set<string>>(new Set());
   const [busyUrls, setBusyUrls] = useState<Set<string>>(new Set());
-  const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showRecoBanner, setShowRecoBanner] = useState(true);
 
   useEffect(() => {
-    Promise.all([listFeeds(), getFeedSuggestions()]).then(([feeds, sug]) => {
+    listFeeds().then((feeds) => {
       const urls = new Set(feeds.map((f: Feed) => f.url));
       setSubscribedUrls(urls);
-      setSuggestions(sug);
       setLoading(false);
     });
   }, []);
@@ -50,16 +49,6 @@ function DiscoverContent() {
     }
     return result;
   }, [activeCategory, search]);
-
-  const recommendedFeeds = useMemo(() => {
-    if (suggestions.length === 0) return [];
-    return ALL_FEEDS.filter(
-      (f) =>
-        suggestions.includes(f.category) && !subscribedUrls.has(f.url)
-    )
-      .sort((a, b) => b.popularity - a.popularity)
-      .slice(0, 8);
-  }, [suggestions, subscribedUrls]);
 
   async function handleSubscribe(entry: DirectoryEntry) {
     setBusyUrls((prev) => new Set(prev).add(entry.url));
@@ -85,9 +74,9 @@ function DiscoverContent() {
           <p className="discover-card-desc">{entry.description}</p>
           <div className="row">
             <span className="badge">{entry.category}</span>
-            {Array.from({ length: entry.popularity }, (_, i) => (
-              <span key={i} className="popularity-star">*</span>
-            ))}
+            <span className="popularity-star" aria-label={`Popularity ${entry.popularity}`}>
+              {"*".repeat(entry.popularity)}
+            </span>
           </div>
         </div>
         <div className="discover-card-action">
@@ -134,16 +123,22 @@ function DiscoverContent() {
           <p className="muted">Loading...</p>
         ) : (
           <>
-            {recommendedFeeds.length > 0 && activeCategory === "All" && !search.trim() && (
-              <div className="discover-section">
-                <h2>Recommended for You</h2>
-                <p className="muted">
-                  Based on your current feed subscriptions, you might enjoy these.
-                </p>
-                <div className="discover-grid">
-                  {recommendedFeeds.map(renderFeedCard)}
+            {/* TODO: replace banner with real recos when recommendation engine is wired up */}
+            {showRecoBanner && activeCategory === "All" && !search.trim() && (
+              <section className="banner">
+                <div>
+                  <strong>Personalized recommendations are coming.</strong>
+                  <p>Subscribe to feeds and read articles — we&apos;ll learn your interests and suggest new sources.</p>
                 </div>
-              </div>
+                <button
+                  type="button"
+                  className="banner-dismiss"
+                  onClick={() => setShowRecoBanner(false)}
+                  aria-label="Dismiss"
+                >
+                  &times;
+                </button>
+              </section>
             )}
 
             <div className="discover-tabs">

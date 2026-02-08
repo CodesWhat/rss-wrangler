@@ -1,4 +1,4 @@
-import PgBoss from "pg-boss";
+import { PgBoss } from "pg-boss";
 import { loadEnv } from "./config/env";
 import { registerJobs } from "./jobs/register-jobs";
 import { getPool, closePool } from "./db";

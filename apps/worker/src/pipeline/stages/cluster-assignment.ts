@@ -18,6 +18,7 @@ interface CandidateRow {
 
 export async function assignClusters(
   pool: Pool,
+  tenantId: string,
   items: UpsertedItem[]
 ): Promise<void> {
   const newItems = items.filter((i) => i.isNew);
@@ -26,8 +27,11 @@ export async function assignClusters(
   // Batch check: which items are already clustered?
   const itemIds = newItems.map((i) => i.id);
   const alreadyClustered = await pool.query<{ item_id: string }>(
-    `SELECT item_id FROM cluster_member WHERE item_id = ANY($1)`,
-    [itemIds]
+    `SELECT item_id
+     FROM cluster_member
+     WHERE item_id = ANY($1)
+       AND tenant_id = $2`,
+    [itemIds, tenantId]
   );
   const clusteredSet = new Set(alreadyClustered.rows.map((r) => r.item_id));
   const unclustered = newItems.filter((i) => !clusteredSet.has(i.id));
@@ -53,9 +57,12 @@ export async function assignClusters(
      JOIN cluster c ON c.id = cm.cluster_id
      WHERE i.published_at BETWEEN $1 AND $2
        AND i.id != ALL($3)
+       AND i.tenant_id = $4
+       AND cm.tenant_id = $4
+       AND c.tenant_id = $4
      ORDER BY i.published_at DESC
      LIMIT 2000`,
-    [windowStart.toISOString(), windowEnd.toISOString(), unclusteredIds]
+    [windowStart.toISOString(), windowEnd.toISOString(), unclusteredIds, tenantId]
   );
 
   // Group candidates by cluster
@@ -69,8 +76,11 @@ export async function assignClusters(
   // Pre-fetch all feed weights we might need for representative selection
   const feedIds = new Set(unclustered.map((i) => i.feedId));
   const feedWeightResult = await pool.query<{ id: string; weight: string }>(
-    `SELECT id, weight FROM feed WHERE id = ANY($1)`,
-    [Array.from(feedIds)]
+    `SELECT id, weight
+     FROM feed
+     WHERE id = ANY($1)
+       AND tenant_id = $2`,
+    [Array.from(feedIds), tenantId]
   );
   const feedWeights = new Map<string, string>();
   for (const row of feedWeightResult.rows) {
@@ -83,9 +93,11 @@ export async function assignClusters(
     const feedTopicResult = await pool.query<{ feed_id: string; topic_id: string }>(
       `SELECT DISTINCT ON (feed_id) feed_id, topic_id
        FROM feed_topic
-       WHERE feed_id = ANY($1) AND status = 'approved'
+       WHERE feed_id = ANY($1)
+         AND status = 'approved'
+         AND tenant_id = $2
        ORDER BY feed_id, confidence DESC`,
-      [Array.from(feedIds)]
+      [Array.from(feedIds), tenantId]
     );
     for (const row of feedTopicResult.rows) {
       feedTopicMap.set(row.feed_id, row.topic_id);
@@ -149,11 +161,11 @@ export async function assignClusters(
     const placeholders: string[] = [];
     for (let i = 0; i < addToCluster.length; i++) {
       const entry = addToCluster[i]!;
-      placeholders.push(`($${i * 2 + 1}, $${i * 2 + 2})`);
-      values.push(entry.clusterId, entry.itemId);
+      placeholders.push(`($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`);
+      values.push(tenantId, entry.clusterId, entry.itemId);
     }
     await pool.query(
-      `INSERT INTO cluster_member (cluster_id, item_id)
+      `INSERT INTO cluster_member (tenant_id, cluster_id, item_id)
        VALUES ${placeholders.join(", ")}
        ON CONFLICT (cluster_id, item_id) DO NOTHING`,
       values
@@ -175,8 +187,9 @@ export async function assignClusters(
          size = size + increment.cnt,
          updated_at = NOW()
        FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::int[]) AS cnt) AS increment
-       WHERE cluster.id = increment.id`,
-      [clusterUpdateIds, clusterUpdateCounts]
+       WHERE cluster.id = increment.id
+         AND cluster.tenant_id = $3`,
+      [clusterUpdateIds, clusterUpdateCounts, tenantId]
     );
   }
 
@@ -186,12 +199,12 @@ export async function assignClusters(
     const clusterPlaceholders: string[] = [];
     for (let i = 0; i < newClusters.length; i++) {
       const entry = newClusters[i]!;
-      const offset = i * 3;
-      clusterPlaceholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, 1)`);
-      clusterValues.push(entry.item.id, entry.folderId, entry.topicId);
+      const offset = i * 4;
+      clusterPlaceholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, 1)`);
+      clusterValues.push(tenantId, entry.item.id, entry.folderId, entry.topicId);
     }
     const newClusterResult = await pool.query<{ id: string; rep_item_id: string }>(
-      `INSERT INTO cluster (rep_item_id, folder_id, topic_id, size)
+      `INSERT INTO cluster (tenant_id, rep_item_id, folder_id, topic_id, size)
        VALUES ${clusterPlaceholders.join(", ")}
        RETURNING id, rep_item_id`,
       clusterValues
@@ -203,11 +216,11 @@ export async function assignClusters(
       const memberPlaceholders: string[] = [];
       for (let i = 0; i < newClusterResult.rows.length; i++) {
         const row = newClusterResult.rows[i]!;
-        memberPlaceholders.push(`($${i * 2 + 1}, $${i * 2 + 2})`);
-        memberValues.push(row.id, row.rep_item_id);
+        memberPlaceholders.push(`($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`);
+        memberValues.push(tenantId, row.id, row.rep_item_id);
       }
       await pool.query(
-        `INSERT INTO cluster_member (cluster_id, item_id)
+        `INSERT INTO cluster_member (tenant_id, cluster_id, item_id)
          VALUES ${memberPlaceholders.join(", ")}`,
         memberValues
       );
@@ -223,8 +236,9 @@ export async function assignClusters(
        FROM cluster c
        JOIN item i ON i.id = c.rep_item_id
        JOIN feed f ON f.id = i.feed_id
-       WHERE c.id = ANY($1)`,
-      [affectedClusterIds]
+       WHERE c.id = ANY($1)
+         AND c.tenant_id = $2`,
+      [affectedClusterIds, tenantId]
     );
     const currentRepWeights = new Map<string, string>();
     for (const row of currentReps.rows) {
@@ -242,8 +256,11 @@ export async function assignClusters(
       const newWeight = feedWeights.get(item.feedId) || "neutral";
       if ((weightRank[newWeight] || 0) > (weightRank[currentWeight] || 0)) {
         await pool.query(
-          `UPDATE cluster SET rep_item_id = $2, updated_at = NOW() WHERE id = $1`,
-          [clusterId, item.id]
+          `UPDATE cluster
+           SET rep_item_id = $2, updated_at = NOW()
+           WHERE id = $1
+             AND tenant_id = $3`,
+          [clusterId, item.id, tenantId]
         );
         // Update local state so subsequent items see the new rep weight
         currentRepWeights.set(clusterId, newWeight);

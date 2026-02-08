@@ -20,16 +20,21 @@ import {
   recordDwellRequestSchema,
   renameTopicRequestSchema,
   resolveTopicRequestSchema,
+  opmlImportResponseSchema,
   searchQuerySchema,
   statsQuerySchema,
+  tenantEntitlementsSchema,
   updateFeedRequestSchema,
   updateFilterRuleRequestSchema,
   updateSettingsRequestSchema,
-  workspaceInviteSchema
+  workspaceInviteSchema,
+  type ClusterCard,
+  type SearchQuery
 } from "@rss-wrangler/contracts";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { ApiEnv } from "../config/env";
+import { getTenantEntitlements } from "../plugins/entitlements";
 import { createAuthService } from "../services/auth-service";
 import { parseOpml } from "../services/opml-parser";
 import { PostgresStore } from "../services/postgres-store";
@@ -227,6 +232,22 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return new PostgresStore(request.dbClient, tenantId);
     };
 
+    const tenantContextFor = (request: FastifyRequest) => {
+      const tenantId = request.authContext?.tenantId;
+      if (!tenantId) {
+        throw app.httpErrors.unauthorized("missing tenant context");
+      }
+      if (!request.dbClient) {
+        throw app.httpErrors.internalServerError("missing tenant db context");
+      }
+      return { tenantId, dbClient: request.dbClient };
+    };
+
+    const entitlementsFor = async (request: FastifyRequest) => {
+      const { tenantId, dbClient } = tenantContextFor(request);
+      return getTenantEntitlements(dbClient, tenantId);
+    };
+
     protectedRoutes.get("/v1/clusters", async (request) => {
       const query = listClustersQuerySchema.parse(request.query);
       const store = storeFor(request);
@@ -389,6 +410,16 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       if (urlError) {
         return reply.badRequest(urlError);
       }
+
+      const entitlements = await entitlementsFor(request);
+      if (entitlements.feedLimit !== null && entitlements.usage.feeds >= entitlements.feedLimit) {
+        return reply.code(402).send({
+          error: "feed_limit_reached",
+          message: `Your current plan allows up to ${entitlements.feedLimit} feeds. Upgrade to add more.`,
+          limit: entitlements.feedLimit
+        });
+      }
+
       const store = storeFor(request);
       return store.addFeed(payload);
     });
@@ -441,9 +472,38 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.badRequest("no feeds found in OPML");
       }
 
+      const entitlements = await entitlementsFor(request);
+      let feedsToImport = feeds;
+
+      if (entitlements.feedLimit !== null) {
+        const remainingSlots = Math.max(entitlements.feedLimit - entitlements.usage.feeds, 0);
+        if (remainingSlots <= 0) {
+          return reply.code(402).send({
+            error: "feed_limit_reached",
+            message: `Your current plan allows up to ${entitlements.feedLimit} feeds. Upgrade to import more.`,
+            limit: entitlements.feedLimit
+          });
+        }
+        if (feedsToImport.length > remainingSlots) {
+          feedsToImport = feedsToImport.slice(0, remainingSlots);
+        }
+      }
+
       const store = storeFor(request);
-      const result = await store.importOpml(feeds);
-      return { ok: true, ...result, total: feeds.length };
+      const result = await store.importOpml(feedsToImport);
+      const rejectedCount = feeds.length - feedsToImport.length;
+      const remainingSlots = entitlements.feedLimit === null
+        ? undefined
+        : Math.max(entitlements.feedLimit - (entitlements.usage.feeds + result.imported), 0);
+
+      return opmlImportResponseSchema.parse({
+        ok: true,
+        ...result,
+        total: feeds.length,
+        limitedByPlan: rejectedCount > 0 ? true : undefined,
+        rejectedCount: rejectedCount > 0 ? rejectedCount : undefined,
+        remainingSlots
+      });
     });
 
     protectedRoutes.get("/v1/filters", async (request) => {
@@ -622,6 +682,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         .send(body);
     });
 
+    protectedRoutes.get("/v1/account/entitlements", async (request) => {
+      const entitlements = await entitlementsFor(request);
+      return tenantEntitlementsSchema.parse(entitlements);
+    });
+
     protectedRoutes.get("/v1/settings", async (request) => {
       const store = storeFor(request);
       return store.getSettings();
@@ -635,6 +700,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     protectedRoutes.get("/v1/search", async (request) => {
       const query = searchQuerySchema.parse(request.query);
+      const entitlements = await entitlementsFor(request);
+      if (entitlements.searchMode === "title_source") {
+        const { tenantId, dbClient } = tenantContextFor(request);
+        return searchClustersTitleAndSource(dbClient, tenantId, query);
+      }
       const store = storeFor(request);
       return store.searchClusters(query);
     });
@@ -718,6 +788,111 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     });
   });
 };
+
+async function searchClustersTitleAndSource(
+  dbClient: {
+    query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
+  },
+  tenantId: string,
+  query: SearchQuery
+): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
+  const offset = query.cursor ? Number.parseInt(query.cursor, 10) || 0 : 0;
+  const limit = query.limit;
+
+  const searchSql = `
+      SELECT DISTINCT ON (c.id)
+        c.id,
+        COALESCE(rep_i.title, 'Untitled') AS headline,
+        rep_i.hero_image_url,
+        COALESCE(rep_feed.title, 'Unknown') AS primary_source,
+        COALESCE(rep_i.published_at, c.created_at) AS primary_source_published_at,
+        c.size AS outlet_count,
+        c.folder_id,
+        COALESCE(fo.name, 'Other') AS folder_name,
+        c.topic_id,
+        t.name AS topic_name,
+        rep_i.summary,
+        rs.read_at,
+        rs.saved_at,
+        ts_rank(
+          to_tsvector('english', COALESCE(i.title, '') || ' ' || COALESCE(source_feed.title, '')),
+          plainto_tsquery('english', $1)
+        ) AS rank
+      FROM item i
+      JOIN feed source_feed
+        ON source_feed.id = i.feed_id
+       AND source_feed.tenant_id = i.tenant_id
+      JOIN cluster_member cm
+        ON cm.item_id = i.id
+       AND cm.tenant_id = i.tenant_id
+      JOIN cluster c
+        ON c.id = cm.cluster_id
+       AND c.tenant_id = cm.tenant_id
+      LEFT JOIN item rep_i
+        ON rep_i.id = c.rep_item_id
+       AND rep_i.tenant_id = c.tenant_id
+      LEFT JOIN feed rep_feed
+        ON rep_feed.id = rep_i.feed_id
+       AND rep_feed.tenant_id = c.tenant_id
+      LEFT JOIN folder fo ON fo.id = c.folder_id
+      LEFT JOIN topic t
+        ON t.id = c.topic_id
+       AND t.tenant_id = c.tenant_id
+      LEFT JOIN read_state rs
+        ON rs.cluster_id = c.id
+       AND rs.tenant_id = c.tenant_id
+      WHERE c.tenant_id = $2
+        AND i.tenant_id = $2
+        AND to_tsvector('english', COALESCE(i.title, '') || ' ' || COALESCE(source_feed.title, ''))
+          @@ plainto_tsquery('english', $1)
+      ORDER BY c.id, rank DESC
+  `;
+
+  const wrappedSql = `
+      SELECT * FROM (${searchSql}) sub
+      ORDER BY sub.rank DESC
+      OFFSET $3 LIMIT $4
+  `;
+
+  const result = await dbClient.query<{
+    id: string;
+    headline: string;
+    hero_image_url: string | null;
+    primary_source: string;
+    primary_source_published_at: Date;
+    outlet_count: number;
+    folder_id: string;
+    folder_name: string;
+    topic_id: string | null;
+    topic_name: string | null;
+    summary: string | null;
+    read_at: Date | null;
+    saved_at: Date | null;
+  }>(wrappedSql, [query.q, tenantId, offset, limit + 1]);
+
+  const hasMore = result.rows.length > limit;
+  const data: ClusterCard[] = result.rows.slice(0, limit).map((row) => ({
+    id: row.id,
+    headline: row.headline,
+    heroImageUrl: row.hero_image_url,
+    primarySource: row.primary_source,
+    primarySourcePublishedAt: row.primary_source_published_at.toISOString(),
+    outletCount: Number(row.outlet_count),
+    folderId: row.folder_id,
+    folderName: row.folder_name,
+    topicId: row.topic_id,
+    topicName: row.topic_name,
+    summary: row.summary,
+    mutedBreakoutReason: null,
+    isRead: row.read_at != null,
+    isSaved: row.saved_at != null
+  }));
+
+  return {
+    data,
+    nextCursor: hasMore ? String(offset + limit) : null
+  };
+}
 
 function escapeXml(s: string): string {
   return s

@@ -1,5 +1,3 @@
-import type { Pool } from "pg";
-
 // Well-known folder IDs from the migration seed (0001_init.sql)
 const FOLDER_IDS: Record<string, string> = {
   Tech: "11111111-1111-1111-1111-111111111111",
@@ -136,7 +134,7 @@ const FOLDER_KEYWORDS: [string, string[]][] = [
  * Classify text content into a folder based on keyword matching.
  * Returns the folder ID for the best-matching folder.
  */
-export function classifyText(title: string, summary: string | null): string {
+function classifyText(title: string, summary: string | null): string {
   const text = ` ${(title + " " + (summary || "")).toLowerCase()} `;
 
   let bestFolder = "Other";
@@ -163,51 +161,4 @@ export function classifyText(title: string, summary: string | null): string {
  */
 export function classifyItem(item: { title: string; summary: string | null }): string {
   return classifyText(item.title, item.summary);
-}
-
-/**
- * Reclassify all existing clusters based on their representative item's content.
- * Updates cluster.folder_id in batch.
- */
-export async function reclassifyAllClusters(pool: Pool): Promise<number> {
-  const result = await pool.query<{
-    cluster_id: string;
-    title: string;
-    summary: string | null;
-  }>(
-    `SELECT c.id AS cluster_id, COALESCE(i.title, '') AS title, i.summary
-     FROM cluster c
-     JOIN item i ON i.id = c.rep_item_id`
-  );
-
-  if (result.rows.length === 0) return 0;
-
-  let updated = 0;
-
-  // Process in batches of 500
-  const BATCH_SIZE = 500;
-  for (let i = 0; i < result.rows.length; i += BATCH_SIZE) {
-    const batch = result.rows.slice(i, i + BATCH_SIZE);
-    const clusterIds: string[] = [];
-    const folderIds: string[] = [];
-
-    for (const row of batch) {
-      const folderId = classifyText(row.title, row.summary);
-      clusterIds.push(row.cluster_id);
-      folderIds.push(folderId);
-    }
-
-    await pool.query(
-      `UPDATE cluster SET
-         folder_id = updates.new_folder_id,
-         updated_at = NOW()
-       FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::uuid[]) AS new_folder_id) AS updates
-       WHERE cluster.id = updates.id`,
-      [clusterIds, folderIds]
-    );
-
-    updated += batch.length;
-  }
-
-  return updated;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import {
   approveAllFeedTopics,
@@ -21,11 +21,7 @@ function PendingContent() {
   const [busyFeed, setBusyFeed] = useState<string | null>(null);
   const [message, setMessage] = useState("");
 
-  useEffect(() => {
-    loadPending();
-  }, []);
-
-  async function loadPending() {
+  const loadPending = useCallback(async () => {
     setLoading(true);
     const feeds = await getPendingClassifications();
     const results: PendingFeed[] = [];
@@ -38,7 +34,11 @@ function PendingContent() {
     }
     setPendingFeeds(results);
     setLoading(false);
-  }
+  }, []);
+
+  useEffect(() => {
+    loadPending();
+  }, [loadPending]);
 
   async function handleResolve(
     feedId: string,

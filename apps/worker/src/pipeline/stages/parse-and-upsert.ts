@@ -21,6 +21,7 @@ export interface UpsertResult {
 
 export async function parseAndUpsert(
   pool: Pool,
+  tenantId: string,
   feedId: string,
   items: ParsedItem[]
 ): Promise<UpsertResult> {
@@ -41,12 +42,12 @@ export async function parseAndUpsert(
   const failed: { item: ParsedItem; error: Error }[] = [];
 
   // Batch upsert guid-based items (chunk to stay under PG's 65535 param limit)
-  const GUID_CHUNK_SIZE = 7000; // 9 params per row → 63000 params max
+  const GUID_CHUNK_SIZE = 6000; // 10 params per row → 60000 params max
   if (guidItems.length > 0) {
     try {
       for (let i = 0; i < guidItems.length; i += GUID_CHUNK_SIZE) {
         const chunk = guidItems.slice(i, i + GUID_CHUNK_SIZE);
-        const result = await batchUpsertByGuid(pool, feedId, chunk);
+        const result = await batchUpsertByGuid(pool, tenantId, feedId, chunk);
         succeeded.push(...result);
       }
     } catch (err) {
@@ -58,7 +59,7 @@ export async function parseAndUpsert(
       // Fall back to individual inserts so partial success is possible
       for (const item of guidItems) {
         try {
-          const result = await singleUpsertByGuid(pool, feedId, item);
+          const result = await singleUpsertByGuid(pool, tenantId, feedId, item);
           if (result) succeeded.push(result);
         } catch (innerErr) {
           failed.push({
@@ -71,12 +72,12 @@ export async function parseAndUpsert(
   }
 
   // Batch upsert canonical-url-based items (chunk to stay under PG's 65535 param limit)
-  const CANONICAL_CHUNK_SIZE = 7000; // 9 params per row → 63000 params max
+  const CANONICAL_CHUNK_SIZE = 6000; // 10 params per row → 60000 params max
   if (noGuidItems.length > 0) {
     try {
       for (let i = 0; i < noGuidItems.length; i += CANONICAL_CHUNK_SIZE) {
         const chunk = noGuidItems.slice(i, i + CANONICAL_CHUNK_SIZE);
-        const result = await batchUpsertByCanonical(pool, feedId, chunk);
+        const result = await batchUpsertByCanonical(pool, tenantId, feedId, chunk);
         succeeded.push(...result);
       }
     } catch (err) {
@@ -87,7 +88,7 @@ export async function parseAndUpsert(
       });
       for (const item of noGuidItems) {
         try {
-          const result = await singleUpsertByCanonical(pool, feedId, item);
+          const result = await singleUpsertByCanonical(pool, tenantId, feedId, item);
           if (result) succeeded.push(result);
         } catch (innerErr) {
           failed.push({
@@ -112,11 +113,12 @@ export async function parseAndUpsert(
 
 function batchUpsertByGuid(
   pool: Pool,
+  tenantId: string,
   feedId: string,
   items: ParsedItem[]
 ): Promise<UpsertedItem[]> {
   // Build a multi-row VALUES clause
-  // Each row needs: feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url
+  // Each row needs: tenant_id, feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url
   const values: unknown[] = [];
   const rowPlaceholders: string[] = [];
 
@@ -124,11 +126,12 @@ function batchUpsertByGuid(
     const item = items[i]!;
     const canonical = canonicalizeUrl(item.url || "");
     const url = item.url || canonical;
-    const offset = i * 9;
+    const offset = i * 10;
     rowPlaceholders.push(
-      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`
+      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`
     );
     values.push(
+      tenantId,
       feedId,
       url,
       canonical,
@@ -141,9 +144,9 @@ function batchUpsertByGuid(
     );
   }
 
-  const sql = `INSERT INTO item (feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
+  const sql = `INSERT INTO item (tenant_id, feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
      VALUES ${rowPlaceholders.join(", ")}
-     ON CONFLICT (feed_id, guid) WHERE guid IS NOT NULL
+     ON CONFLICT (tenant_id, feed_id, guid) WHERE guid IS NOT NULL
      DO UPDATE SET title = EXCLUDED.title, summary = EXCLUDED.summary,
                   hero_image_url = COALESCE(EXCLUDED.hero_image_url, item.hero_image_url)
      RETURNING id, feed_id, url, canonical_url, title, summary, published_at, hero_image_url, (xmax = 0) AS is_new`;
@@ -177,6 +180,7 @@ function batchUpsertByGuid(
 
 function batchUpsertByCanonical(
   pool: Pool,
+  tenantId: string,
   feedId: string,
   items: ParsedItem[]
 ): Promise<UpsertedItem[]> {
@@ -187,12 +191,13 @@ function batchUpsertByCanonical(
     const item = items[i]!;
     const canonical = canonicalizeUrl(item.url || "");
     const url = item.url || canonical;
-    // 9 params per row (guid is always NULL for this path)
-    const offset = i * 9;
+    // 10 params per row (guid is always NULL for this path)
+    const offset = i * 10;
     rowPlaceholders.push(
-      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9})`
+      `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, $${offset + 5}, $${offset + 6}, $${offset + 7}, $${offset + 8}, $${offset + 9}, $${offset + 10})`
     );
     values.push(
+      tenantId,
       feedId,
       url,
       canonical,
@@ -205,9 +210,9 @@ function batchUpsertByCanonical(
     );
   }
 
-  const sql = `INSERT INTO item (feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
+  const sql = `INSERT INTO item (tenant_id, feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
      VALUES ${rowPlaceholders.join(", ")}
-     ON CONFLICT (feed_id, canonical_url, published_at) WHERE guid IS NULL
+     ON CONFLICT (tenant_id, feed_id, canonical_url, published_at) WHERE guid IS NULL
      DO UPDATE SET title = EXCLUDED.title, summary = EXCLUDED.summary,
                   hero_image_url = COALESCE(EXCLUDED.hero_image_url, item.hero_image_url)
      RETURNING id, feed_id, url, canonical_url, title, summary, published_at, hero_image_url, (xmax = 0) AS is_new`;
@@ -241,19 +246,20 @@ function batchUpsertByCanonical(
 
 async function singleUpsertByGuid(
   pool: Pool,
+  tenantId: string,
   feedId: string,
   item: ParsedItem
 ): Promise<UpsertedItem | null> {
   const canonical = canonicalizeUrl(item.url || "");
   const url = item.url || canonical;
   const result = await pool.query<{ id: string; is_new: boolean }>(
-    `INSERT INTO item (feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     ON CONFLICT (feed_id, guid) WHERE guid IS NOT NULL
+    `INSERT INTO item (tenant_id, feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (tenant_id, feed_id, guid) WHERE guid IS NOT NULL
      DO UPDATE SET title = EXCLUDED.title, summary = EXCLUDED.summary,
                   hero_image_url = COALESCE(EXCLUDED.hero_image_url, item.hero_image_url)
      RETURNING id, (xmax = 0) AS is_new`,
-    [feedId, url, canonical, item.title, item.summary, item.publishedAt.toISOString(), item.author, item.guid, item.heroImageUrl]
+    [tenantId, feedId, url, canonical, item.title, item.summary, item.publishedAt.toISOString(), item.author, item.guid, item.heroImageUrl]
   );
   const row = result.rows[0];
   if (!row) return null;
@@ -272,19 +278,20 @@ async function singleUpsertByGuid(
 
 async function singleUpsertByCanonical(
   pool: Pool,
+  tenantId: string,
   feedId: string,
   item: ParsedItem
 ): Promise<UpsertedItem | null> {
   const canonical = canonicalizeUrl(item.url || "");
   const url = item.url || canonical;
   const result = await pool.query<{ id: string; is_new: boolean }>(
-    `INSERT INTO item (feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, $8)
-     ON CONFLICT (feed_id, canonical_url, published_at) WHERE guid IS NULL
+    `INSERT INTO item (tenant_id, feed_id, url, canonical_url, title, summary, published_at, author, guid, hero_image_url)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL, $9)
+     ON CONFLICT (tenant_id, feed_id, canonical_url, published_at) WHERE guid IS NULL
      DO UPDATE SET title = EXCLUDED.title, summary = EXCLUDED.summary,
                   hero_image_url = COALESCE(EXCLUDED.hero_image_url, item.hero_image_url)
      RETURNING id, (xmax = 0) AS is_new`,
-    [feedId, url, canonical, item.title, item.summary, item.publishedAt.toISOString(), item.author, item.heroImageUrl]
+    [tenantId, feedId, url, canonical, item.title, item.summary, item.publishedAt.toISOString(), item.author, item.heroImageUrl]
   );
   const row = result.rows[0];
   if (!row) return null;

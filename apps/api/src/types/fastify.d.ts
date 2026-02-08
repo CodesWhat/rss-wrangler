@@ -1,9 +1,19 @@
-import type { FastifyReply, FastifyRequest } from "fastify";
-import type { Pool } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 declare module "fastify" {
+  interface FastifyRequest {
+    authContext?: {
+      userId: string;
+      tenantId: string;
+    };
+    dbClient?: PoolClient;
+  }
+
   interface FastifyInstance {
-    verifyAccessToken: (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+    verifyAccessToken: (
+      request: import("fastify").FastifyRequest,
+      reply: import("fastify").FastifyReply
+    ) => Promise<void>;
     pg: Pool;
   }
 }

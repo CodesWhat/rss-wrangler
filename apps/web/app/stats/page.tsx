@@ -13,10 +13,8 @@ function formatDwell(seconds: number): string {
   return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
 }
 
-function BarChart({ items, labelKey, valueKey, maxValue }: {
+function BarChart({ items, maxValue }: {
   items: { label: string; value: number }[];
-  labelKey?: string;
-  valueKey?: string;
   maxValue?: number;
 }) {
   const max = maxValue ?? Math.max(...items.map((i) => i.value), 1);

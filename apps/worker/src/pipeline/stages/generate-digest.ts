@@ -32,24 +32,29 @@ const BACKLOG_THRESHOLD = 50;
  * pg-boss cron job. When called from the pipeline, it only generates
  * if no digest exists covering the current window.
  */
-export async function maybeGenerateDigest(pool: Pool): Promise<void> {
-  const shouldGenerate = await checkDigestTriggers(pool);
+export async function maybeGenerateDigest(pool: Pool, tenantId: string): Promise<void> {
+  const shouldGenerate = await checkDigestTriggers(pool, tenantId);
   if (!shouldGenerate) return;
 
-  await generateDigest(pool);
+  await generateDigest(pool, tenantId);
 }
 
 /**
  * Generate a digest unconditionally. Used by the scheduled job.
  */
-export async function generateDigest(pool: Pool): Promise<void> {
+export async function generateDigest(pool: Pool, tenantId: string): Promise<void> {
   const windowEnd = new Date();
   const windowStart = new Date(windowEnd.getTime() - DIGEST_WINDOW_HOURS * 60 * 60 * 1000);
 
   // Check if a digest already exists for this window (avoid duplicates)
   const existing = await pool.query(
-    `SELECT id FROM digest WHERE start_ts >= $1 AND end_ts <= $2 LIMIT 1`,
-    [windowStart.toISOString(), windowEnd.toISOString()]
+    `SELECT id
+     FROM digest
+     WHERE tenant_id = $1
+       AND start_ts >= $2
+       AND end_ts <= $3
+     LIMIT 1`,
+    [tenantId, windowStart.toISOString(), windowEnd.toISOString()]
   );
   if (existing.rows.length > 0) {
     console.info("[digest] digest already exists for this window, skipping");
@@ -71,15 +76,16 @@ export async function generateDigest(pool: Pool): Promise<void> {
      JOIN item i ON i.id = c.rep_item_id
      JOIN feed f ON f.id = i.feed_id
      JOIN folder fo ON fo.id = c.folder_id
-     LEFT JOIN read_state rs ON rs.cluster_id = c.id
+     LEFT JOIN read_state rs ON rs.cluster_id = c.id AND rs.tenant_id = c.tenant_id
      WHERE c.updated_at >= $1
+       AND c.tenant_id = $2
        AND rs.read_at IS NULL
      ORDER BY
        CASE f.weight WHEN 'prefer' THEN 3 WHEN 'neutral' THEN 2 ELSE 1 END DESC,
        c.size DESC,
        i.published_at DESC
-     LIMIT $2`,
-    [windowStart.toISOString(), TOP_PICKS_COUNT + BIG_STORIES_COUNT + QUICK_SCAN_COUNT]
+     LIMIT $3`,
+    [windowStart.toISOString(), tenantId, TOP_PICKS_COUNT + BIG_STORIES_COUNT + QUICK_SCAN_COUNT]
   );
 
   if (clusters.rows.length === 0) {
@@ -115,9 +121,10 @@ export async function generateDigest(pool: Pool): Promise<void> {
   const body = buildDigestBody(entries);
 
   await pool.query(
-    `INSERT INTO digest (start_ts, end_ts, title, body, entries_json)
-     VALUES ($1, $2, $3, $4, $5)`,
+    `INSERT INTO digest (tenant_id, start_ts, end_ts, title, body, entries_json)
+     VALUES ($1, $2, $3, $4, $5, $6)`,
     [
+      tenantId,
       windowStart.toISOString(),
       windowEnd.toISOString(),
       title,
@@ -129,12 +136,14 @@ export async function generateDigest(pool: Pool): Promise<void> {
   console.info("[digest] generated", { entries: entries.length, window: `${windowStart.toISOString()} - ${windowEnd.toISOString()}` });
 }
 
-async function checkDigestTriggers(pool: Pool): Promise<boolean> {
+async function checkDigestTriggers(pool: Pool, tenantId: string): Promise<boolean> {
   // Trigger 1: unread backlog >= threshold
   const backlogResult = await pool.query<{ cnt: string }>(
     `SELECT COUNT(*)::text AS cnt FROM cluster c
-     LEFT JOIN read_state rs ON rs.cluster_id = c.id
-     WHERE rs.read_at IS NULL`
+     LEFT JOIN read_state rs ON rs.cluster_id = c.id AND rs.tenant_id = c.tenant_id
+     WHERE c.tenant_id = $1
+       AND rs.read_at IS NULL`,
+    [tenantId]
   );
   const backlog = parseInt(backlogResult.rows[0]?.cnt || "0", 10);
   if (backlog >= BACKLOG_THRESHOLD) {
@@ -144,7 +153,12 @@ async function checkDigestTriggers(pool: Pool): Promise<boolean> {
 
   // Trigger 2: no recent digest in the last 24h
   const recentDigest = await pool.query(
-    `SELECT id FROM digest WHERE created_at >= NOW() - INTERVAL '24 hours' LIMIT 1`
+    `SELECT id
+     FROM digest
+     WHERE tenant_id = $1
+       AND created_at >= NOW() - INTERVAL '24 hours'
+     LIMIT 1`,
+    [tenantId]
   );
   if (recentDigest.rows.length === 0 && backlog > 0) {
     console.info("[digest] time trigger (no digest in 24h)");

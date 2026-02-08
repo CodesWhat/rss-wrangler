@@ -1,6 +1,6 @@
 # RSS Wrangler Feature Audit
 
-Audited: 2026-02-07
+Audited: 2026-02-08
 
 ## Legend
 - ✅ IMPLEMENTED - Working as specced
@@ -197,10 +197,10 @@ Audited: 2026-02-07
 | Hosted account settings: password change/reset | ✅ | Self-serve password change shipped (`/v1/account/password` + Settings UI account section). Password reset flow shipped (forgot/reset endpoints + web forms + email token lifecycle). |
 | Hosted account deletion workflow | ⚠️ | Self-serve request/cancel flow plus lifecycle automation shipped: worker job (`process-account-deletions`) enforces a 7-day grace window, marks requests completed, hard-purges due accounts, writes audit events, and prunes empty tenants. Remaining gap: user-facing completion notification channel (email/in-app). |
 | Hosted self-serve data download request (GDPR-style) | ⚠️ | Baseline shipped: account data export request/status/download endpoints (`/v1/account/data-export*`), tenant-scoped export-request persistence, and protected frontend export page. Remaining gaps: move processing to durable worker queue, add completion notifications, and enforce retention/purge for generated bundles. |
-| Entitlements + plan-aware limit enforcement | ❌ | No plan gate middleware or per-user quota checks in API/worker paths |
+| Entitlements + plan-aware limit enforcement | ⚠️ | Baseline entitlement middleware now exists: tenant plan defaults (`free/pro/pro_ai`), feed-cap checks on add/import, search-mode gating (title/source vs full-text), `/v1/account/entitlements`, worker min-poll enforcement, and daily ingest budget reservation/release (`tenant_usage_daily`). Remaining gaps: billing-webhook sync, broader route coverage, and frontend upgrade UX/telemetry hardening. |
 | Hosted performance/load testing + SLO baselines | ✅ | Baseline shipped with repeatable multi-tenant API load profile + SLO thresholds (`infra/load/profiles/phase0-hosted-api-baseline.json`), worker queue SLO thresholds (`infra/load/profiles/phase0-worker-slo-baseline.json`), and automated perf gate scripts (`scripts/load/run-phase0-slo-gate.mjs`, `scripts/load/run-hosted-load.mjs`, `scripts/load/check-worker-slo.mjs`) documented in `.planning/PHASE0_HOSTED_SLO_BASELINE.md`. |
 | Billing integration (Lemon Squeezy + pricing/upgrade + plan management UI) | ❌ | No Lemon Squeezy subscription/webhook integration and no hosted pricing/upgrade/plan-management surface |
-| Usage metering (feeds/items-day/retention/index size) | ❌ | No usage ledger/rollups for hosted cost calibration |
+| Usage metering (feeds/items-day/retention/index size) | ⚠️ | Daily ingest metering baseline exists (`tenant_usage_daily` + reservation/release in worker + feed-count usage in entitlement responses). Remaining gaps: retention/index-size metering, billing-facing rollups, and usage surfacing in hosted account UI. |
 | Global API rate limiting baseline | ✅ | Fastify global rate limit exists (100 req/min), but not plan-aware |
 
 ## 16. DATA PORTABILITY & TRUST
@@ -220,9 +220,9 @@ Audited: 2026-02-07
 ## SUMMARY COUNTS
 
 - ✅ IMPLEMENTED: 37
-- ⚠️ PARTIAL: 15
+- ⚠️ PARTIAL: 17
 - 🔲 STUB: 6
-- ❌ MISSING: 52
+- ❌ MISSING: 50
 
 ## TOP PRIORITY GAPS (from spec)
 
@@ -238,9 +238,10 @@ Audited: 2026-02-07
 10. **Missing card actions** - mute keyword, prefer/mute source
 11. **Hosted onboarding still incomplete** - member approval policy/roles and richer bootstrap logic still needed before hosted public launch
 12. **Hosted billing flow not implemented** - Lemon Squeezy + upgrade/plan management required before hosted launch
-13. **Feed discovery + directory seeding missing** - need one-time DB seed from feed-directory.json + discovery engine for URL → candidates
-14. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail
-15. **Accessibility baseline missing** - no explicit WCAG 2.2 AA coverage for semantics, keyboard/focus, contrast, and screen-reader validation
-16. **Data portability bundle missing** - no export beyond OPML for saved items, annotations, training signals, and filters/rules
-17. **Hosted account management/compliance still incomplete** - account-deletion user-facing completion notifications and account-data-export worker/notification/retention hardening are still missing
-18. **Guided onboarding is baseline-only** - wizard exists, but deeper topic/bootstrap automation is still missing
+13. **Entitlements are baseline-only** - core feed/search/worker gates landed, but billing sync + broader gate coverage + hosted upgrade UX remain
+14. **Feed discovery + directory seeding missing** - need one-time DB seed from feed-directory.json + discovery engine for URL → candidates
+15. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail
+16. **Accessibility baseline missing** - no explicit WCAG 2.2 AA coverage for semantics, keyboard/focus, contrast, and screen-reader validation
+17. **Data portability bundle missing** - no export beyond OPML for saved items, annotations, training signals, and filters/rules
+18. **Hosted account management/compliance still incomplete** - account-deletion user-facing completion notifications and account-data-export worker/notification/retention hardening are still missing
+19. **Guided onboarding is baseline-only** - wizard exists, but deeper topic/bootstrap automation is still missing

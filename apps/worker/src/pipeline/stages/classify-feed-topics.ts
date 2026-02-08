@@ -13,9 +13,10 @@ interface TopicSuggestion {
   confidence: number;
 }
 
-async function getOpenAIKey(pool: Pool): Promise<string | undefined> {
+async function getOpenAIKey(pool: Pool, tenantId: string): Promise<string | undefined> {
   const result = await pool.query<{ data: unknown }>(
-    `SELECT data FROM app_settings WHERE key = 'main' LIMIT 1`
+    `SELECT data FROM app_settings WHERE tenant_id = $1 AND key = 'main' LIMIT 1`,
+    [tenantId]
   );
   const row = result.rows[0];
   if (!row || !row.data || typeof row.data !== "object") return undefined;
@@ -37,6 +38,7 @@ async function getOpenAIKey(pool: Pool): Promise<string | undefined> {
  */
 export async function classifyFeedTopics(
   pool: Pool,
+  tenantId: string,
   feedId: string,
   openaiApiKey: string | undefined
 ): Promise<void> {
@@ -44,9 +46,10 @@ export async function classifyFeedTopics(
   const articlesResult = await pool.query<ArticleRow>(
     `SELECT title, summary FROM item
      WHERE feed_id = $1
+       AND tenant_id = $2
      ORDER BY published_at DESC
      LIMIT 20`,
-    [feedId]
+    [feedId, tenantId]
   );
 
   if (articlesResult.rows.length === 0) {
@@ -56,12 +59,13 @@ export async function classifyFeedTopics(
 
   // Fetch existing topic names
   const topicsResult = await pool.query<{ name: string }>(
-    `SELECT name FROM topic ORDER BY name`
+    `SELECT name FROM topic WHERE tenant_id = $1 ORDER BY name`,
+    [tenantId]
   );
   const existingTopics = topicsResult.rows.map((r) => r.name);
 
   // Resolve API key: prefer settings, fall back to parameter/env
-  const settingsKey = await getOpenAIKey(pool);
+  const settingsKey = await getOpenAIKey(pool, tenantId);
   const effectiveKey = settingsKey || openaiApiKey || process.env.OPENAI_API_KEY;
   if (!effectiveKey) {
     console.warn("[classify-feed-topics] no OpenAI API key available, skipping classification", { feedId });
@@ -147,16 +151,19 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
   // Ensure all suggested topics exist in the topic table
   for (const suggestion of suggestions) {
     await pool.query(
-      `INSERT INTO topic (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`,
-      [suggestion.topic]
+      `INSERT INTO topic (tenant_id, name) VALUES ($1, $2) ON CONFLICT (tenant_id, name) DO NOTHING`,
+      [tenantId, suggestion.topic]
     );
   }
 
   // Fetch topic IDs for all suggested names
   const topicNames = suggestions.map((s) => s.topic);
   const topicIdsResult = await pool.query<{ id: string; name: string }>(
-    `SELECT id, name FROM topic WHERE name = ANY($1)`,
-    [topicNames]
+    `SELECT id, name
+     FROM topic
+     WHERE name = ANY($1)
+       AND tenant_id = $2`,
+    [topicNames, tenantId]
   );
   const topicIdMap = new Map(topicIdsResult.rows.map((r) => [r.name, r.id]));
 
@@ -166,17 +173,20 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
     if (!topicId) continue;
 
     await pool.query(
-      `INSERT INTO feed_topic (feed_id, topic_id, status, confidence, proposed_at)
-       VALUES ($1, $2, 'pending', $3, NOW())
+      `INSERT INTO feed_topic (tenant_id, feed_id, topic_id, status, confidence, proposed_at)
+       VALUES ($1, $2, $3, 'pending', $4, NOW())
        ON CONFLICT (feed_id, topic_id) DO NOTHING`,
-      [feedId, topicId, suggestion.confidence]
+      [tenantId, feedId, topicId, suggestion.confidence]
     );
   }
 
   // Update feed classification status
   await pool.query(
-    `UPDATE feed SET classification_status = 'classified' WHERE id = $1`,
-    [feedId]
+    `UPDATE feed
+     SET classification_status = 'classified'
+     WHERE id = $1
+       AND tenant_id = $2`,
+    [feedId, tenantId]
   );
 
   console.info("[classify-feed-topics] feed classified", {

@@ -44,9 +44,10 @@ interface FilterResult {
  */
 export async function preFilterSoftGate(
   pool: Pool,
+  tenantId: string,
   items: ItemForFilter[]
 ): Promise<Map<string, FilterResult>> {
-  const rules = await loadFilterRules(pool);
+  const rules = await loadFilterRules(pool, tenantId);
   const results = new Map<string, FilterResult>();
 
   for (const item of items) {
@@ -75,20 +76,22 @@ export async function preFilterSoftGate(
  */
 export async function postClusterFilter(
   pool: Pool,
+  tenantId: string,
   clusterIds: string[]
 ): Promise<void> {
   if (clusterIds.length === 0) return;
 
-  const rules = await loadFilterRules(pool);
+  const rules = await loadFilterRules(pool, tenantId);
   if (rules.length === 0) return;
 
   for (const clusterId of clusterIds) {
-    await processClusterFilter(pool, clusterId, rules);
+    await processClusterFilter(pool, tenantId, clusterId, rules);
   }
 }
 
 async function processClusterFilter(
   pool: Pool,
+  tenantId: string,
   clusterId: string,
   rules: FilterRule[]
 ): Promise<void> {
@@ -103,8 +106,9 @@ async function processClusterFilter(
      FROM cluster c
      JOIN item i ON i.id = c.rep_item_id
      JOIN feed f ON f.id = i.feed_id
-     WHERE c.id = $1`,
-    [clusterId]
+     WHERE c.id = $1
+       AND c.tenant_id = $2`,
+    [clusterId, tenantId]
   );
 
   const info = clusterInfo.rows[0];
@@ -116,27 +120,27 @@ async function processClusterFilter(
   if (!matchResult) return; // No filter match on representative
   if (matchResult.mode === "block") {
     // Hard block: record hidden event
-    await recordFilterEvent(pool, matchResult.ruleId, clusterId, "hidden");
+    await recordFilterEvent(pool, tenantId, matchResult.ruleId, clusterId, "hidden");
     return;
   }
 
   // Mute mode: check breakout conditions
   if (!matchResult.breakoutEnabled) {
-    await recordFilterEvent(pool, matchResult.ruleId, clusterId, "hidden");
+    await recordFilterEvent(pool, tenantId, matchResult.ruleId, clusterId, "hidden");
     return;
   }
 
   const breakoutReason = checkBreakout(repText, info.rep_feed_weight, info.size);
 
   if (breakoutReason) {
-    await recordFilterEvent(pool, matchResult.ruleId, clusterId, "breakout_shown");
+    await recordFilterEvent(pool, tenantId, matchResult.ruleId, clusterId, "breakout_shown");
     console.info("[filter] breakout triggered", {
       clusterId,
       ruleId: matchResult.ruleId,
       reason: breakoutReason,
     });
   } else {
-    await recordFilterEvent(pool, matchResult.ruleId, clusterId, "hidden");
+    await recordFilterEvent(pool, tenantId, matchResult.ruleId, clusterId, "hidden");
   }
 }
 
@@ -193,7 +197,7 @@ function matchRules(
   return null;
 }
 
-async function loadFilterRules(pool: Pool): Promise<FilterRule[]> {
+async function loadFilterRules(pool: Pool, tenantId: string): Promise<FilterRule[]> {
   const result = await pool.query<{
     id: string;
     pattern: string;
@@ -201,7 +205,10 @@ async function loadFilterRules(pool: Pool): Promise<FilterRule[]> {
     mode: "mute" | "block";
     breakout_enabled: boolean;
   }>(
-    `SELECT id, pattern, type, mode, breakout_enabled FROM filter_rule`
+    `SELECT id, pattern, type, mode, breakout_enabled
+     FROM filter_rule
+     WHERE tenant_id = $1`,
+    [tenantId]
   );
 
   return result.rows.map((r) => ({
@@ -215,12 +222,13 @@ async function loadFilterRules(pool: Pool): Promise<FilterRule[]> {
 
 async function recordFilterEvent(
   pool: Pool,
+  tenantId: string,
   ruleId: string,
   clusterId: string,
   action: "hidden" | "breakout_shown"
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO filter_event (rule_id, cluster_id, action) VALUES ($1, $2, $3)`,
-    [ruleId, clusterId, action]
+    `INSERT INTO filter_event (tenant_id, rule_id, cluster_id, action) VALUES ($1, $2, $3, $4)`,
+    [tenantId, ruleId, clusterId, action]
   );
 }

@@ -24,6 +24,15 @@ export type AiMode = z.infer<typeof aiModeSchema>;
 export const aiProviderSchema = z.enum(["openai", "anthropic", "local"]);
 export type AiProvider = z.infer<typeof aiProviderSchema>;
 
+export const planIdSchema = z.enum(["free", "pro", "pro_ai"]);
+export type PlanId = z.infer<typeof planIdSchema>;
+
+export const planSubscriptionStatusSchema = z.enum(["active", "trialing", "past_due", "canceled"]);
+export type PlanSubscriptionStatus = z.infer<typeof planSubscriptionStatusSchema>;
+
+export const searchModeSchema = z.enum(["title_source", "full_text"]);
+export type SearchMode = z.infer<typeof searchModeSchema>;
+
 export const folderSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1)
@@ -364,9 +373,29 @@ export const opmlImportResponseSchema = z.object({
   ok: z.literal(true),
   imported: z.number().int().min(0),
   skipped: z.number().int().min(0),
-  total: z.number().int().min(0)
+  total: z.number().int().min(0),
+  limitedByPlan: z.boolean().optional(),
+  rejectedCount: z.number().int().min(0).optional(),
+  remainingSlots: z.number().int().min(0).optional()
 });
 export type OpmlImportResponse = z.infer<typeof opmlImportResponseSchema>;
+
+export const tenantEntitlementsSchema = z.object({
+  planId: planIdSchema,
+  subscriptionStatus: planSubscriptionStatusSchema,
+  trialEndsAt: z.string().datetime().nullable(),
+  currentPeriodEndsAt: z.string().datetime().nullable(),
+  feedLimit: z.number().int().positive().nullable(),
+  itemsPerDayLimit: z.number().int().positive().nullable(),
+  searchMode: searchModeSchema,
+  minPollMinutes: z.number().int().positive(),
+  usage: z.object({
+    date: z.string(),
+    itemsIngested: z.number().int().min(0),
+    feeds: z.number().int().min(0)
+  })
+});
+export type TenantEntitlements = z.infer<typeof tenantEntitlementsSchema>;
 
 export const recordEventsResponseSchema = z.object({
   accepted: z.number().int().min(0),
@@ -494,6 +523,7 @@ export const apiRoutes = {
   accountDataExportStatus: "/v1/account/data-export",
   accountDataExportRequest: "/v1/account/data-export/request",
   accountDataExportDownload: "/v1/account/data-export/download",
+  accountEntitlements: "/v1/account/entitlements",
   opmlImport: "/v1/opml/import",
   opmlExport: "/v1/opml/export",
   search: "/v1/search",

@@ -2,6 +2,7 @@
   "name": "rss-wrangler",
   "private": true,
   "version": "0.1.0",
+  "license": "AGPL-3.0-only",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -12,14 +13,26 @@
     "dev:worker": "npm run build -w @rss-wrangler/contracts && npm run dev -w @rss-wrangler/worker",
     "build": "npm run build -w @rss-wrangler/contracts && npm run build -w @rss-wrangler/api && npm run build -w @rss-wrangler/worker && npm run build -w @rss-wrangler/web",
     "typecheck": "npm run build -w @rss-wrangler/contracts && npm run typecheck -w @rss-wrangler/contracts && npm run typecheck -w @rss-wrangler/api && npm run typecheck -w @rss-wrangler/worker && npm run typecheck -w @rss-wrangler/web",
-    "lint": "npm run lint -w @rss-wrangler/contracts && npm run lint -w @rss-wrangler/api && npm run lint -w @rss-wrangler/worker && npm run lint -w @rss-wrangler/web",
+    "lint": "biome lint . --files-ignore-unknown=true --no-errors-on-unmatched --only=lint/correctness --only=lint/suspicious --skip=lint/suspicious/noConsole --skip=lint/suspicious/noReactSpecificProps --skip=lint/suspicious/useAwait --skip=lint/suspicious/noBitwiseOperators --skip=lint/suspicious/noAssignInExpressions --skip=lint/suspicious/noExplicitAny --skip=lint/correctness/noNodejsModules --skip=lint/correctness/useImportExtensions --skip=lint/correctness/noProcessGlobal --skip=lint/correctness/noUndeclaredDependencies --skip=lint/correctness/useUniqueElementIds",
+    "lint:fix": "biome lint . --write --files-ignore-unknown=true --no-errors-on-unmatched --only=lint/correctness --only=lint/suspicious --skip=lint/suspicious/noConsole --skip=lint/suspicious/noReactSpecificProps --skip=lint/suspicious/useAwait --skip=lint/suspicious/noBitwiseOperators --skip=lint/suspicious/noAssignInExpressions --skip=lint/suspicious/noExplicitAny --skip=lint/correctness/noNodejsModules --skip=lint/correctness/useImportExtensions --skip=lint/correctness/noProcessGlobal --skip=lint/correctness/noUndeclaredDependencies --skip=lint/correctness/useUniqueElementIds",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:policy": "npm run test:coverage && node scripts/check-coverage-policy.mjs",
+    "debt:scan": "knip --include files,exports,duplicates,dependencies --reporter compact --no-exit-code",
+    "backfill:enrichment": "tsx scripts/backfill-enrichment.ts",
+    "push:vapid:keys": "node scripts/generate-vapid-keys.js",
+    "hooks:install": "lefthook install",
+    "prepare": "lefthook install"
   },
   "devDependencies": {
-    "@types/node": "^22.13.1",
-    "tsx": "^4.19.2",
-    "typescript": "^5.8.2",
+    "@biomejs/biome": "^2.3.14",
+    "@types/node": "^25.2.2",
+    "@vitest/coverage-v8": "^4.0.18",
+    "knip": "^5.83.1",
+    "lefthook": "^2.1.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "engines": {

@@ -29,8 +29,8 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue>({
   authenticated: false,
   loading: true,
-  loginUser: async () => {},
-  logoutUser: async () => {},
+  loginUser: async () => Promise.resolve(),
+  logoutUser: async () => Promise.resolve(),
 });
 
 export function useAuth() {

@@ -21,9 +21,10 @@ interface EnrichableItem {
   heroImageUrl: string | null;
 }
 
-async function getSettings(pool: Pool): Promise<Settings> {
+async function getSettings(pool: Pool, tenantId: string): Promise<Settings> {
   const result = await pool.query<{ data: unknown }>(
-    `SELECT data FROM app_settings WHERE key = 'main' LIMIT 1`
+    `SELECT data FROM app_settings WHERE tenant_id = $1 AND key = 'main' LIMIT 1`,
+    [tenantId]
   );
   const row = result.rows[0];
   if (!row || !row.data || typeof row.data !== "object") {
@@ -41,7 +42,7 @@ async function getSettings(pool: Pool): Promise<Settings> {
  * Fetches the og:image meta tag from an article URL.
  * Works regardless of AI mode -- pure HTML scraping.
  */
-export async function fetchOgImage(articleUrl: string): Promise<string | null> {
+async function fetchOgImage(articleUrl: string): Promise<string | null> {
   try {
     const url = new URL(articleUrl);
     if (url.protocol !== "http:" && url.protocol !== "https:") return null;
@@ -72,7 +73,9 @@ export async function fetchOgImage(articleUrl: string): Promise<string | null> {
       // Stop once we've passed </head>
       if (html.includes("</head>") || html.includes("</HEAD>")) break;
     }
-    reader.cancel().catch(() => {});
+    reader.cancel().catch(() => {
+      // Ignore cancellation errors when stream is already closed.
+    });
 
     return extractOgImageFromHtml(html);
   } catch {
@@ -143,6 +146,7 @@ async function generateSummary(
 
 async function updateItemEnrichment(
   pool: Pool,
+  tenantId: string,
   itemId: string,
   summary: string | null,
   heroImageUrl: string | null
@@ -162,23 +166,28 @@ async function updateItemEnrichment(
 
   if (setClauses.length === 0) return;
 
-  values.push(itemId);
+  values.push(itemId, tenantId);
   await pool.query(
-    `UPDATE item SET ${setClauses.join(", ")} WHERE id = $${paramIdx}`,
+    `UPDATE item
+     SET ${setClauses.join(", ")}
+     WHERE id = $${paramIdx}
+       AND tenant_id = $${paramIdx + 1}`,
     values
   );
 }
 
 async function updateClusterHeroImage(
   pool: Pool,
+  tenantId: string,
   itemId: string,
-  heroImageUrl: string
+  _heroImageUrl: string
 ): Promise<void> {
   // Update hero_image_url on clusters where this item is the representative
   await pool.query(
     `UPDATE cluster SET updated_at = NOW()
-     WHERE rep_item_id = $1`,
-    [itemId]
+     WHERE rep_item_id = $1
+       AND tenant_id = $2`,
+    [itemId, tenantId]
   );
 }
 
@@ -191,12 +200,13 @@ async function updateClusterHeroImage(
  */
 export async function enrichWithAi(
   pool: Pool,
+  tenantId: string,
   items: UpsertedItem[],
   openaiApiKey: string | undefined
 ): Promise<void> {
   if (items.length === 0) return;
 
-  const settings = await getSettings(pool);
+  const settings = await getSettings(pool, tenantId);
 
   // Find items that need enrichment
   const needsEnrichment: EnrichableItem[] = items
@@ -232,8 +242,8 @@ export async function enrichWithAi(
           const ogImage = await fetchOgImage(item.url);
           if (ogImage) {
             item.heroImageUrl = ogImage;
-            await updateItemEnrichment(pool, item.id, null, ogImage);
-            await updateClusterHeroImage(pool, item.id, ogImage);
+            await updateItemEnrichment(pool, tenantId, item.id, null, ogImage);
+            await updateClusterHeroImage(pool, tenantId, item.id, ogImage);
           }
         })
       );
@@ -279,7 +289,7 @@ export async function enrichWithAi(
         const summary = await generateSummary(client, item.title, item.summary);
         if (summary) {
           item.summary = summary;
-          await updateItemEnrichment(pool, item.id, summary, null);
+          await updateItemEnrichment(pool, tenantId, item.id, summary, null);
         }
       })
     );

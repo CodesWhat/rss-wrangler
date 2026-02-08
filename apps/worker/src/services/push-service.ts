@@ -9,6 +9,7 @@ export interface PushConfig {
 
 export async function sendNewStoriesNotification(
   pool: Pool,
+  tenantId: string,
   config: PushConfig,
   newClusterCount: number,
   topHeadline: string
@@ -23,7 +24,10 @@ export async function sendNewStoriesNotification(
     config.vapidPrivateKey
   );
 
-  const { rows } = await pool.query("SELECT endpoint, p256dh, auth FROM push_subscription");
+  const { rows } = await pool.query(
+    "SELECT endpoint, p256dh, auth FROM push_subscription WHERE tenant_id = $1",
+    [tenantId]
+  );
 
   if (rows.length === 0) {
     return { sent: 0, failed: 0 };
@@ -53,7 +57,10 @@ export async function sendNewStoriesNotification(
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode === 410 || statusCode === 404) {
         // Subscription expired or invalid, remove it
-        await pool.query("DELETE FROM push_subscription WHERE endpoint = $1", [sub.endpoint]);
+        await pool.query(
+          "DELETE FROM push_subscription WHERE endpoint = $1 AND tenant_id = $2",
+          [sub.endpoint, tenantId]
+        );
       }
       failed++;
     }

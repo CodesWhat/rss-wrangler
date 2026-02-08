@@ -304,11 +304,20 @@ select {
 .sidebar-brand:hover {
   display: flex;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-3);
   padding: var(--sp-5) var(--sp-4);
   border-bottom: 1px solid var(--border-hairline);
   text-decoration: none;
   color: inherit;
+}
+
+.sidebar-brand .brand-mark {
+  width: 8px;
+  height: 32px;
+}
+
+.sidebar-brand .brand-name {
+  font-size: 1.15rem;
 }
 
 .sidebar-section {
@@ -522,6 +531,21 @@ select {
   gap: var(--sp-4);
   font-family: var(--font-mono);
   font-size: 0.85rem;
+  margin-bottom: var(--sp-5);
+}
+
+.banner-dismiss {
+  background: none;
+  border: none;
+  color: #FF5500;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: var(--sp-1) var(--sp-2);
+  transition: opacity var(--transition-fast);
+}
+
+.banner-dismiss:hover {
+  opacity: 0.7;
 }
 
 /* ========================================
@@ -615,6 +639,7 @@ select {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   color: var(--text-tertiary);
+  background: var(--bg-base);
   border: 1px solid var(--border-default);
   border-right: none;
   transition: all var(--transition-fast);
@@ -847,6 +872,7 @@ select {
   border-radius: var(--radius-sm);
   padding: var(--sp-4);
 }
+
 
 .list {
   margin: 0;
@@ -1150,10 +1176,11 @@ select {
    LOGIN
    ======================================== */
 .login-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 60vh;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 100dvh;
+  padding: var(--sp-6) var(--sp-4);
 }
 
 .login-card {
@@ -1177,6 +1204,12 @@ select {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+
+.main:has(.login-container) {
+  max-width: none;
+  border-right: 0;
+  padding-bottom: 0;
 }
 
 /* ========================================
@@ -1262,6 +1295,41 @@ select {
 /* ========================================
    SETTINGS
    ======================================== */
+.settings-nav {
+  display: flex;
+  gap: 0;
+  margin-top: var(--sp-3);
+}
+
+.settings-nav-btn {
+  padding: var(--sp-1) var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  background: var(--bg-base);
+  border: 1px solid var(--border-default);
+  border-right: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.settings-nav-btn:first-child {
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+
+.settings-nav-btn:last-child {
+  border-right: 1px solid var(--border-default);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.settings-nav-btn:hover {
+  background: var(--bg-invert);
+  color: var(--text-invert);
+}
+
 .settings-layout {
   display: grid;
   gap: var(--sp-4);
@@ -2120,13 +2188,15 @@ select {
   .main {
     flex: 1;
     min-width: 0;
-    max-width: 860px;
-    border-right: 1px solid var(--border-hairline);
+    max-width: 75vw;
+    background: transparent;
+    padding-left: var(--sp-5);
   }
 
   .page-header {
     padding: var(--sp-8) var(--sp-8) 0;
     padding-bottom: var(--sp-5);
+    border-bottom: none;
   }
 
   .page-title {
@@ -2139,6 +2209,7 @@ select {
 
   .feed-controls {
     padding: var(--sp-3) var(--sp-8);
+    border-bottom: none;
   }
 
   .stories {

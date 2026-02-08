@@ -1,0 +1,19 @@
+pre-commit:
+  parallel: true
+  commands:
+    biome:
+      run: npx biome lint --staged --no-errors-on-unmatched --files-ignore-unknown=true
+
+commit-msg:
+  commands:
+    message-format:
+      run: node scripts/validate-commit-msg.mjs {1}
+
+pre-push:
+  commands:
+    typecheck:
+      run: npm run typecheck
+    test:
+      run: npm test
+    debt:
+      run: npm run debt:scan

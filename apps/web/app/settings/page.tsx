@@ -4,6 +4,10 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { ProtectedRoute } from "@/components/protected-route";
 import { NotificationToggle } from "@/components/notification-toggle";
 import {
+  cancelAccountDeletion,
+  changePassword,
+  getAccountDeletionStatus,
+  requestAccountDeletion,
   getSettings,
   updateSettings,
   listFilters,
@@ -15,6 +19,7 @@ import type {
   FilterRule,
   AiMode,
   AiProvider,
+  AccountDeletionStatus,
   FilterType,
   FilterMode,
 } from "@rss-wrangler/contracts";
@@ -43,14 +48,27 @@ function SettingsContent() {
   const [newMode, setNewMode] = useState<FilterMode>("mute");
   const [newBreakout, setNewBreakout] = useState(true);
   const [filterBusy, setFilterBusy] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordBusy, setPasswordBusy] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
+  const [passwordSaved, setPasswordSaved] = useState(false);
+  const [deletionStatus, setDeletionStatus] = useState<AccountDeletionStatus | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deletionBusy, setDeletionBusy] = useState(false);
+  const [deletionError, setDeletionError] = useState("");
+  const [deletionSaved, setDeletionSaved] = useState(false);
 
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    Promise.all([getSettings(), listFilters()]).then(([s, f]) => {
+    Promise.all([getSettings(), listFilters(), getAccountDeletionStatus()]).then(([s, f, d]) => {
       setSettings(s);
       setSavedSettings(s);
       setFilters(f);
+      setDeletionStatus(d);
       setLoading(false);
     });
   }, []);
@@ -151,22 +169,130 @@ function SettingsContent() {
     }
   }
 
+  async function handleChangePassword(e: FormEvent) {
+    e.preventDefault();
+    setPasswordError("");
+    setPasswordSaved(false);
+
+    if (newPassword.length < 8) {
+      setPasswordError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New password and confirmation do not match.");
+      return;
+    }
+
+    setPasswordBusy(true);
+    const result = await changePassword({
+      currentPassword,
+      newPassword,
+    });
+    setPasswordBusy(false);
+
+    if (!result.ok) {
+      setPasswordError(result.error);
+      return;
+    }
+
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordSaved(true);
+    setTimeout(() => setPasswordSaved(false), 3000);
+  }
+
+  async function handleRequestDeletion(e: FormEvent) {
+    e.preventDefault();
+    setDeletionError("");
+    setDeletionSaved(false);
+
+    if (deleteConfirmText !== "DELETE") {
+      setDeletionError("Type DELETE exactly to confirm.");
+      return;
+    }
+
+    setDeletionBusy(true);
+    const result = await requestAccountDeletion({
+      password: deletePassword,
+      confirmText: "DELETE",
+    });
+    setDeletionBusy(false);
+
+    if (!result.ok) {
+      setDeletionError(result.error);
+      return;
+    }
+
+    setDeletionStatus(result.status);
+    setDeletePassword("");
+    setDeleteConfirmText("");
+    setDeletionSaved(true);
+    setTimeout(() => setDeletionSaved(false), 3000);
+  }
+
+  async function handleCancelDeletion() {
+    setDeletionError("");
+    setDeletionSaved(false);
+    setDeletionBusy(true);
+    const result = await cancelAccountDeletion();
+    setDeletionBusy(false);
+    if (!result.ok) {
+      setDeletionError(result.error);
+      return;
+    }
+    setDeletionStatus(result.status);
+    setDeletionSaved(true);
+    setTimeout(() => setDeletionSaved(false), 3000);
+  }
+
   if (loading || !settings) {
     return <p className="muted">Loading settings...</p>;
   }
 
   const hasKey = !!(settings.openaiApiKey && settings.openaiApiKey.length > 0);
 
+  const sections = [
+    { id: "ai-provider", label: "AI Provider" },
+    { id: "general", label: "General" },
+    { id: "account", label: "Account" },
+    { id: "account-deletion", label: "Danger Zone" },
+    { id: "notifications", label: "Notifications" },
+    { id: "filters", label: "Filters" },
+  ];
+
+  function scrollToSection(id: string) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
   return (
-    <div className="settings-layout">
+    <>
+      <div className="page-header">
+        <h1 className="page-title">Settings</h1>
+        <div className="settings-nav">
+          {sections.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="settings-nav-btn"
+              onClick={() => scrollToSection(s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="settings-layout">
       {/* AI Provider section */}
-      <section className="section-card">
-        <h1 className="page-title">
+      <section className="section-card" id="ai-provider">
+        <h2>
           AI Provider
           {savedFields.has("openaiApiKey") && (
             <span className="key-status key-status-active saved-indicator-lg">SAVED</span>
           )}
-        </h1>
+        </h2>
         <p className="muted">Configure the AI backend for summaries and digests.</p>
 
         <div className="settings-form">
@@ -284,7 +410,7 @@ function SettingsContent() {
       </section>
 
       {/* General settings */}
-      <section className="section-card">
+      <section className="section-card" id="general">
         <h2>General</h2>
         <form onSubmit={handleManualSave} className="settings-form">
           <label>
@@ -341,8 +467,121 @@ function SettingsContent() {
         </form>
       </section>
 
+      {/* Account */}
+      <section className="section-card" id="account">
+        <h2>
+          Account
+          {passwordSaved ? (
+            <span className="key-status key-status-active saved-indicator-lg">UPDATED</span>
+          ) : null}
+        </h2>
+        <p className="muted">Change your account password.</p>
+        <form onSubmit={handleChangePassword} className="settings-form">
+          <label>
+            Current password
+            <input
+              type="password"
+              autoComplete="current-password"
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              className="input"
+              required
+            />
+          </label>
+
+          <label>
+            New password
+            <input
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="input"
+              required
+            />
+          </label>
+
+          <label>
+            Confirm new password
+            <input
+              type="password"
+              autoComplete="new-password"
+              minLength={8}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              className="input"
+              required
+            />
+          </label>
+
+          {passwordError ? <p className="error-text">{passwordError}</p> : null}
+
+          <button type="submit" className="button button-primary" disabled={passwordBusy}>
+            {passwordBusy ? "Updating..." : "Update password"}
+          </button>
+        </form>
+      </section>
+
+      <section className="section-card" id="account-deletion">
+        <h2>
+          Danger Zone
+          {deletionSaved ? (
+            <span className="key-status key-status-active saved-indicator-lg">UPDATED</span>
+          ) : null}
+        </h2>
+        <p className="muted">
+          Request account deletion. This is a request-only workflow for now and does not purge data immediately.
+        </p>
+
+        {deletionStatus?.status === "pending" ? (
+          <div className="settings-form">
+            <p className="muted">
+              Deletion requested on {new Date(deletionStatus.requestedAt).toLocaleString()}.
+            </p>
+            <button
+              type="button"
+              className="button button-danger"
+              disabled={deletionBusy}
+              onClick={handleCancelDeletion}
+            >
+              {deletionBusy ? "Cancelling..." : "Cancel deletion request"}
+            </button>
+            {deletionError ? <p className="error-text">{deletionError}</p> : null}
+          </div>
+        ) : (
+          <form onSubmit={handleRequestDeletion} className="settings-form">
+            <label>
+              Current password
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                className="input"
+                required
+              />
+            </label>
+            <label>
+              Type DELETE to confirm
+              <input
+                type="text"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                className="input"
+                required
+              />
+            </label>
+            {deletionError ? <p className="error-text">{deletionError}</p> : null}
+            <button type="submit" className="button button-danger" disabled={deletionBusy}>
+              {deletionBusy ? "Submitting..." : "Request account deletion"}
+            </button>
+          </form>
+        )}
+      </section>
+
       {/* Notifications */}
-      <section className="section-card">
+      <section className="section-card" id="notifications">
         <h2>Notifications</h2>
         <p className="muted">Receive push notifications when new stories arrive.</p>
         <div className="settings-form">
@@ -351,7 +590,7 @@ function SettingsContent() {
       </section>
 
       {/* Filter rules */}
-      <section className="section-card">
+      <section className="section-card" id="filters">
         <h2>Filter rules</h2>
         <p className="muted">Mute or block content matching patterns.</p>
 
@@ -421,6 +660,7 @@ function SettingsContent() {
         )}
       </section>
     </div>
+    </>
   );
 }
 
