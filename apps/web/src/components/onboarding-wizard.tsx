@@ -414,7 +414,7 @@ export function OnboardingWizard({
         </aside>
       </div>
 
-      <style jsx>{`
+      <style>{`
         .onboarding-wizard {
           display: flex;
           flex-direction: column;
