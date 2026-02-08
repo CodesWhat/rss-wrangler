@@ -62,9 +62,9 @@ Implementation notes:
 
 ## Current Status Snapshot (2026-02-08)
 
-- Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, tenant join flow, account data-export baseline, invite-token controls, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline, and consent/CMP baseline.
-- Phase 0 in progress: member approval policy/roles and entitlements hardening beyond baseline limits.
-- Still open for hosted launch: billing polish (cancel/reactivate UX + annual variants + webhook alerting), CMP adapter + script-gating verification, and hosted dogfood rollout.
+- Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, tenant join flow, account data-export baseline, invite-token controls, member approval policy/roles, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline, consent/CMP baseline, and self-host Docker/OrbStack smoke hardening.
+- Phase 0 in progress: entitlements hardening beyond baseline limits and hosted dogfood rollout readiness.
+- Still open for hosted launch: billing polish (cancel/reactivate UX + annual variants + webhook alerting), CMP adapter + script-gating verification, and first hosted dogfood telemetry run.
 - Deployment readiness update: Render blueprint profiles now exist (`render.free.yaml` smoke, `render.yaml` dogfood baseline); next action is first live deploy + telemetry validation.
 
 ---

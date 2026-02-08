@@ -24,7 +24,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${DATABASE_URL}
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-rss_wrangler}
     volumes:
       - ../db:/db:ro
     entrypoint: ["sh", "/db/run-migrations.sh"]
@@ -42,22 +42,22 @@ services:
     env_file:
       - .env
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      DATABASE_URL: ${DATABASE_URL}
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-rss_wrangler}
       API_PORT: ${API_PORT}
       API_HOST: ${API_HOST}
       API_CORS_ORIGIN: ${API_CORS_ORIGIN}
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET}
       AUTH_USERNAME: ${AUTH_USERNAME}
       AUTH_PASSWORD: ${AUTH_PASSWORD}
-      APP_BASE_URL: ${APP_BASE_URL}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
       ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL}
       REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL}
-      PASSWORD_RESET_TOKEN_TTL: ${PASSWORD_RESET_TOKEN_TTL}
-      EMAIL_VERIFICATION_TOKEN_TTL: ${EMAIL_VERIFICATION_TOKEN_TTL}
-      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION}
-      EMAIL_FROM: ${EMAIL_FROM}
-      RESEND_API_KEY: ${RESEND_API_KEY}
+      PASSWORD_RESET_TOKEN_TTL: ${PASSWORD_RESET_TOKEN_TTL:-1h}
+      EMAIL_VERIFICATION_TOKEN_TTL: ${EMAIL_VERIFICATION_TOKEN_TTL:-24h}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
+      EMAIL_FROM: ${EMAIL_FROM:-RSS Wrangler <no-reply@example.com>}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
     ports:
       - "4000:4000"
 
@@ -73,8 +73,8 @@ services:
     env_file:
       - .env
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      DATABASE_URL: ${DATABASE_URL}
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-rss_wrangler}
       WORKER_POLL_MINUTES: ${WORKER_POLL_MINUTES}
       WORKER_BATCH_SIZE: ${WORKER_BATCH_SIZE}
       API_BASE_URL: ${API_BASE_URL}
@@ -91,7 +91,9 @@ services:
     env_file:
       - .env
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      INTERNAL_API_BASE_URL: http://api:4000
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL}
       NEXT_PUBLIC_DEV_BEARER_TOKEN: ${NEXT_PUBLIC_DEV_BEARER_TOKEN}
     ports:

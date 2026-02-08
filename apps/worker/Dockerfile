@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package.json tsconfig.base.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/worker/package.json apps/worker/package.json
-RUN npm install
+RUN npm install --ignore-scripts
 
 COPY packages/contracts packages/contracts
 COPY apps/worker apps/worker

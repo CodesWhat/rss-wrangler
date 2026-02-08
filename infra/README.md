@@ -23,7 +23,7 @@ What it does:
 
 - ensures `infra/.env` exists (creates from example if missing)
 - builds and boots the Docker Compose stack
-- waits for API health (`/health`) and web root
+- waits for API and web health from inside containers (avoids host port conflicts)
 - performs an auth login smoke check (when `AUTH_USERNAME` and `AUTH_PASSWORD` exist)
 - verifies `api`, `web`, `worker`, and `postgres` are running
 
@@ -39,6 +39,9 @@ npm run orbstack:down
 Database migrations run automatically on startup via the `migrate` service.
 The `migrate` container uses `postgres:16-alpine` (which includes `psql`) and
 executes all `.sql` files in `db/migrations/` in alphabetical order.
+
+`migrate` is a one-shot job and is expected to exit after success. In some Docker UIs
+it may appear as "stopped" or not green even when migrations completed correctly.
 
 Both `api` and `worker` services depend on `migrate` completing successfully
 before they start (via `service_completed_successfully`).

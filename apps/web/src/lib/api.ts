@@ -67,7 +67,9 @@ export type SignupResult =
 const API_BASE_URL =
   typeof window !== "undefined"
     ? (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000")
-    : (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:4000");
+    : (process.env.INTERNAL_API_BASE_URL ??
+      process.env.NEXT_PUBLIC_API_BASE_URL ??
+      "http://localhost:4000");
 
 const LOGGED_IN_KEY = "rss_logged_in";
 const REFRESH_TOKEN_KEY = "rss_refresh_token";

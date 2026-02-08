@@ -48,7 +48,7 @@ docker compose -f infra/docker-compose.yml up --build -d
 
 Services started:
 - **postgres** — PostgreSQL 16
-- **migrate** — runs SQL migrations on startup
+- **migrate** — one-shot SQL migration runner (exits after success)
 - **api** — Fastify API (port 4000)
 - **worker** — feed polling, clustering, AI enrichment, digests
 - **web** — Next.js frontend (port 3000)
@@ -80,6 +80,7 @@ npm run orbstack:smoke
 ```
 
 This builds and boots the Compose stack, verifies API/web health, checks login, and confirms required services are running.
+Health checks run from inside containers, so they are not affected by local processes already using ports 3000/4000.
 
 ## Scripts
 

@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package.json tsconfig.base.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/web/package.json apps/web/package.json
-RUN npm install
+RUN npm install --ignore-scripts
 
 COPY packages/contracts packages/contracts
 COPY apps/web apps/web
@@ -20,6 +20,10 @@ COPY --from=build /app/package.json /app/package.json
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/packages/contracts /app/packages/contracts
 COPY --from=build /app/apps/web /app/apps/web
+COPY --from=build /app/apps/web/.next/static /app/apps/web/.next/standalone/apps/web/.next/static
+COPY --from=build /app/apps/web/public /app/apps/web/.next/standalone/apps/web/public
+
+WORKDIR /app/apps/web/.next/standalone/apps/web
 
 EXPOSE 3000
-CMD ["npm", "run", "start", "-w", "@rss-wrangler/web"]
+CMD ["node", "server.js"]
