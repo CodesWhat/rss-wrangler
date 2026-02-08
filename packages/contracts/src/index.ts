@@ -471,6 +471,26 @@ export const billingOverviewSchema = z.object({
 });
 export type BillingOverview = z.infer<typeof billingOverviewSchema>;
 
+// ---------- Privacy consent ----------
+
+export const privacyConsentSchema = z.object({
+  necessary: z.literal(true),
+  analytics: z.boolean(),
+  advertising: z.boolean(),
+  functional: z.boolean(),
+  consentCapturedAt: z.string().datetime().nullable(),
+  regionCode: z.string().nullable(),
+  requiresExplicitConsent: z.boolean()
+});
+export type PrivacyConsent = z.infer<typeof privacyConsentSchema>;
+
+export const updatePrivacyConsentRequestSchema = z.object({
+  analytics: z.boolean(),
+  advertising: z.boolean(),
+  functional: z.boolean()
+});
+export type UpdatePrivacyConsentRequest = z.infer<typeof updatePrivacyConsentRequestSchema>;
+
 export const recordEventsResponseSchema = z.object({
   accepted: z.number().int().min(0),
   deduped: z.number().int().min(0)
@@ -602,6 +622,7 @@ export const apiRoutes = {
   billingCheckout: "/v1/billing/checkout",
   billingPortal: "/v1/billing/portal",
   billingWebhook: "/v1/billing/webhooks/lemon-squeezy",
+  privacyConsent: "/v1/privacy/consent",
   opmlImport: "/v1/opml/import",
   opmlExport: "/v1/opml/export",
   search: "/v1/search",

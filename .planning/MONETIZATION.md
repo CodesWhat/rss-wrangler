@@ -162,7 +162,7 @@ user_id -> plan -> features -> limits
 
 - Hosted foundations are in-progress with shipped slices for onboarding wizard, tenant join, invite-token onboarding guard, password recovery/verification, account-export baseline, account-deletion automation, and load/SLO tooling.
 - Entitlements are partial: feed/search/ingest gates are live and now sync with Lemon webhook plan changes; broader route coverage + usage UX remain.
-- Billing foundation is partial-live: checkout/webhook sync/pricing/portal handoff shipped. Consent/CMP and hosted dogfood rollout remain open.
+- Billing foundation is partial-live: checkout/webhook sync/pricing/portal handoff shipped. Consent baseline is now partial-live; hosted dogfood rollout remains open.
 
 ### What we need to build
 
@@ -181,8 +181,8 @@ user_id -> plan -> features -> limits
 - [ ] Plan selection UI (pricing page, upgrade flow) **(Phase 0 mandatory for hosted launch)** *(partial: pricing page + upgrade checkout redirects shipped)*
 - [ ] Plan management UI (change/cancel/reactivate + billing portal handoff) **(Phase 0 mandatory for hosted launch)** *(partial: billing overview + portal handoff shipped; explicit in-app cancel/reactivate controls pending)*
 - [ ] Sponsored-story feed primitives (new `sponsored` item type, mandatory label/style, frequency caps, and feature flag default OFF)
-- [ ] Hosted consent baseline for cookies/storage (`necessary` by default + persistent "Privacy settings" reopen + consent withdrawal flow)
-- [ ] Region-aware gating for non-essential scripts and CMP adapter (if Google ads target EEA/UK/CH, use Google-certified CMP path)
+- [ ] Hosted consent baseline for cookies/storage (`necessary` by default + persistent "Privacy settings" reopen + consent withdrawal flow) *(partial: per-user consent persistence + persistent privacy controls shipped)*
+- [ ] Region-aware gating for non-essential scripts and CMP adapter (if Google ads target EEA/UK/CH, use Google-certified CMP path) *(partial: region detection + consent metadata shipped; CMP adapter and provider-specific script gating tests pending)*
 - [ ] Usage tracking for compute add-ons (token counting, extraction counts)
 - [ ] Full account export bundle (beyond OPML): saved/starred items, annotations, training signals, filters/rules, settings metadata
 - [ ] Annual billing option **(Phase 0 if pricing model includes annual at launch; otherwise first post-launch billing iteration)**

@@ -200,6 +200,7 @@ Audited: 2026-02-08
 | Entitlements + plan-aware limit enforcement | ⚠️ | Baseline entitlement middleware now exists: tenant plan defaults (`free/pro/pro_ai`), feed-cap checks on add/import, search-mode gating (title/source vs full-text), `/v1/account/entitlements`, worker min-poll enforcement, daily ingest budget reservation/release (`tenant_usage_daily`), and billing-webhook subscription sync into `tenant_plan_subscription`. Remaining gaps: broader route coverage, retention/index-size meters, and hosted warning/usage telemetry hardening. |
 | Hosted performance/load testing + SLO baselines | ✅ | Baseline shipped with repeatable multi-tenant API load profile + SLO thresholds (`infra/load/profiles/phase0-hosted-api-baseline.json`), worker queue SLO thresholds (`infra/load/profiles/phase0-worker-slo-baseline.json`), and automated perf gate scripts (`scripts/load/run-phase0-slo-gate.mjs`, `scripts/load/run-hosted-load.mjs`, `scripts/load/check-worker-slo.mjs`) documented in `.planning/PHASE0_HOSTED_SLO_BASELINE.md`. |
 | Billing integration (Lemon Squeezy + pricing/upgrade + plan management UI) | ⚠️ | Billing foundation shipped: Lemon Squeezy checkout endpoint, signed webhook ingestion with idempotency/audit table, subscription-to-plan sync, `/v1/billing` overview, billing portal handoff, settings billing section, and `/pricing` page. Remaining gaps: explicit in-app cancel/reactivate controls (beyond portal handoff), annual plan variants, and production alerting around webhook failures. |
+| Consent + CMP baseline (hosted) | ⚠️ | Baseline shipped: tenant/user consent storage (`user_privacy_consent`), `/v1/privacy/consent` read/write endpoints, necessary-only defaults, persistent privacy settings manager, and proxy-header region detection for explicit-consent locales. Remaining gaps: provider CMP adapter wiring, automated non-essential script gating tests, and policy-version migration tooling. |
 | Usage metering (feeds/items-day/retention/index size) | ⚠️ | Daily ingest metering baseline exists (`tenant_usage_daily` + reservation/release in worker + feed-count usage in entitlement responses). Remaining gaps: retention/index-size metering, billing-facing rollups, and usage surfacing in hosted account UI. |
 | Global API rate limiting baseline | ✅ | Fastify global rate limit exists (100 req/min), but not plan-aware |
 
@@ -220,7 +221,7 @@ Audited: 2026-02-08
 ## SUMMARY COUNTS
 
 - ✅ IMPLEMENTED: 37
-- ⚠️ PARTIAL: 18
+- ⚠️ PARTIAL: 19
 - 🔲 STUB: 6
 - ❌ MISSING: 49
 
@@ -245,3 +246,4 @@ Audited: 2026-02-08
 17. **Data portability bundle missing** - no export beyond OPML for saved items, annotations, training signals, and filters/rules
 18. **Hosted account management/compliance still incomplete** - account-deletion user-facing completion notifications and account-data-export worker/notification/retention hardening are still missing
 19. **Guided onboarding is baseline-only** - wizard exists, but deeper topic/bootstrap automation is still missing
+20. **Consent/CMP is baseline-only** - consent persistence + controls are shipped, but CMP adapter and automated script-gating verification are still pending

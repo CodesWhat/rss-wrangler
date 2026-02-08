@@ -14,6 +14,7 @@ import {
   folderSchema,
   listClustersQuerySchema,
   membershipPolicySchema,
+  privacyConsentSchema,
   readingStatsSchema,
   searchQuerySchema,
   settingsSchema,
@@ -41,6 +42,7 @@ import {
   type ListClustersQuery,
   type LoginRequest,
   type MembershipPolicy,
+  type PrivacyConsent,
   type ReadingStats,
   type ResendVerificationRequest,
   type ResetPasswordRequest,
@@ -51,6 +53,7 @@ import {
   type Topic,
   type UpdateFeedRequest,
   type UpdateMemberRequest,
+  type UpdatePrivacyConsentRequest,
   type UpdateSettingsRequest,
   type WorkspaceInvite,
   type WorkspaceMember,
@@ -1279,5 +1282,36 @@ export async function getBillingPortalUrl(): Promise<{ ok: true; url: string } |
     return { ok: true, url: body.url };
   } catch {
     return { ok: false, error: "Billing portal unavailable" };
+  }
+}
+
+// ---------- Privacy consent ----------
+
+export async function getPrivacyConsent(): Promise<PrivacyConsent | null> {
+  const payload = await requestJson<unknown>("/v1/privacy/consent");
+  if (!payload) return null;
+  return privacyConsentSchema.parse(payload);
+}
+
+export async function updatePrivacyConsent(
+  body: UpdatePrivacyConsentRequest
+): Promise<{ ok: true; consent: PrivacyConsent } | { ok: false; error: string }> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(`${API_BASE_URL}/v1/privacy/consent`, {
+      method: "PUT",
+      headers,
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Privacy settings update failed" };
+    }
+
+    const consent = privacyConsentSchema.parse(await res.json());
+    return { ok: true, consent };
+  } catch {
+    return { ok: false, error: "Privacy settings update failed" };
   }
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 import { AppNav } from "@/components/nav";
 import { AuthProvider } from "@/components/auth-provider";
+import { PrivacyConsentManager } from "@/components/privacy-consent-manager";
 import "./globals.css";
 
 const mono = JetBrains_Mono({
@@ -31,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="app-shell">
             <AppNav />
             <main className="main">{children}</main>
+            <PrivacyConsentManager />
           </div>
         </AuthProvider>
       </body>

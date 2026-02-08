@@ -20,6 +20,7 @@ import {
   signupRequestSchema,
   pushSubscribeRequestSchema,
   pushUnsubscribeRequestSchema,
+  privacyConsentSchema,
   requestAccountDeletionSchema,
   recordDwellRequestSchema,
   renameTopicRequestSchema,
@@ -30,6 +31,7 @@ import {
   tenantEntitlementsSchema,
   updateFeedRequestSchema,
   updateFilterRuleRequestSchema,
+  updatePrivacyConsentRequestSchema,
   updateMemberRequestSchema,
   updateMembershipPolicyRequestSchema,
   updateSettingsRequestSchema,
@@ -46,6 +48,7 @@ import { createAuthService } from "../services/auth-service";
 import { createBillingService } from "../services/billing-service";
 import { parseOpml } from "../services/opml-parser";
 import { PostgresStore } from "../services/postgres-store";
+import { requiresExplicitConsent, resolveCountryCode } from "../services/privacy-consent-service";
 import { validateFeedUrl } from "../services/url-validator";
 
 const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
@@ -918,6 +921,109 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       return billingPortalResponseSchema.parse({ url: result.url });
+    });
+
+    protectedRoutes.get("/v1/privacy/consent", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      if (!request.dbClient) {
+        throw app.httpErrors.internalServerError("missing tenant db context");
+      }
+
+      const countryCode = resolveCountryCode(request.headers);
+      const result = await request.dbClient.query<{
+        analytics_enabled: boolean;
+        advertising_enabled: boolean;
+        functional_enabled: boolean;
+        region_code: string | null;
+        updated_at: Date;
+      }>(
+        `SELECT analytics_enabled, advertising_enabled, functional_enabled, region_code, updated_at
+         FROM user_privacy_consent
+         WHERE tenant_id = $1
+           AND user_id = $2
+         LIMIT 1`,
+        [authContext.tenantId, authContext.userId]
+      );
+      const row = result.rows[0];
+      const effectiveRegion = row?.region_code ?? countryCode;
+
+      return privacyConsentSchema.parse({
+        necessary: true,
+        analytics: row?.analytics_enabled ?? false,
+        advertising: row?.advertising_enabled ?? false,
+        functional: row?.functional_enabled ?? false,
+        consentCapturedAt: row?.updated_at?.toISOString() ?? null,
+        regionCode: effectiveRegion ?? null,
+        requiresExplicitConsent: requiresExplicitConsent(effectiveRegion)
+      });
+    });
+
+    protectedRoutes.put("/v1/privacy/consent", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      if (!request.dbClient) {
+        throw app.httpErrors.internalServerError("missing tenant db context");
+      }
+
+      const payload = updatePrivacyConsentRequestSchema.parse(request.body);
+      const countryCode = resolveCountryCode(request.headers);
+      const result = await request.dbClient.query<{
+        analytics_enabled: boolean;
+        advertising_enabled: boolean;
+        functional_enabled: boolean;
+        region_code: string | null;
+        updated_at: Date;
+      }>(
+        `INSERT INTO user_privacy_consent (
+           tenant_id,
+           user_id,
+           analytics_enabled,
+           advertising_enabled,
+           functional_enabled,
+           region_code,
+           source,
+           updated_at
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, 'settings', NOW())
+         ON CONFLICT (tenant_id, user_id)
+         DO UPDATE SET
+           analytics_enabled = EXCLUDED.analytics_enabled,
+           advertising_enabled = EXCLUDED.advertising_enabled,
+           functional_enabled = EXCLUDED.functional_enabled,
+           region_code = COALESCE(EXCLUDED.region_code, user_privacy_consent.region_code),
+           source = EXCLUDED.source,
+           updated_at = NOW()
+         RETURNING analytics_enabled, advertising_enabled, functional_enabled, region_code, updated_at`,
+        [
+          authContext.tenantId,
+          authContext.userId,
+          payload.analytics,
+          payload.advertising,
+          payload.functional,
+          countryCode
+        ]
+      );
+
+      const row = result.rows[0];
+      if (!row) {
+        throw app.httpErrors.internalServerError("failed to persist privacy consent");
+      }
+
+      const effectiveRegion = row.region_code ?? countryCode;
+      return privacyConsentSchema.parse({
+        necessary: true,
+        analytics: row.analytics_enabled,
+        advertising: row.advertising_enabled,
+        functional: row.functional_enabled,
+        consentCapturedAt: row.updated_at.toISOString(),
+        regionCode: effectiveRegion ?? null,
+        requiresExplicitConsent: requiresExplicitConsent(effectiveRegion)
+      });
     });
 
     protectedRoutes.get("/v1/settings", async (request) => {

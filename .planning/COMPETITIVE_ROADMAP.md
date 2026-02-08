@@ -281,10 +281,10 @@ Features that only power users want or that only one app has.
 | Entitlements + plan-limit middleware baseline | ⚠️ Partial | Plan defaults + API/worker feed/search/ingest gates landed; billing webhook sync now lands plan updates into entitlements, broader coverage/usage UX remain |
 | Hosted performance/load testing + SLO baseline | ✅ Implemented | Load harness, SLO policy, and calibration workflow are in repo |
 | Billing foundation (Lemon Squeezy + plan management UX) | ⚠️ Partial | Checkout + signed webhook sync + billing overview/portal APIs + settings/pricing surfaces shipped; in-app cancel/reactivate UX and annual variants remain |
-| Consent + CMP baseline (hosted) | ❌ Missing | Not started |
+| Consent + CMP baseline (hosted) | ⚠️ Partial | Necessary-only default + persistent privacy controls + region-aware consent metadata shipped; CMP adapter and automated non-essential script gating tests remain |
 | Hosted SaaS offering (dogfood pilot) | ⚠️ Pending | Infra/provider decisions locked; hosted pilot execution still pending |
 
-**Immediate next slice:** Consent + CMP baseline (strictly-necessary default, persistent privacy settings, region-aware gating for non-essential scripts).
+**Immediate next slice:** Hosted SaaS dogfood pilot rollout (cost telemetry, limit tuning, and launch-readiness checks).
 
 ### Phase 0: Hosted SaaS Pilot & Cost Model
 

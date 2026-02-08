@@ -120,6 +120,7 @@ See `infra/.env.example` for the full list. Key variables:
 - OPML import and export
 - Push notifications
 - Annotations and highlights
+- Privacy consent controls (necessary-only default, hosted non-essential opt-in)
 - Feed discovery directory (500+ curated feeds)
 - PWA installable
 - Reading stats dashboard
