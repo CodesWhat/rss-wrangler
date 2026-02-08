@@ -11,6 +11,29 @@
 3. Access web UI at `http://<tailscale-hostname>:3000`.
 4. Keep API private to Tailscale; do not expose to public WAN.
 
+## OrbStack self-host validation (default local loop)
+
+Use this as the primary test path before hosted deploys:
+
+```bash
+npm run orbstack:smoke
+```
+
+What it does:
+
+- ensures `infra/.env` exists (creates from example if missing)
+- builds and boots the Docker Compose stack
+- waits for API health (`/health`) and web root
+- performs an auth login smoke check (when `AUTH_USERNAME` and `AUTH_PASSWORD` exist)
+- verifies `api`, `web`, `worker`, and `postgres` are running
+
+Related commands:
+
+```bash
+npm run orbstack:up
+npm run orbstack:down
+```
+
 ## Migrations
 
 Database migrations run automatically on startup via the `migrate` service.

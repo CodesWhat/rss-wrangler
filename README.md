@@ -71,6 +71,16 @@ npm run dev:worker   # Background jobs
 npm run dev:web      # Next.js on :3000
 ```
 
+## OrbStack Docker smoke test (recommended)
+
+For self-host/free-user validation, run:
+
+```bash
+npm run orbstack:smoke
+```
+
+This builds and boots the Compose stack, verifies API/web health, checks login, and confirms required services are running.
+
 ## Scripts
 
 | Command | Description |
