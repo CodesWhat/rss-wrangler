@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StoryCard } from "@/components/story-card";
 import { ProtectedRoute } from "@/components/protected-route";
-import { getSettings, listClusters, listFeeds } from "@/lib/api";
+import { getSettings, listClusters, listFeeds, updateSettings } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { ShortcutsHelp, ShortcutsButton } from "@/components/shortcuts-help";
 import { LayoutToggle, getStoredLayout, storeLayout } from "@/components/layout-toggle";
@@ -11,8 +11,6 @@ import { OnboardingWizard } from "@/components/onboarding-wizard";
 import type { ViewLayout } from "@/components/layout-toggle";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
 import type { AiMode, ClusterCard, StorySort } from "@rss-wrangler/contracts";
-
-const ONBOARDING_DISMISSED_KEY = "rss_onboarding_dismissed";
 
 function HomeFeed() {
   const [clusters, setClusters] = useState<ClusterCard[]>([]);
@@ -30,6 +28,7 @@ function HomeFeed() {
   const [setupLoading, setSetupLoading] = useState(true);
   const [feedsCount, setFeedsCount] = useState(0);
   const [initialAiMode, setInitialAiMode] = useState<AiMode>("off");
+  const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<string | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
 
@@ -39,16 +38,12 @@ function HomeFeed() {
   }, []);
 
   useEffect(() => {
-    const dismissed = localStorage.getItem(ONBOARDING_DISMISSED_KEY) === "1";
-    setShowOnboarding(!dismissed);
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
     Promise.all([listFeeds(), getSettings()]).then(([feeds, settings]) => {
       if (cancelled) return;
       setFeedsCount(feeds.length);
       setInitialAiMode(settings.aiMode);
+      setOnboardingCompletedAt(settings.onboardingCompletedAt ?? null);
       setSetupLoading(false);
     });
     return () => {
@@ -131,14 +126,20 @@ function HomeFeed() {
     setClusters((prev) => prev.filter((c) => c.id !== id));
   }
 
-  function dismissOnboarding() {
+  async function dismissOnboarding() {
     setShowOnboarding(false);
-    localStorage.setItem(ONBOARDING_DISMISSED_KEY, "1");
+    const completedAt = new Date().toISOString();
+    setOnboardingCompletedAt(completedAt);
+    const updated = await updateSettings({ onboardingCompletedAt: completedAt });
+    if (updated) {
+      setOnboardingCompletedAt(updated.onboardingCompletedAt ?? completedAt);
+    }
   }
 
-  function reopenOnboarding() {
+  async function reopenOnboarding() {
     setShowOnboarding(true);
-    localStorage.removeItem(ONBOARDING_DISMISSED_KEY);
+    setOnboardingCompletedAt(null);
+    await updateSettings({ onboardingCompletedAt: null });
   }
 
   const handleRefresh = useCallback(async () => {
@@ -222,7 +223,10 @@ function HomeFeed() {
 
   useKeyboardShortcuts(shortcutActions);
 
-  const shouldShowOnboarding = !setupLoading && feedsCount === 0 && showOnboarding;
+  const shouldShowOnboarding = !setupLoading
+    && feedsCount === 0
+    && showOnboarding
+    && !onboardingCompletedAt;
 
   return (
     <>
@@ -292,7 +296,9 @@ function HomeFeed() {
           feedsCount={feedsCount}
           initialAiMode={initialAiMode}
           onFeedsCountChange={setFeedsCount}
-          onDismiss={dismissOnboarding}
+          onDismiss={() => {
+            void dismissOnboarding();
+          }}
         />
       ) : clusters.length === 0 && feedsCount === 0 && showEmptyBanner ? (
         <section className="banner">
@@ -301,7 +307,13 @@ function HomeFeed() {
             <p>Run guided setup, or add feeds manually in Sources.</p>
           </div>
           <div className="row">
-            <button type="button" className="button button-secondary" onClick={reopenOnboarding}>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => {
+                void reopenOnboarding();
+              }}
+            >
               Start setup
             </button>
             <a href="/sources" className="button button-secondary">

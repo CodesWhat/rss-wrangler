@@ -159,7 +159,8 @@ export const settingsSchema = z.object({
   digestAwayHours: z.number().int().min(1),
   digestBacklogThreshold: z.number().int().min(1),
   feedPollMinutes: z.number().int().min(5),
-  wallabagUrl: z.string().optional().default("")
+  wallabagUrl: z.string().optional().default(""),
+  onboardingCompletedAt: z.string().datetime().nullable().optional()
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
