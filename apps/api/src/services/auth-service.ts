@@ -49,6 +49,15 @@ interface UserAccountRow {
 
 const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
 
+export function timingSafeStringEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool) {
   const emailService = createEmailService(env, app.log);
 
@@ -310,8 +319,8 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     if (
       tenantId === DEFAULT_TENANT_ID &&
       userCount === 0 &&
-      timingSafeEqual(Buffer.from(username), Buffer.from(env.AUTH_USERNAME)) &&
-      timingSafeEqual(Buffer.from(password), Buffer.from(env.AUTH_PASSWORD))
+      timingSafeStringEqual(username, env.AUTH_USERNAME) &&
+      timingSafeStringEqual(password, env.AUTH_PASSWORD)
     ) {
       // Auto-create the admin user in the DB using pgcrypto
       const insertResult = await withTenantClient(tenantId, async (client) => {

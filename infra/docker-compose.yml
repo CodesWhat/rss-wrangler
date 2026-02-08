@@ -83,6 +83,9 @@ services:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:4001}
+        NEXT_PUBLIC_DEV_BEARER_TOKEN: ${NEXT_PUBLIC_DEV_BEARER_TOKEN:-}
     container_name: rss-wrangler-web
     restart: unless-stopped
     depends_on:
