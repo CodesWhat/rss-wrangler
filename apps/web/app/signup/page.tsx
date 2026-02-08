@@ -6,7 +6,6 @@ import { useEffect, useState, type FormEvent } from "react";
 
 export default function SignupPage() {
   const router = useRouter();
-  const [tenantSlug, setTenantSlug] = useState("default");
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -16,11 +15,7 @@ export default function SignupPage() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const tenant = params.get("tenant");
     const invite = params.get("invite");
-    if (tenant) {
-      setTenantSlug(tenant);
-    }
     if (invite) {
       setInviteCode(invite);
     }
@@ -32,7 +27,6 @@ export default function SignupPage() {
     setSubmitting(true);
     try {
       const result = await joinWorkspace({
-        tenantSlug,
         email,
         username,
         password,

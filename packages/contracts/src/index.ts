@@ -225,16 +225,24 @@ export const eventsBatchRequestSchema = z.object({
 });
 export type EventsBatchRequest = z.infer<typeof eventsBatchRequestSchema>;
 
+const tenantSlugSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/);
+
+const tenantSlugWithDefaultSchema = tenantSlugSchema.optional().default("default");
+
 export const loginRequestSchema = z.object({
   username: z.string().min(1),
   password: z.string().min(1),
-  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/).default("default")
+  tenantSlug: tenantSlugWithDefaultSchema
 });
-export type LoginRequest = z.infer<typeof loginRequestSchema>;
+export type LoginRequest = z.input<typeof loginRequestSchema>;
 
 export const signupRequestSchema = z.object({
   tenantName: z.string().trim().min(2).max(100),
-  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  tenantSlug: tenantSlugSchema,
   email: z.string().trim().email().max(320),
   username: z.string().trim().min(1).max(64),
   password: z.string().min(8)
@@ -242,13 +250,13 @@ export const signupRequestSchema = z.object({
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 
 export const joinWorkspaceRequestSchema = z.object({
-  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  tenantSlug: tenantSlugWithDefaultSchema,
   email: z.string().trim().email().max(320),
   username: z.string().trim().min(1).max(64),
   password: z.string().min(8),
   inviteCode: z.string().trim().min(12).max(256).optional()
 });
-export type JoinWorkspaceRequest = z.infer<typeof joinWorkspaceRequestSchema>;
+export type JoinWorkspaceRequest = z.input<typeof joinWorkspaceRequestSchema>;
 
 export const createWorkspaceInviteRequestSchema = z.object({
   email: z.string().trim().email().max(320).optional(),
@@ -282,10 +290,10 @@ export const changePasswordRequestSchema = z.object({
 export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
 
 export const forgotPasswordRequestSchema = z.object({
-  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  tenantSlug: tenantSlugWithDefaultSchema,
   email: z.string().trim().email().max(320)
 });
-export type ForgotPasswordRequest = z.infer<typeof forgotPasswordRequestSchema>;
+export type ForgotPasswordRequest = z.input<typeof forgotPasswordRequestSchema>;
 
 export const resetPasswordRequestSchema = z.object({
   token: z.string().min(12).max(512),
@@ -294,10 +302,10 @@ export const resetPasswordRequestSchema = z.object({
 export type ResetPasswordRequest = z.infer<typeof resetPasswordRequestSchema>;
 
 export const resendVerificationRequestSchema = z.object({
-  tenantSlug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/),
+  tenantSlug: tenantSlugWithDefaultSchema,
   email: z.string().trim().email().max(320)
 });
-export type ResendVerificationRequest = z.infer<typeof resendVerificationRequestSchema>;
+export type ResendVerificationRequest = z.input<typeof resendVerificationRequestSchema>;
 
 export const verifyEmailRequestSchema = z.object({
   token: z.string().min(12).max(512)

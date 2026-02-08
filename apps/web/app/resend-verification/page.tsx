@@ -1,25 +1,19 @@
 "use client";
 
 import { resendVerification } from "@/lib/api";
-import { useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 
 export default function ResendVerificationPage() {
-  const [tenantSlug, setTenantSlug] = useState("default");
   const [email, setEmail] = useState("");
   const [error, setError] = useState("");
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    setTenantSlug(params.get("tenant") ?? "default");
-  }, []);
-
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError("");
     setSubmitting(true);
-    const result = await resendVerification({ tenantSlug, email });
+    const result = await resendVerification({ email });
     setSubmitting(false);
 
     if (!result.ok) {

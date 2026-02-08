@@ -446,7 +446,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     | "verification_required"
     | "pending_approval"
   > {
-    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug);
+    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug ?? "default");
     if (!tenantId) {
       return "tenant_not_found";
     }
@@ -1417,7 +1417,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   async function resendEmailVerification(
     payload: ResendVerificationRequest
   ): Promise<"ok" | "already_verified"> {
-    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug);
+    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug ?? "default");
     if (!tenantId) {
       return "ok";
     }
@@ -1505,7 +1505,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   }
 
   async function requestPasswordReset(payload: ForgotPasswordRequest): Promise<void> {
-    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug);
+    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug ?? "default");
     if (!tenantId) {
       return;
     }

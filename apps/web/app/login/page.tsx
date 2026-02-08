@@ -9,7 +9,6 @@ export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [tenantSlug, setTenantSlug] = useState("default");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [notice, setNotice] = useState("");
@@ -17,10 +16,6 @@ export default function LoginPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     setNotice(params.get("notice") ?? "");
-    const tenant = params.get("tenant");
-    if (tenant) {
-      setTenantSlug(tenant);
-    }
   }, []);
 
   useEffect(() => {
@@ -34,7 +29,7 @@ export default function LoginPage() {
     setError("");
     setSubmitting(true);
     try {
-      await loginUser({ username, password, tenantSlug });
+      await loginUser({ username, password });
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -80,26 +75,10 @@ export default function LoginPage() {
           <button type="submit" className="button button-primary" disabled={submitting}>
             {submitting ? "Signing in..." : "Sign in"}
           </button>
-          <a
-            href={
-              tenantSlug === "default"
-                ? "/forgot-password"
-                : `/forgot-password?tenant=${encodeURIComponent(tenantSlug)}`
-            }
-            className="muted"
-            style={{ textAlign: "center", display: "block" }}
-          >
+          <a href="/forgot-password" className="muted" style={{ textAlign: "center", display: "block" }}>
             Forgot password?
           </a>
-          <a
-            href={
-              tenantSlug === "default"
-                ? "/resend-verification"
-                : `/resend-verification?tenant=${encodeURIComponent(tenantSlug)}`
-            }
-            className="muted"
-            style={{ textAlign: "center", display: "block" }}
-          >
+          <a href="/resend-verification" className="muted" style={{ textAlign: "center", display: "block" }}>
             Resend verification email
           </a>
           <a href="/signup" className="muted" style={{ textAlign: "center", display: "block" }}>

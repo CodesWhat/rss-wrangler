@@ -362,7 +362,7 @@ export async function joinWorkspace(req: JoinWorkspaceRequest): Promise<SignupRe
   });
   if (!res.ok) {
     if (res.status === 404) {
-      throw new Error("Workspace not found");
+      throw new Error("Signup is currently unavailable");
     }
     if (res.status === 403) {
       throw new Error("Invite code required");

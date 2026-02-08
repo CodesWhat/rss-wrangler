@@ -9,11 +9,7 @@ export default function JoinWorkspacePage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const nextParams = new URLSearchParams();
-    const tenant = params.get("tenant");
     const invite = params.get("invite");
-    if (tenant) {
-      nextParams.set("tenant", tenant);
-    }
     if (invite) {
       nextParams.set("invite", invite);
     }
