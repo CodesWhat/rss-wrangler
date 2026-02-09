@@ -188,7 +188,7 @@ export function OnboardingWizard({
     addMessage.startsWith("Could not") || addMessage.startsWith("OPML import failed");
 
   return (
-    <section className="section-card onboarding-wizard">
+    <section className="onboarding-wizard">
       <div className="onboarding-header">
         <div>
           <h2 className="onboarding-title">Guided setup</h2>
@@ -465,10 +465,10 @@ export function OnboardingWizard({
           gap: 1rem;
           max-width: 1180px;
           margin: 0 auto;
+          padding: var(--sp-4);
           border: none;
-          background: var(--bg-base);
-          border-color: var(--border-default);
-          box-shadow: 0 2px 10px rgba(10, 10, 10, 0.04);
+          background: transparent;
+          box-shadow: none;
         }
         .onboarding-header {
           display: flex;
