@@ -466,7 +466,7 @@ export function OnboardingWizard({
           max-width: 1180px;
           margin: 0 auto;
           border: none;
-          background: var(--bg-elevated);
+          background: #d9dce3;
           border-color: var(--border-default);
           box-shadow: 0 2px 10px rgba(10, 10, 10, 0.04);
         }
@@ -490,7 +490,9 @@ export function OnboardingWizard({
           flex-direction: column;
           gap: 0.75rem;
           background: var(--bg-surface);
+          border: 1px solid var(--border-default);
           padding: 0.9rem;
+          box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04);
         }
         .onboarding-step {
           display: flex;
