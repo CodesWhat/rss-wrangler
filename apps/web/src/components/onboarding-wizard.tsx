@@ -20,6 +20,8 @@ interface OnboardingWizardProps {
   onDismiss: () => void;
 }
 
+type SourceMethod = "url" | "opml" | "directory";
+
 const STARTER_PER_CATEGORY = 2;
 const STARTER_MAX = 10;
 
@@ -32,6 +34,7 @@ export function OnboardingWizard({
   onDismiss
 }: OnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [sourceMethod, setSourceMethod] = useState<SourceMethod>("url");
   const [feedUrl, setFeedUrl] = useState("");
   const [addBusy, setAddBusy] = useState(false);
   const [addMessage, setAddMessage] = useState("");
@@ -181,6 +184,8 @@ export function OnboardingWizard({
   const interestsDone = selectedCategories.length > 0 || starterAdded;
   const aiDone = aiSaved;
   const progressDone = [sourceDone, interestsDone, aiDone].filter(Boolean).length;
+  const addMessageIsError =
+    addMessage.startsWith("Could not") || addMessage.startsWith("OPML import failed");
 
   return (
     <section className="section-card onboarding-wizard">
@@ -202,60 +207,98 @@ export function OnboardingWizard({
             <div className="onboarding-step">
               <h3>1. Add your first source</h3>
               <p className="muted">
-                Choose any path: paste a feed URL, import OPML, or browse the starter directory.
+                Pick one way to start now. You can always use the other methods later in Sources.
               </p>
 
-              <div className="onboarding-card">
-                <label htmlFor="onboarding-feed-url">Feed URL</label>
-                <div className="onboarding-inline">
-                  <input
-                    id="onboarding-feed-url"
-                    type="url"
-                    className="input"
-                    placeholder="https://example.com/feed.xml"
-                    value={feedUrl}
-                    onChange={(event) => setFeedUrl(event.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    onClick={handleAddFeed}
-                    disabled={addBusy}
-                  >
-                    {addBusy ? "Adding..." : "Add feed"}
-                  </button>
-                </div>
+              <div className="onboarding-methods" role="tablist" aria-label="Source setup method">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sourceMethod === "url"}
+                  className={`onboarding-method ${sourceMethod === "url" ? "is-active" : ""}`}
+                  onClick={() => setSourceMethod("url")}
+                >
+                  Feed URL
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sourceMethod === "opml"}
+                  className={`onboarding-method ${sourceMethod === "opml" ? "is-active" : ""}`}
+                  onClick={() => setSourceMethod("opml")}
+                >
+                  OPML import
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={sourceMethod === "directory"}
+                  className={`onboarding-method ${sourceMethod === "directory" ? "is-active" : ""}`}
+                  onClick={() => setSourceMethod("directory")}
+                >
+                  Starter directory
+                </button>
               </div>
 
-              <div className="onboarding-card">
-                <label htmlFor="onboarding-opml">OPML import</label>
-                <div className="onboarding-inline">
-                  <input
-                    id="onboarding-opml"
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".opml,.xml"
-                    className="input"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        void handleImportOpml(file);
-                      }
-                    }}
-                  />
-                </div>
-              </div>
+              <div className="onboarding-card onboarding-method-shell">
+                {sourceMethod === "url" ? (
+                  <>
+                    <label htmlFor="onboarding-feed-url">Feed URL</label>
+                    <div className="onboarding-inline">
+                      <input
+                        id="onboarding-feed-url"
+                        type="url"
+                        className="input"
+                        placeholder="https://example.com/feed.xml"
+                        value={feedUrl}
+                        onChange={(event) => setFeedUrl(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        onClick={handleAddFeed}
+                        disabled={addBusy}
+                      >
+                        {addBusy ? "Adding..." : "Add feed"}
+                      </button>
+                    </div>
+                  </>
+                ) : null}
 
-              <div className="onboarding-card">
-                <label>Starter directory</label>
-                <p className="muted">Explore curated feeds and subscribe with one click.</p>
-                <a href="/discover" className="button button-secondary">
-                  Open Discover
-                </a>
+                {sourceMethod === "opml" ? (
+                  <>
+                    <label htmlFor="onboarding-opml">OPML import</label>
+                    <div className="onboarding-inline">
+                      <input
+                        id="onboarding-opml"
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".opml,.xml"
+                        className="input"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) {
+                            void handleImportOpml(file);
+                          }
+                        }}
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {sourceMethod === "directory" ? (
+                  <>
+                    <label>Starter directory</label>
+                    <p className="muted">Explore curated feeds and subscribe with one click.</p>
+                    <a href="/discover" className="button button-secondary">
+                      Open Discover
+                    </a>
+                  </>
+                ) : null}
               </div>
 
               {addMessage ? (
-                <p className={addMessage.startsWith("Could not") || addMessage.startsWith("OPML import failed") ? "error-text" : "muted"}>
+                <p className={addMessageIsError ? "error-text" : "muted"}>
                   {addMessage}
                 </p>
               ) : null}
@@ -369,15 +412,16 @@ export function OnboardingWizard({
             </div>
           ) : null}
 
-          <div className="onboarding-actions">
-            <button
-              type="button"
-              className="button button-small"
-              onClick={() => setStep((prev) => (prev > 1 ? (prev - 1) as 1 | 2 | 3 : prev))}
-              disabled={step === 1}
-            >
-              Back
-            </button>
+          <div className={`onboarding-actions ${step === 1 ? "is-first-step" : ""}`}>
+            {step > 1 ? (
+              <button
+                type="button"
+                className="button button-small"
+                onClick={() => setStep((prev) => (prev > 1 ? (prev - 1) as 1 | 2 | 3 : prev))}
+              >
+                Back
+              </button>
+            ) : null}
             <button
               type="button"
               className="button button-small button-primary"
@@ -440,16 +484,49 @@ export function OnboardingWizard({
           flex-direction: column;
           gap: 0.75rem;
         }
-        .onboarding-step h3 {
-          margin-bottom: 0.25rem;
+        .onboarding-step {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
         }
-        .onboarding-card {
+        .onboarding-step h3 {
+          margin: 0;
+        }
+        .onboarding-methods {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+        }
+        .onboarding-method {
           border: 1px solid var(--border-default);
           background: var(--bg-surface);
+          color: var(--text-secondary);
+          font-family: var(--font-mono);
+          font-size: 0.72rem;
+          font-weight: 600;
+          letter-spacing: 0.02em;
+          text-transform: uppercase;
+          padding: 0.35rem 0.6rem;
+        }
+        .onboarding-method:hover {
+          background: var(--bg-hover);
+          color: var(--text-primary);
+        }
+        .onboarding-method.is-active {
+          border-color: var(--accent);
+          color: var(--accent);
+          background: var(--accent-dim);
+        }
+        .onboarding-card {
+          border: 1px solid var(--border-hairline);
+          background: var(--bg-elevated);
           padding: 0.75rem;
           display: flex;
           flex-direction: column;
           gap: 0.5rem;
+        }
+        .onboarding-method-shell {
+          min-height: 142px;
         }
         .onboarding-inline {
           display: flex;
@@ -472,9 +549,12 @@ export function OnboardingWizard({
           justify-content: space-between;
           gap: 0.5rem;
         }
+        .onboarding-actions.is-first-step {
+          justify-content: flex-end;
+        }
         .onboarding-checklist {
-          border: 1px solid var(--border-default);
-          background: var(--bg-elevated);
+          border: 1px solid var(--border-hairline);
+          background: var(--bg-surface);
           padding: 0.75rem;
           display: flex;
           flex-direction: column;
