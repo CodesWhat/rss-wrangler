@@ -229,131 +229,133 @@ function HomeFeed() {
 
   return (
     <>
-      <div className="page-header">
-        <h1 className="page-title">Your Feed</h1>
-        <p className="page-meta">
-          <span className="count">{clusters.length} stories</span>
-        </p>
-      </div>
-
-      <div className="feed-controls">
-        <div className="feed-sort">
-          <button
-            type="button"
-            className={cn("sort-btn", sort === "personal" && "active")}
-            onClick={() => setSort("personal")}
-          >
-            For You
-          </button>
-          <button
-            type="button"
-            className={cn("sort-btn", sort === "latest" && "active")}
-            onClick={() => setSort("latest")}
-          >
-            Latest
-          </button>
+      <div className="home-shell">
+        <div className="page-header">
+          <h1 className="page-title">Your Feed</h1>
+          <p className="page-meta">
+            <span className="count">{clusters.length} stories</span>
+          </p>
         </div>
-        <div className="row">
-          <LayoutToggle layout={layout} onChange={handleLayoutChange} />
-          <button
-            type="button"
-            className="button button-small"
-            onClick={handleRefresh}
-            disabled={refreshing}
-          >
-            {refreshing ? "Refreshing..." : "Refresh"}
-          </button>
-        </div>
-      </div>
 
-      {loading ? (
-        <p className="muted">Loading stories...</p>
-      ) : shouldShowOnboarding ? (
-        <OnboardingWizard
-          feedsCount={feedsCount}
-          initialAiMode={initialAiMode}
-          onFeedsCountChange={setFeedsCount}
-          onDismiss={() => {
-            void dismissOnboarding();
-          }}
-        />
-      ) : clusters.length === 0 && feedsCount === 0 && showEmptyBanner ? (
-        <section className="banner">
-          <div>
-            <strong>No sources configured yet.</strong>
-            <p>Run guided setup, or add feeds manually in Sources.</p>
+        <div className="feed-controls">
+          <div className="feed-sort">
+            <button
+              type="button"
+              className={cn("sort-btn", sort === "personal" && "active")}
+              onClick={() => setSort("personal")}
+            >
+              For You
+            </button>
+            <button
+              type="button"
+              className={cn("sort-btn", sort === "latest" && "active")}
+              onClick={() => setSort("latest")}
+            >
+              Latest
+            </button>
           </div>
           <div className="row">
+            <LayoutToggle layout={layout} onChange={handleLayoutChange} />
             <button
               type="button"
-              className="button button-secondary"
-              onClick={() => {
-                void reopenOnboarding();
-              }}
+              className="button button-small"
+              onClick={handleRefresh}
+              disabled={refreshing}
             >
-              Start setup
-            </button>
-            <a href="/sources" className="button button-secondary">
-              Sources
-            </a>
-            <button
-              type="button"
-              className="banner-dismiss"
-              onClick={() => setShowEmptyBanner(false)}
-              aria-label="Dismiss"
-            >
-              &times;
+              {refreshing ? "Refreshing..." : "Refresh"}
             </button>
           </div>
-        </section>
-      ) : clusters.length === 0 && showEmptyBanner ? (
-        <section className="banner">
-          <div>
-            <strong>No unread stories.</strong>
-            <p>Add some feeds in Sources to get started.</p>
-          </div>
-          <div className="row">
-            <a href="/sources" className="button button-secondary">
-              Sources
-            </a>
-            <button
-              type="button"
-              className="banner-dismiss"
-              onClick={() => setShowEmptyBanner(false)}
-              aria-label="Dismiss"
-            >
-              &times;
-            </button>
-          </div>
-        </section>
-      ) : (
-        <section className="cards" aria-label="Story cards">
-          {clusters.map((cluster, i) => (
-            <StoryCard
-              key={cluster.id}
-              cluster={cluster}
-              layout={layout}
-              selected={i === selectedIndex}
-              onRemove={handleRemove}
-              ref={(el) => {
-                if (el) cardRefs.current.set(i, el);
-                else cardRefs.current.delete(i);
-              }}
-            />
-          ))}
-          {cursor && <div ref={sentinelRef} className="scroll-sentinel" />}
-          {loadingMore && <p className="muted">Loading more...</p>}
-          {cursor && !loadingMore && (
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => fetchClusters(false)}
-            >
-              Load more
-            </button>
-          )}
-        </section>
-      )}
+        </div>
+
+        {loading ? (
+          <p className="muted">Loading stories...</p>
+        ) : shouldShowOnboarding ? (
+          <OnboardingWizard
+            feedsCount={feedsCount}
+            initialAiMode={initialAiMode}
+            onFeedsCountChange={setFeedsCount}
+            onDismiss={() => {
+              void dismissOnboarding();
+            }}
+          />
+        ) : clusters.length === 0 && feedsCount === 0 && showEmptyBanner ? (
+          <section className="banner">
+            <div>
+              <strong>No sources configured yet.</strong>
+              <p>Run guided setup, or add feeds manually in Sources.</p>
+            </div>
+            <div className="row">
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => {
+                  void reopenOnboarding();
+                }}
+              >
+                Start setup
+              </button>
+              <a href="/sources" className="button button-secondary">
+                Sources
+              </a>
+              <button
+                type="button"
+                className="banner-dismiss"
+                onClick={() => setShowEmptyBanner(false)}
+                aria-label="Dismiss"
+              >
+                &times;
+              </button>
+            </div>
+          </section>
+        ) : clusters.length === 0 && showEmptyBanner ? (
+          <section className="banner">
+            <div>
+              <strong>No unread stories.</strong>
+              <p>Add some feeds in Sources to get started.</p>
+            </div>
+            <div className="row">
+              <a href="/sources" className="button button-secondary">
+                Sources
+              </a>
+              <button
+                type="button"
+                className="banner-dismiss"
+                onClick={() => setShowEmptyBanner(false)}
+                aria-label="Dismiss"
+              >
+                &times;
+              </button>
+            </div>
+          </section>
+        ) : (
+          <section className="cards" aria-label="Story cards">
+            {clusters.map((cluster, i) => (
+              <StoryCard
+                key={cluster.id}
+                cluster={cluster}
+                layout={layout}
+                selected={i === selectedIndex}
+                onRemove={handleRemove}
+                ref={(el) => {
+                  if (el) cardRefs.current.set(i, el);
+                  else cardRefs.current.delete(i);
+                }}
+              />
+            ))}
+            {cursor && <div ref={sentinelRef} className="scroll-sentinel" />}
+            {loadingMore && <p className="muted">Loading more...</p>}
+            {cursor && !loadingMore && (
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => fetchClusters(false)}
+              >
+                Load more
+              </button>
+            )}
+          </section>
+        )}
+      </div>
 
       <ShortcutsHelp open={showHelp} onClose={() => setShowHelp(false)} />
       <ShortcutsButton onClick={() => setShowHelp((prev) => !prev)} />

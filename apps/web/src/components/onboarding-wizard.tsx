@@ -463,6 +463,11 @@ export function OnboardingWizard({
           display: flex;
           flex-direction: column;
           gap: 1rem;
+          max-width: 1180px;
+          margin: 0 auto;
+          background: var(--bg-elevated);
+          border-color: var(--border-default);
+          box-shadow: 0 2px 10px rgba(10, 10, 10, 0.04);
         }
         .onboarding-header {
           display: flex;
@@ -483,6 +488,10 @@ export function OnboardingWizard({
           display: flex;
           flex-direction: column;
           gap: 0.75rem;
+          background: var(--bg-surface);
+          border: 1px solid var(--border-default);
+          padding: 0.9rem;
+          box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04);
         }
         .onboarding-step {
           display: flex;
@@ -528,6 +537,7 @@ export function OnboardingWizard({
         }
         .onboarding-method-shell {
           min-height: 142px;
+          max-width: 980px;
         }
         .onboarding-inline {
           display: flex;
@@ -594,8 +604,12 @@ export function OnboardingWizard({
         }
         @media (min-width: 1024px) {
           .onboarding-grid {
-            grid-template-columns: minmax(0, 1fr) 280px;
+            grid-template-columns: minmax(0, 1fr) 320px;
             align-items: start;
+          }
+          .onboarding-checklist {
+            position: sticky;
+            top: 1rem;
           }
         }
       `}</style>

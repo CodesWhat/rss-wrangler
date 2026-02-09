@@ -486,6 +486,11 @@ select {
   padding: 0 0 calc(var(--bottombar-height) + 20px) 0;
 }
 
+.home-shell {
+  width: min(1280px, 100%);
+  margin: 0 auto;
+}
+
 /* Page header */
 .page-header {
   padding: var(--sp-4) var(--sp-4) 0;
@@ -2190,6 +2195,10 @@ select {
     background: var(--bg-base);
     padding-left: var(--sp-5);
     padding-right: var(--sp-5);
+  }
+
+  .home-shell {
+    width: min(1320px, 100%);
   }
 
   .page-header {
