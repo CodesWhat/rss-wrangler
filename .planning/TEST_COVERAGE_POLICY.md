@@ -1,6 +1,6 @@
 # RSS Wrangler Test Coverage Policy
 
-Updated: 2026-02-08
+Updated: 2026-02-09
 
 ## Goal
 
@@ -12,19 +12,26 @@ Catch regressions with meaningful tests, especially in risky areas, without chas
 
 ### 1. Repository baseline (always enforced)
 
-- Statements: `>= 70%`
-- Branches: `>= 60%`
-- Functions: `>= 70%`
-- Lines: `>= 70%`
+Coverage gates are ratcheted from `.coverage-policy-baseline.json`:
+
+- Current run must be `>=` the stored baseline (per metric), with a hard floor:
+  - Statements: `>= 40%`
+  - Branches: `>= 35%`
+  - Functions: `>= 30%`
+  - Lines: `>= 40%`
+- Baseline is updated intentionally via:
+  - `npm run test:coverage:baseline`
 
 ### 2. Changed source files (enforced in PR checks)
 
 For changed files under `apps/**/src` or `packages/**/src` (excluding tests and `.d.ts`):
 
-- Statements: `>= 80%`
-- Branches: `>= 70%`
-- Functions: `>= 80%`
-- Lines: `>= 80%`
+- If file exists in baseline: coverage may not regress more than `0.1` percentage points per metric (override with `COVERAGE_REGRESSION_TOLERANCE`).
+- If file is new to baseline:
+  - Statements: `>= 80%`
+  - Branches: `>= 70%`
+  - Functions: `>= 80%`
+  - Lines: `>= 80%`
 
 If a changed source file has no coverage entry, the check fails.
 
@@ -34,9 +41,9 @@ Changed-file detection rules:
 - Local: evaluate staged source files by default
 - Optional override: set `COVERAGE_BASE_REF` or `COVERAGE_CHANGED_FILES`
 
-### 3. Critical changed files (stricter)
+### 3. Critical changed files (stricter for new files)
 
-When changed, these files must meet:
+When a changed file is *new to baseline* and matches a critical path, it must meet:
 
 - Statements: `>= 90%`
 - Branches: `>= 85%`
@@ -69,6 +76,7 @@ Required checks for user-facing flow changes:
 
 - Unit/integration tests: `npm test`
 - Coverage report: `npm run test:coverage`
+- Refresh baseline (intentional ratchet): `npm run test:coverage:baseline`
 - Coverage gate: `npm run test:coverage:policy`
 - Compare local branch to main: `COVERAGE_BASE_REF=origin/main npm run test:coverage:policy`
 

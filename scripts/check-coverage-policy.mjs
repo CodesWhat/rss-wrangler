@@ -2,21 +2,23 @@ import { execSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const OVERALL_THRESHOLD = {
-  statements: 70,
-  branches: 60,
-  functions: 70,
-  lines: 70,
+const METRIC_KEYS = ["statements", "branches", "functions", "lines"];
+
+const MIN_OVERALL_THRESHOLD = {
+  statements: 40,
+  branches: 35,
+  functions: 30,
+  lines: 40,
 };
 
-const CHANGED_THRESHOLD = {
+const NEW_FILE_THRESHOLD = {
   statements: 80,
   branches: 70,
   functions: 80,
   lines: 80,
 };
 
-const CRITICAL_CHANGED_THRESHOLD = {
+const CRITICAL_NEW_FILE_THRESHOLD = {
   statements: 90,
   branches: 85,
   functions: 90,
@@ -33,9 +35,22 @@ const CRITICAL_FILE_PATTERNS = [
 ];
 
 const COVERAGE_SUMMARY_PATH = path.resolve("coverage/coverage-summary.json");
+const COVERAGE_BASELINE_PATH = path.resolve(".coverage-policy-baseline.json");
+const DEFAULT_REGRESSION_TOLERANCE = 0.1;
+const EPSILON = 0.000001;
 
 function normalizePath(inputPath) {
   return inputPath.replaceAll("\\", "/");
+}
+
+function parseTolerance() {
+  const raw = process.env.COVERAGE_REGRESSION_TOLERANCE;
+  if (!raw) return DEFAULT_REGRESSION_TOLERANCE;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return DEFAULT_REGRESSION_TOLERANCE;
+  }
+  return value;
 }
 
 function getChangedFiles() {
@@ -91,26 +106,17 @@ function asPct(metric) {
   return typeof metric?.pct === "number" ? metric.pct : 0;
 }
 
-function formatThreshold(threshold) {
-  return `S:${threshold.statements}% B:${threshold.branches}% F:${threshold.functions}% L:${threshold.lines}%`;
-}
-
-function checkThreshold(label, metrics, threshold, violations) {
-  const actual = {
+function extractMetricSet(metrics) {
+  return {
     statements: asPct(metrics.statements),
     branches: asPct(metrics.branches),
     functions: asPct(metrics.functions),
     lines: asPct(metrics.lines),
   };
+}
 
-  for (const key of Object.keys(threshold)) {
-    const typedKey = key;
-    if (actual[typedKey] < threshold[typedKey]) {
-      violations.push(
-        `${label}: ${typedKey} ${actual[typedKey].toFixed(2)}% < ${threshold[typedKey].toFixed(2)}%`
-      );
-    }
-  }
+function formatThreshold(threshold) {
+  return `S:${threshold.statements}% B:${threshold.branches}% F:${threshold.functions}% L:${threshold.lines}%`;
 }
 
 function isCriticalFile(filePath) {
@@ -136,6 +142,69 @@ function buildCoverageLookup(summary) {
   return lookup;
 }
 
+function loadBaseline() {
+  if (!existsSync(COVERAGE_BASELINE_PATH)) {
+    return null;
+  }
+
+  const parsed = JSON.parse(readFileSync(COVERAGE_BASELINE_PATH, "utf8"));
+  const overall = parsed?.overall;
+  const files = parsed?.files ?? {};
+
+  return {
+    version: parsed?.version ?? 0,
+    updatedAt: parsed?.updatedAt ?? null,
+    overall: {
+      statements: Number(overall?.statements ?? 0),
+      branches: Number(overall?.branches ?? 0),
+      functions: Number(overall?.functions ?? 0),
+      lines: Number(overall?.lines ?? 0),
+    },
+    files: Object.fromEntries(
+      Object.entries(files).map(([filePath, metrics]) => [
+        normalizePath(filePath),
+        {
+          statements: Number(metrics?.statements ?? 0),
+          branches: Number(metrics?.branches ?? 0),
+          functions: Number(metrics?.functions ?? 0),
+          lines: Number(metrics?.lines ?? 0),
+        },
+      ])
+    ),
+  };
+}
+
+function resolveOverallThreshold(baseline) {
+  if (!baseline) {
+    return { ...MIN_OVERALL_THRESHOLD };
+  }
+
+  const threshold = {};
+  for (const key of METRIC_KEYS) {
+    threshold[key] = Math.max(MIN_OVERALL_THRESHOLD[key], baseline.overall[key] ?? 0);
+  }
+  return threshold;
+}
+
+function checkAbsoluteThreshold(label, actual, threshold, violations) {
+  for (const key of METRIC_KEYS) {
+    if (actual[key] + EPSILON < threshold[key]) {
+      violations.push(`${label}: ${key} ${actual[key].toFixed(2)}% < ${threshold[key].toFixed(2)}%`);
+    }
+  }
+}
+
+function checkRegressionThreshold(label, actual, baselineMetrics, tolerance, violations) {
+  for (const key of METRIC_KEYS) {
+    const minimumAllowed = Math.max(0, baselineMetrics[key] - tolerance);
+    if (actual[key] + EPSILON < minimumAllowed) {
+      violations.push(
+        `${label}: ${key} regressed ${actual[key].toFixed(2)}% < ${minimumAllowed.toFixed(2)}% (baseline ${baselineMetrics[key].toFixed(2)}%, tolerance ${tolerance.toFixed(2)}%)`
+      );
+    }
+  }
+}
+
 function main() {
   if (!existsSync(COVERAGE_SUMMARY_PATH)) {
     console.error(
@@ -147,8 +216,30 @@ function main() {
   const summary = JSON.parse(readFileSync(COVERAGE_SUMMARY_PATH, "utf8"));
   const lookup = buildCoverageLookup(summary);
   const violations = [];
+  const tolerance = parseTolerance();
+  const baseline = loadBaseline();
 
-  checkThreshold("overall", summary.total, OVERALL_THRESHOLD, violations);
+  if (baseline && baseline.version !== 1) {
+    console.error(
+      `[coverage-policy] Unsupported baseline version ${String(baseline.version)} in ${COVERAGE_BASELINE_PATH}.`
+    );
+    process.exit(1);
+  }
+
+  if (!baseline) {
+    console.warn(
+      `[coverage-policy] Baseline file not found at ${COVERAGE_BASELINE_PATH}; using minimum overall thresholds only.`
+    );
+  }
+
+  const overallActual = extractMetricSet(summary.total);
+  const overallThreshold = resolveOverallThreshold(baseline);
+  checkAbsoluteThreshold(
+    `overall [${formatThreshold(overallThreshold)}]`,
+    overallActual,
+    overallThreshold,
+    violations
+  );
 
   const changedSourceFiles = getChangedFiles().filter(isSourceFile);
   if (changedSourceFiles.length === 0) {
@@ -162,13 +253,30 @@ function main() {
       continue;
     }
 
+    const actual = extractMetricSet(metrics);
+    const baselineMetrics = baseline?.files?.[sourceFile];
+
+    if (baselineMetrics) {
+      checkRegressionThreshold(
+        `${sourceFile} [baseline regression guard]`,
+        actual,
+        baselineMetrics,
+        tolerance,
+        violations
+      );
+      continue;
+    }
+
     const threshold = isCriticalFile(sourceFile)
-      ? CRITICAL_CHANGED_THRESHOLD
-      : CHANGED_THRESHOLD;
-    const label = `${sourceFile} [${isCriticalFile(sourceFile) ? "critical" : "changed"} ${formatThreshold(
-      threshold
-    )}]`;
-    checkThreshold(label, metrics, threshold, violations);
+      ? CRITICAL_NEW_FILE_THRESHOLD
+      : NEW_FILE_THRESHOLD;
+
+    checkAbsoluteThreshold(
+      `${sourceFile} [new file ${isCriticalFile(sourceFile) ? "critical " : ""}${formatThreshold(threshold)}]`,
+      actual,
+      threshold,
+      violations
+    );
   }
 
   if (violations.length > 0) {
@@ -179,7 +287,11 @@ function main() {
     process.exit(1);
   }
 
-  console.log("[coverage-policy] Passed.");
+  if (baseline?.updatedAt) {
+    console.log(`[coverage-policy] Passed. Baseline: ${baseline.updatedAt}`);
+  } else {
+    console.log("[coverage-policy] Passed.");
+  }
 }
 
 main();

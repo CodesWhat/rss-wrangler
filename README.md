@@ -92,6 +92,7 @@ Health checks run from inside containers, so they are not affected by local proc
 | `npm run build` | Build all packages |
 | `npm test` | Run tests (Vitest) |
 | `npm run test:coverage` | Generate coverage report |
+| `npm run test:coverage:baseline` | Refresh ratcheted coverage baseline |
 | `npm run test:coverage:policy` | Check coverage policy gates |
 | `npm run typecheck` | Type-check all packages |
 | `npm run lint` | Lint all packages |
@@ -175,6 +176,7 @@ Coverage thresholds and CI rules are documented in `.planning/TEST_COVERAGE_POLI
 ```bash
 npm test                    # Run all tests
 npm run test:coverage       # Generate coverage report
+npm run test:coverage:baseline  # Refresh coverage baseline (intentional ratchet)
 npm run test:coverage:policy  # Check against policy gates
 ```
 

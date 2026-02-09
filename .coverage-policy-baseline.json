@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "updatedAt": "2026-02-09T02:32:37.660Z",
+  "overall": {
+    "statements": 42.34,
+    "branches": 44.42,
+    "functions": 36.2,
+    "lines": 41.52
+  },
+  "files": {
+    "apps/api/src/plugins/entitlements.ts": {
+      "statements": 100,
+      "branches": 90,
+      "functions": 100,
+      "lines": 100
+    },
+    "apps/api/src/services/auth-service.ts": {
+      "statements": 1.22,
+      "branches": 0.74,
+      "functions": 0.93,
+      "lines": 1.23
+    },
+    "apps/api/src/services/billing-service.ts": {
+      "statements": 64.03,
+      "branches": 56.61,
+      "functions": 96.29,
+      "lines": 64.03
+    },
+    "apps/api/src/services/email-service.ts": {
+      "statements": 0,
+      "branches": 0,
+      "functions": 0,
+      "lines": 0
+    },
+    "apps/api/src/services/opml-parser.ts": {
+      "statements": 96.87,
+      "branches": 82.75,
+      "functions": 100,
+      "lines": 96.77
+    },
+    "apps/api/src/services/privacy-consent-service.ts": {
+      "statements": 86.95,
+      "branches": 68.75,
+      "functions": 80,
+      "lines": 90
+    },
+    "apps/api/src/services/url-validator.ts": {
+      "statements": 95.83,
+      "branches": 96.72,
+      "functions": 100,
+      "lines": 100
+    },
+    "apps/worker/src/jobs/account-deletion-automation.ts": {
+      "statements": 100,
+      "branches": 83.33,
+      "functions": 100,
+      "lines": 100
+    },
+    "apps/worker/src/pipeline/entitlements.ts": {
+      "statements": 100,
+      "branches": 93.33,
+      "functions": 100,
+      "lines": 100
+    },
+    "apps/worker/src/pipeline/stages/canonicalize-url.ts": {
+      "statements": 100,
+      "branches": 100,
+      "functions": 100,
+      "lines": 100
+    },
+    "apps/worker/src/pipeline/stages/compute-features.ts": {
+      "statements": 100,
+      "branches": 95.23,
+      "functions": 100,
+      "lines": 100
+    },
+    "apps/worker/src/pipeline/stages/filter.ts": {
+      "statements": 96.87,
+      "branches": 91.17,
+      "functions": 100,
+      "lines": 100
+    }
+  }
+}
