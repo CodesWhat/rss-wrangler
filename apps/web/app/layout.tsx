@@ -25,6 +25,8 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const privacyConsentEnabled = process.env.NEXT_PUBLIC_ENABLE_PRIVACY_CONSENT === "true";
+
   return (
     <html lang="en" className={`${mono.variable} ${sans.variable}`}>
       <body>
@@ -32,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="app-shell">
             <AppNav />
             <main className="main">{children}</main>
-            <PrivacyConsentManager />
+            {privacyConsentEnabled ? <PrivacyConsentManager /> : null}
           </div>
         </AuthProvider>
       </body>
