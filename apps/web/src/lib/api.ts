@@ -7,6 +7,7 @@ import {
   billingCheckoutResponseSchema,
   billingOverviewSchema,
   billingPortalResponseSchema,
+  billingSubscriptionActionResponseSchema,
   clusterCardSchema,
   digestSchema,
   feedSchema,
@@ -27,6 +28,7 @@ import {
   type Annotation,
   type AuthTokens,
   type BillingOverview,
+  type BillingSubscriptionAction,
   type ChangePasswordRequest,
   type ClusterCard,
   type ClusterFeedbackRequest,
@@ -1275,6 +1277,44 @@ export async function getBillingPortalUrl(): Promise<{ ok: true; url: string } |
     return { ok: true, url: body.url };
   } catch {
     return { ok: false, error: "Billing portal unavailable" };
+  }
+}
+
+export async function updateBillingSubscription(
+  action: BillingSubscriptionAction
+): Promise<
+  | {
+      ok: true;
+      subscriptionStatus: BillingOverview["subscriptionStatus"];
+      cancelAtPeriodEnd: boolean;
+      currentPeriodEndsAt: string | null;
+      customerPortalUrl: string | null;
+    }
+  | { ok: false; error: string }
+> {
+  try {
+    const headers = await authedHeaders(true);
+    const res = await fetch(`${API_BASE_URL}/v1/billing/subscription-action`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ action })
+    });
+
+    if (!res.ok) {
+      const message = await res.text();
+      return { ok: false, error: message || "Subscription update failed" };
+    }
+
+    const body = billingSubscriptionActionResponseSchema.parse(await res.json());
+    return {
+      ok: true,
+      subscriptionStatus: body.subscriptionStatus,
+      cancelAtPeriodEnd: body.cancelAtPeriodEnd,
+      currentPeriodEndsAt: body.currentPeriodEndsAt,
+      customerPortalUrl: body.customerPortalUrl
+    };
+  } catch {
+    return { ok: false, error: "Subscription update failed" };
   }
 }
 

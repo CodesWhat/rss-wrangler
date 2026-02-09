@@ -106,6 +106,125 @@ describe("createBillingService", () => {
     });
   });
 
+  it("returns not_found when trying to change subscription without hosted billing row", async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({ rows: [] })
+    };
+
+    const service = createBillingService(buildEnv({ LEMON_SQUEEZY_API_KEY: "test_key" }), pool as never, {
+      error: vi.fn(),
+      warn: vi.fn()
+    } as never);
+
+    const result = await service.updateSubscription("tenant-1", "cancel");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "not_found",
+      message: "No hosted subscription is available for this account."
+    });
+  });
+
+  it("updates cancel-at-period-end state via Lemon subscription patch", async () => {
+    const pool = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({
+          rows: [{
+            plan_id: "pro",
+            status: "active",
+            lemon_subscription_id: "sub_123",
+            customer_portal_url: null,
+            update_payment_method_url: null,
+            cancel_at_period_end: false,
+            current_period_ends_at: null
+          }]
+        })
+        .mockResolvedValueOnce({ rows: [] })
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        data: {
+          attributes: {
+            status: "active",
+            cancelled: true,
+            ends_at: "2026-03-01T00:00:00.000Z",
+            urls: {
+              customer_portal: "https://portal.example.com",
+              update_payment_method: "https://portal.example.com/payment"
+            }
+          }
+        }
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = createBillingService(buildEnv({ LEMON_SQUEEZY_API_KEY: "test_key" }), pool as never, {
+      error: vi.fn(),
+      warn: vi.fn()
+    } as never);
+
+    const result = await service.updateSubscription("tenant-1", "cancel");
+
+    expect(result).toEqual({
+      ok: true,
+      subscriptionStatus: "active",
+      cancelAtPeriodEnd: true,
+      currentPeriodEndsAt: "2026-03-01T00:00:00.000Z",
+      customerPortalUrl: "https://portal.example.com"
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [_url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(init.method).toBe("PATCH");
+    const body = JSON.parse(String(init.body)) as {
+      data: { attributes: { cancelled: boolean } };
+    };
+    expect(body.data.attributes.cancelled).toBe(true);
+
+    const updateCall = (pool.query as ReturnType<typeof vi.fn>).mock.calls[1] as [string, unknown[]];
+    expect(updateCall[0]).toContain("UPDATE tenant_plan_subscription");
+    expect(updateCall[1][2]).toBe(true);
+  });
+
+  it("returns current state without provider calls when action already applied", async () => {
+    const currentPeriodEndsAt = new Date("2026-02-20T12:00:00.000Z");
+    const pool = {
+      query: vi.fn().mockResolvedValue({
+        rows: [{
+          plan_id: "pro",
+          status: "active",
+          lemon_subscription_id: "sub_123",
+          customer_portal_url: "https://portal.example.com",
+          update_payment_method_url: "https://portal.example.com/payment",
+          cancel_at_period_end: true,
+          current_period_ends_at: currentPeriodEndsAt
+        }]
+      })
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = createBillingService(buildEnv({ LEMON_SQUEEZY_API_KEY: "test_key" }), pool as never, {
+      error: vi.fn(),
+      warn: vi.fn()
+    } as never);
+
+    const result = await service.updateSubscription("tenant-1", "cancel");
+
+    expect(result).toEqual({
+      ok: true,
+      subscriptionStatus: "active",
+      cancelAtPeriodEnd: true,
+      currentPeriodEndsAt: currentPeriodEndsAt.toISOString(),
+      customerPortalUrl: "https://portal.example.com"
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(pool.query).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects webhook payloads with invalid signatures", async () => {
     const pool = {
       query: vi.fn()

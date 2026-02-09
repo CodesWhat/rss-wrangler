@@ -7,6 +7,8 @@ import {
   billingCheckoutResponseSchema,
   billingOverviewSchema,
   billingPortalResponseSchema,
+  billingSubscriptionActionRequestSchema,
+  billingSubscriptionActionResponseSchema,
   changePasswordRequestSchema,
   createWorkspaceInviteRequestSchema,
   createAnnotationRequestSchema,
@@ -921,6 +923,32 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       return billingPortalResponseSchema.parse({ url: result.url });
+    });
+
+    protectedRoutes.post("/v1/billing/subscription-action", async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+
+      const payload = billingSubscriptionActionRequestSchema.parse(request.body);
+      const result = await billing.updateSubscription(authContext.tenantId, payload.action);
+      if (!result.ok) {
+        if (result.error === "not_found") {
+          return reply.notFound(result.message);
+        }
+        if (result.error === "not_configured") {
+          return reply.code(503).send({ error: result.error, message: result.message });
+        }
+        return reply.code(502).send({ error: result.error, message: result.message });
+      }
+
+      return billingSubscriptionActionResponseSchema.parse({
+        subscriptionStatus: result.subscriptionStatus,
+        cancelAtPeriodEnd: result.cancelAtPeriodEnd,
+        currentPeriodEndsAt: result.currentPeriodEndsAt,
+        customerPortalUrl: result.customerPortalUrl
+      });
     });
 
     protectedRoutes.get("/v1/privacy/consent", async (request, reply) => {

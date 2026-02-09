@@ -10,6 +10,7 @@ import {
   changePassword,
   getBillingOverview,
   getBillingPortalUrl,
+  updateBillingSubscription,
   getAccountDeletionStatus,
   requestAccountDeletion,
   getSettings,
@@ -404,7 +405,9 @@ function BillingSection() {
   const [error, setError] = useState("");
   const [busyPlan, setBusyPlan] = useState<HostedPlanId | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
+  const [subscriptionActionBusy, setSubscriptionActionBusy] = useState<"cancel" | "resume" | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [actionNotice, setActionNotice] = useState("");
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -432,6 +435,7 @@ function BillingSection() {
 
   async function handleUpgrade(planId: HostedPlanId) {
     setError("");
+    setActionNotice("");
     setBusyPlan(planId);
     const result = await createBillingCheckout(planId);
     if (!result.ok) {
@@ -444,6 +448,7 @@ function BillingSection() {
 
   async function handlePortal() {
     setError("");
+    setActionNotice("");
     setPortalBusy(true);
     const result = await getBillingPortalUrl();
     if (!result.ok) {
@@ -452,6 +457,31 @@ function BillingSection() {
       return;
     }
     window.location.assign(result.url);
+  }
+
+  async function handleSubscriptionAction(action: "cancel" | "resume") {
+    setError("");
+    setActionNotice("");
+    setSubscriptionActionBusy(action);
+    const result = await updateBillingSubscription(action);
+    if (!result.ok) {
+      setError(result.error);
+      setSubscriptionActionBusy(null);
+      return;
+    }
+
+    setOverview((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        subscriptionStatus: result.subscriptionStatus,
+        cancelAtPeriodEnd: result.cancelAtPeriodEnd,
+        currentPeriodEndsAt: result.currentPeriodEndsAt,
+        customerPortalUrl: result.customerPortalUrl
+      };
+    });
+    setActionNotice(action === "cancel" ? "Subscription will cancel at period end." : "Auto-renew has been resumed.");
+    setSubscriptionActionBusy(null);
   }
 
   if (loading) {
@@ -475,6 +505,11 @@ function BillingSection() {
       )}
 
       {error && <p className="error-text">{error}</p>}
+      {actionNotice && (
+        <p className="key-status key-status-active" style={{ display: "inline-flex", marginTop: "var(--sp-2)" }}>
+          {actionNotice}
+        </p>
+      )}
 
       {overview ? (
         <div className="billing-overview">
@@ -524,6 +559,22 @@ function BillingSection() {
             >
               {portalBusy ? "Opening..." : "Open billing portal"}
             </button>
+            {overview.planId !== "free" && (overview.cancelAtPeriodEnd || overview.subscriptionStatus !== "canceled") && (
+              <button
+                type="button"
+                className={`button button-small ${overview.cancelAtPeriodEnd ? "" : "button-danger"}`}
+                disabled={subscriptionActionBusy !== null}
+                onClick={() => handleSubscriptionAction(overview.cancelAtPeriodEnd ? "resume" : "cancel")}
+              >
+                {subscriptionActionBusy === "cancel"
+                  ? "Cancelling..."
+                  : subscriptionActionBusy === "resume"
+                    ? "Resuming..."
+                    : overview.cancelAtPeriodEnd
+                      ? "Resume auto-renew"
+                      : "Cancel at period end"}
+              </button>
+            )}
           </div>
 
           <div className="billing-plans">

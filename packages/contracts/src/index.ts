@@ -468,6 +468,22 @@ export const billingPortalResponseSchema = z.object({
 });
 export type BillingPortalResponse = z.infer<typeof billingPortalResponseSchema>;
 
+export const billingSubscriptionActionSchema = z.enum(["cancel", "resume"]);
+export type BillingSubscriptionAction = z.infer<typeof billingSubscriptionActionSchema>;
+
+export const billingSubscriptionActionRequestSchema = z.object({
+  action: billingSubscriptionActionSchema
+});
+export type BillingSubscriptionActionRequest = z.infer<typeof billingSubscriptionActionRequestSchema>;
+
+export const billingSubscriptionActionResponseSchema = z.object({
+  subscriptionStatus: planSubscriptionStatusSchema,
+  cancelAtPeriodEnd: z.boolean(),
+  currentPeriodEndsAt: z.string().datetime().nullable(),
+  customerPortalUrl: z.string().url().nullable()
+});
+export type BillingSubscriptionActionResponse = z.infer<typeof billingSubscriptionActionResponseSchema>;
+
 export const billingOverviewSchema = z.object({
   planId: planIdSchema,
   subscriptionStatus: planSubscriptionStatusSchema,
@@ -629,6 +645,7 @@ export const apiRoutes = {
   billingOverview: "/v1/billing",
   billingCheckout: "/v1/billing/checkout",
   billingPortal: "/v1/billing/portal",
+  billingSubscriptionAction: "/v1/billing/subscription-action",
   billingWebhook: "/v1/billing/webhooks/lemon-squeezy",
   privacyConsent: "/v1/privacy/consent",
   opmlImport: "/v1/opml/import",

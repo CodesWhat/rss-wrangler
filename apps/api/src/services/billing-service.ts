@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import type { Pool } from "pg";
-import type { HostedPlanId, PlanId, PlanSubscriptionStatus } from "@rss-wrangler/contracts";
+import type { BillingSubscriptionAction, HostedPlanId, PlanId, PlanSubscriptionStatus } from "@rss-wrangler/contracts";
 import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 
@@ -37,6 +37,12 @@ const lemonSubscriptionResponseSchema = z.object({
   })
 });
 
+const lemonSubscriptionMutationResponseSchema = z.object({
+  data: z.object({
+    attributes: z.record(z.string(), z.unknown())
+  })
+});
+
 interface BillingOverview {
   planId: PlanId;
   subscriptionStatus: PlanSubscriptionStatus;
@@ -53,6 +59,16 @@ type CheckoutResult =
 
 type PortalResult =
   | { ok: true; url: string }
+  | { ok: false; error: "not_found" | "not_configured" | "provider_error"; message: string };
+
+type SubscriptionActionResult =
+  | {
+      ok: true;
+      subscriptionStatus: PlanSubscriptionStatus;
+      cancelAtPeriodEnd: boolean;
+      currentPeriodEndsAt: string | null;
+      customerPortalUrl: string | null;
+    }
   | { ok: false; error: "not_found" | "not_configured" | "provider_error"; message: string };
 
 type WebhookResult =
@@ -91,6 +107,7 @@ interface BillingService {
     planId: HostedPlanId;
   }) => Promise<CheckoutResult>;
   getPortal: (tenantId: string) => Promise<PortalResult>;
+  updateSubscription: (tenantId: string, action: BillingSubscriptionAction) => Promise<SubscriptionActionResult>;
   processWebhook: (rawBody: string, signatureHeader: string | undefined) => Promise<WebhookResult>;
 }
 
@@ -496,6 +513,131 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
     return { ok: true, url: customerPortalUrl };
   }
 
+  async function updateSubscription(tenantId: string, action: BillingSubscriptionAction): Promise<SubscriptionActionResult> {
+    const result = await pool.query<{
+      plan_id: string;
+      status: string;
+      lemon_subscription_id: string | null;
+      customer_portal_url: string | null;
+      update_payment_method_url: string | null;
+      cancel_at_period_end: boolean;
+      current_period_ends_at: Date | null;
+    }>(
+      `SELECT plan_id,
+              status,
+              lemon_subscription_id,
+              customer_portal_url,
+              update_payment_method_url,
+              cancel_at_period_end,
+              current_period_ends_at
+       FROM tenant_plan_subscription
+       WHERE tenant_id = $1
+       LIMIT 1`,
+      [tenantId]
+    );
+
+    const row = result.rows[0];
+    if (!row?.lemon_subscription_id || normalizePlanId(row.plan_id) === "free") {
+      return {
+        ok: false,
+        error: "not_found",
+        message: "No hosted subscription is available for this account."
+      };
+    }
+
+    if (!env.LEMON_SQUEEZY_API_KEY) {
+      return {
+        ok: false,
+        error: "not_configured",
+        message: "Billing provider credentials are not configured."
+      };
+    }
+
+    const cancelAtPeriodEnd = action === "cancel";
+    if (row.cancel_at_period_end === cancelAtPeriodEnd) {
+      return {
+        ok: true,
+        subscriptionStatus: normalizePlanStatus(row.status),
+        cancelAtPeriodEnd,
+        currentPeriodEndsAt: toIsoOrNull(row.current_period_ends_at),
+        customerPortalUrl: row.customer_portal_url
+      };
+    }
+
+    const response = await lemonRequest(`/subscriptions/${encodeURIComponent(row.lemon_subscription_id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        data: {
+          type: "subscriptions",
+          id: row.lemon_subscription_id,
+          attributes: {
+            cancelled: cancelAtPeriodEnd
+          }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      logger.error(
+        {
+          tenantId,
+          action,
+          subscriptionId: row.lemon_subscription_id,
+          status: response.status,
+          body
+        },
+        "failed to update Lemon subscription cancellation state"
+      );
+      return {
+        ok: false,
+        error: "provider_error",
+        message: "Unable to update subscription state in billing provider."
+      };
+    }
+
+    const parsed = lemonSubscriptionMutationResponseSchema.safeParse(await response.json());
+    if (!parsed.success) {
+      logger.error({ issues: parsed.error.issues, tenantId, action }, "invalid Lemon subscription mutation response");
+      return {
+        ok: false,
+        error: "provider_error",
+        message: "Billing provider returned invalid subscription metadata."
+      };
+    }
+
+    const attributes = parsed.data.data.attributes;
+    const status = normalizeLemonStatus(asString(attributes.status) ?? row.status);
+    const renewsAt = parseDate(attributes.renews_at);
+    const endsAt = parseDate(attributes.ends_at);
+    const currentPeriodEndsAt = renewsAt ?? endsAt ?? row.current_period_ends_at;
+    const providerCancelled = asBoolean(attributes.cancelled);
+    const resolvedCancelAtPeriodEnd = attributes.cancelled === undefined ? cancelAtPeriodEnd : providerCancelled;
+    const urls = parsePortalUrls(attributes.urls);
+    const customerPortalUrl = urls.customerPortalUrl ?? row.customer_portal_url;
+    const updatePaymentMethodUrl = urls.updatePaymentMethodUrl ?? row.update_payment_method_url;
+
+    await pool.query(
+      `UPDATE tenant_plan_subscription
+       SET status = $2,
+           cancel_at_period_end = $3,
+           current_period_ends_at = $4,
+           customer_portal_url = $5,
+           update_payment_method_url = $6,
+           updated_at = NOW()
+       WHERE tenant_id = $1`,
+      [tenantId, status, resolvedCancelAtPeriodEnd, currentPeriodEndsAt, customerPortalUrl, updatePaymentMethodUrl]
+    );
+
+    return {
+      ok: true,
+      subscriptionStatus: status,
+      cancelAtPeriodEnd: resolvedCancelAtPeriodEnd,
+      currentPeriodEndsAt: toIsoOrNull(currentPeriodEndsAt),
+      customerPortalUrl
+    };
+  }
+
   async function findTenantIdForWebhook(
     customTenantId: string | null,
     lemonSubscriptionId: string,
@@ -774,6 +916,7 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
     getOverview,
     createCheckout,
     getPortal,
+    updateSubscription,
     processWebhook
   };
 }

@@ -271,7 +271,7 @@ Features that only power users want or that only one app has.
 
 **Execution model:** Use `/.planning/PHASED_IMPLEMENTATION_PLAYBOOK.md` for role definitions, phase exit gates, locked Phase 0 provider stack, atomic-commit rules (bisectable/revertable slices), and `tech-debt-agent` responsibilities (dead code / duplicate-path control). Playwright gate policy: for impacted user flows, `playwright-qa-agent` must pass; failing runs return the slice to implementation (no merge). Accessibility gate policy: impacted flows must meet WCAG 2.2 AA baseline (keyboard navigation, focus visibility/management, semantic labels, and contrast checks).
 
-### Phase 0 Progress Snapshot (2026-02-08)
+### Phase 0 Progress Snapshot (2026-02-09)
 
 | Phase 0 Feature | Current Status | Notes |
 |---|---|---|
@@ -280,7 +280,7 @@ Features that only power users want or that only one app has.
 | Hosted account management + compliance controls | ⚠️ Partial | Password reset/change, account deletion lifecycle automation, and baseline account export are live; completion notifications + export hardening remain |
 | Entitlements + plan-limit middleware baseline | ⚠️ Partial | Plan defaults + API/worker feed/search/ingest gates landed; billing webhook sync now lands plan updates into entitlements, broader coverage/usage UX remain |
 | Hosted performance/load testing + SLO baseline | ✅ Implemented | Load harness, SLO policy, and calibration workflow are in repo |
-| Billing foundation (Lemon Squeezy + plan management UX) | ⚠️ Partial | Checkout + signed webhook sync + billing overview/portal APIs + settings/pricing surfaces shipped; in-app cancel/reactivate UX and annual variants remain |
+| Billing foundation (Lemon Squeezy + plan management UX) | ⚠️ Partial | Checkout + signed webhook sync + billing overview/portal APIs + settings/pricing surfaces + in-app cancel/reactivate controls shipped; annual variants + webhook alerting remain |
 | Consent + CMP baseline (hosted) | ⚠️ Partial | Necessary-only default + persistent privacy controls + region-aware consent metadata shipped; CMP adapter and automated non-essential script gating tests remain |
 | Hosted SaaS offering (dogfood pilot) | ⚠️ Partial | Infra/provider decisions plus Render blueprints (`render.free.yaml`, `render.yaml`) are in repo, self-host Docker/OrbStack smoke is green (`npm run orbstack:smoke`) with in-container health/login checks, and hosted post-deploy smoke is scripted (`npm run hosted:smoke`). First live hosted deploy + telemetry run still pending. |
 
