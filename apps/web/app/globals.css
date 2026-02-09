@@ -2185,9 +2185,10 @@ select {
   .main {
     flex: 1;
     min-width: 0;
-    max-width: 75vw;
+    max-width: none;
     background: var(--bg-surface);
     padding-left: var(--sp-5);
+    padding-right: var(--sp-5);
   }
 
   .page-header {

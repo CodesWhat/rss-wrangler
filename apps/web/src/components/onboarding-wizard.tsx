@@ -518,12 +518,13 @@ export function OnboardingWizard({
           background: var(--accent-dim);
         }
         .onboarding-card {
-          border: 1px solid var(--border-hairline);
-          background: var(--bg-elevated);
+          border: 1px solid var(--border-default);
+          background: var(--bg-surface);
           padding: 0.75rem;
           display: flex;
           flex-direction: column;
           gap: 0.5rem;
+          box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04);
         }
         .onboarding-method-shell {
           min-height: 142px;
@@ -553,12 +554,13 @@ export function OnboardingWizard({
           justify-content: flex-end;
         }
         .onboarding-checklist {
-          border: 1px solid var(--border-hairline);
+          border: 1px solid var(--border-default);
           background: var(--bg-surface);
           padding: 0.75rem;
           display: flex;
           flex-direction: column;
           gap: 0.5rem;
+          box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04);
         }
         .onboarding-checklist ul {
           list-style: none;
