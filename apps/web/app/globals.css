@@ -11,16 +11,16 @@
   color-scheme: light;
 
   /* Surfaces - stark, high contrast */
-  --bg: #FAFAFA;
-  --bg-base: #FAFAFA;
+  --bg: #F4F5F8;
+  --bg-base: #F4F5F8;
   --surface: #FFFFFF;
   --bg-surface: #FFFFFF;
-  --surface-alt: #F5F5F5;
-  --bg-sidebar: #F1F2F5;
-  --bg-elevated: #F5F5F5;
-  --bg-code: #F0F0F0;
-  --bg-hover: #ECECEC;
-  --bg-active: #E4E4E4;
+  --surface-alt: #ECEFF4;
+  --bg-sidebar: #ECEFF4;
+  --bg-elevated: #ECEFF4;
+  --bg-code: #ECEFF4;
+  --bg-hover: #E6EAF2;
+  --bg-active: #DDE3EE;
   --bg-invert: #0A0A0A;
 
   /* Borders - visible, intentional */
@@ -872,9 +872,10 @@ select {
 
 .section-card {
   background: var(--bg-surface);
-  border: 1px solid var(--border-hairline);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   padding: var(--sp-4);
+  box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04);
 }
 
 
@@ -2186,7 +2187,7 @@ select {
     flex: 1;
     min-width: 0;
     max-width: none;
-    background: var(--bg-surface);
+    background: var(--bg-base);
     padding-left: var(--sp-5);
     padding-right: var(--sp-5);
   }
