@@ -22,7 +22,6 @@ function HomeFeed() {
   const [layout, setLayout] = useState<ViewLayout>("card");
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const [showHelp, setShowHelp] = useState(false);
-  const [showDigestBanner, setShowDigestBanner] = useState(true);
   const [showEmptyBanner, setShowEmptyBanner] = useState(true);
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [setupLoading, setSetupLoading] = useState(true);
@@ -266,28 +265,6 @@ function HomeFeed() {
           </button>
         </div>
       </div>
-
-      {showDigestBanner && (
-        <section className="banner">
-          <div>
-            <strong>Digest available when away or backlog is high.</strong>
-            <p>Default triggers: away 24h or unread backlog 50 clusters.</p>
-          </div>
-          <div className="row">
-            <a href="/digest" className="button button-secondary">
-              Open digest
-            </a>
-            <button
-              type="button"
-              className="banner-dismiss"
-              onClick={() => setShowDigestBanner(false)}
-              aria-label="Dismiss"
-            >
-              &times;
-            </button>
-          </div>
-        </section>
-      )}
 
       {loading ? (
         <p className="muted">Loading stories...</p>

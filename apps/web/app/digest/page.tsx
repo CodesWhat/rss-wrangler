@@ -112,6 +112,13 @@ function DigestContent() {
         <p className="page-meta">Top picks, big stories, and quick scan.</p>
       </div>
 
+      <section className="banner">
+        <div>
+          <strong>Digest triggers</strong>
+          <p>Generated when you are away for 24h or unread backlog reaches 50 clusters.</p>
+        </div>
+      </section>
+
       <section className="section-card">
         {loading ? (
           <p className="muted">Loading digests...</p>
