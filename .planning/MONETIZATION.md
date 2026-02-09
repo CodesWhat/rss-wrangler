@@ -163,7 +163,7 @@ user_id -> plan -> features -> limits
 - Hosted foundations are in-progress with shipped slices for onboarding wizard, invite-token onboarding guard, password recovery/verification, account-export baseline, account-deletion automation, and load/SLO tooling.
 - Identity model alignment is now explicit: hosted and self-host auth UX should be workspace-free (single product, direct user accounts).
 - Entitlements are partial: feed/search/ingest gates are live and now sync with Lemon webhook plan changes; broader route coverage + usage UX remain.
-- Billing foundation is partial-live: checkout/webhook sync/pricing/portal handoff plus in-app cancel/resume controls shipped. Consent baseline is now partial-live; hosted dogfood rollout remains open.
+- Billing foundation is launch-ready: checkout/webhook sync/pricing/portal handoff, in-app cancel/resume controls, annual plan variants, and webhook failure alerting are shipped. Consent baseline is now partial-live; hosted dogfood rollout remains open.
 - Deployment bootstrap is in place: Render blueprints exist for free smoke (`render.free.yaml`) and dogfood baseline (`render.yaml`), awaiting first live run.
 
 ### What we need to build
@@ -179,15 +179,15 @@ user_id -> plan -> features -> limits
 - [ ] Hosted account deletion workflow (self-serve request, confirmation, grace window, hard purge SLA + worker job) *(partial: request/cancel + worker automation shipped; completion notifications pending)*
 - [ ] Hosted self-serve data download request (GDPR-style export request + delivery lifecycle) *(partial: request/status/download baseline shipped; workerization + retention pending)*
 - [x] Hosted load-testing harness + SLO budgets (hosted API + worker scenarios, pass/fail thresholds) **(Phase 0 mandatory for hosted launch)**
-- [ ] Lemon Squeezy integration (web payments, Merchant of Record) **(Phase 0 mandatory for hosted launch)** *(partial: checkout + signed webhook sync + subscription mapping shipped)*
-- [ ] Plan selection UI (pricing page, upgrade flow) **(Phase 0 mandatory for hosted launch)** *(partial: pricing page + upgrade checkout redirects shipped)*
-- [ ] Plan management UI (change/cancel/reactivate + billing portal handoff) **(Phase 0 mandatory for hosted launch)** *(partial: billing overview + portal handoff + in-app cancel/reactivate controls shipped; annual variants and webhook alerting pending)*
+- [x] Lemon Squeezy integration (web payments, Merchant of Record) **(Phase 0 mandatory for hosted launch)** *(shipped: checkout + signed webhook sync + subscription mapping + annual variants + webhook failure alerting)*
+- [x] Plan selection UI (pricing page, upgrade flow) **(Phase 0 mandatory for hosted launch)** *(shipped: pricing page + monthly/annual toggle + upgrade checkout redirects)*
+- [x] Plan management UI (change/cancel/reactivate + billing portal handoff) **(Phase 0 mandatory for hosted launch)** *(shipped: billing overview, portal handoff, in-app cancel/reactivate, monthly/annual checkout selection)*
 - [ ] Sponsored-story feed primitives (new `sponsored` item type, mandatory label/style, frequency caps, and feature flag default OFF)
 - [ ] Hosted consent baseline for cookies/storage (`necessary` by default + persistent "Privacy settings" reopen + consent withdrawal flow) *(partial: per-user consent persistence + persistent privacy controls shipped)*
 - [ ] Region-aware gating for non-essential scripts and CMP adapter (if Google ads target EEA/UK/CH, use Google-certified CMP path) *(partial: region detection + consent metadata shipped; CMP adapter and provider-specific script gating tests pending)*
 - [ ] Usage tracking for compute add-ons (token counting, extraction counts)
 - [ ] Full account export bundle (beyond OPML): saved/starred items, annotations, training signals, filters/rules, settings metadata
-- [ ] Annual billing option **(Phase 0 if pricing model includes annual at launch; otherwise first post-launch billing iteration)**
+- [x] Annual billing option **(Phase 0 if pricing model includes annual at launch; otherwise first post-launch billing iteration)** *(shipped: annual variants + pricing/settings interval toggle)*
 
 ### What we DON'T need yet
 

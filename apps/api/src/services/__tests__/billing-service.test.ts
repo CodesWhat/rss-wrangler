@@ -29,6 +29,9 @@ function buildEnv(overrides: Partial<ApiEnv> = {}): ApiEnv {
     LEMON_SQUEEZY_WEBHOOK_SECRET: undefined,
     LEMON_SQUEEZY_VARIANT_PRO: undefined,
     LEMON_SQUEEZY_VARIANT_PRO_AI: undefined,
+    LEMON_SQUEEZY_VARIANT_PRO_ANNUAL: undefined,
+    LEMON_SQUEEZY_VARIANT_PRO_AI_ANNUAL: undefined,
+    BILLING_ALERT_WEBHOOK_URL: undefined,
     ...overrides
   };
 }
@@ -51,9 +54,20 @@ describe("createBillingService", () => {
       subscriptionStatus: "active",
       trialEndsAt: null,
       currentPeriodEndsAt: null,
+      billingInterval: null,
       cancelAtPeriodEnd: false,
       customerPortalUrl: null,
-      checkoutEnabled: false
+      checkoutEnabled: false,
+      checkoutAvailability: {
+        pro: {
+          monthly: false,
+          annual: false
+        },
+        pro_ai: {
+          monthly: false,
+          annual: false
+        }
+      }
     });
   });
 
@@ -79,7 +93,9 @@ describe("createBillingService", () => {
         LEMON_SQUEEZY_API_KEY: "test_key",
         LEMON_SQUEEZY_STORE_ID: "12345",
         LEMON_SQUEEZY_VARIANT_PRO: "111",
-        LEMON_SQUEEZY_VARIANT_PRO_AI: "222"
+        LEMON_SQUEEZY_VARIANT_PRO_AI: "222",
+        LEMON_SQUEEZY_VARIANT_PRO_ANNUAL: "333",
+        LEMON_SQUEEZY_VARIANT_PRO_AI_ANNUAL: "444"
       }),
       pool as never,
       { error: vi.fn(), warn: vi.fn() } as never
@@ -88,7 +104,8 @@ describe("createBillingService", () => {
     const result = await service.createCheckout({
       tenantId: "tenant-1",
       userId: "user-1",
-      planId: "pro"
+      planId: "pro",
+      interval: "monthly"
     });
 
     expect(result).toEqual({ ok: true, url: "https://checkout.lemonsqueezy.com/buy/example" });
@@ -102,8 +119,58 @@ describe("createBillingService", () => {
     expect(requestBody.data.attributes.checkout_data.custom).toEqual({
       tenant_id: "tenant-1",
       user_id: "user-1",
-      plan_id: "pro"
+      plan_id: "pro",
+      billing_interval: "monthly"
     });
+  });
+
+  it("creates an annual checkout URL when annual variant is selected", async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({ rows: [{ email: "owner@example.com" }] })
+    };
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        data: {
+          attributes: {
+            url: "https://checkout.lemonsqueezy.com/buy/annual-example"
+          }
+        }
+      }),
+      { status: 201, headers: { "content-type": "application/json" } }
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = createBillingService(
+      buildEnv({
+        LEMON_SQUEEZY_API_KEY: "test_key",
+        LEMON_SQUEEZY_STORE_ID: "12345",
+        LEMON_SQUEEZY_VARIANT_PRO: "111",
+        LEMON_SQUEEZY_VARIANT_PRO_AI: "222",
+        LEMON_SQUEEZY_VARIANT_PRO_ANNUAL: "333",
+        LEMON_SQUEEZY_VARIANT_PRO_AI_ANNUAL: "444"
+      }),
+      pool as never,
+      { error: vi.fn(), warn: vi.fn() } as never
+    );
+
+    const result = await service.createCheckout({
+      tenantId: "tenant-1",
+      userId: "user-1",
+      planId: "pro_ai",
+      interval: "annual"
+    });
+
+    expect(result).toEqual({ ok: true, url: "https://checkout.lemonsqueezy.com/buy/annual-example" });
+    const requestBody = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string) as {
+      data: {
+        relationships: { variant: { data: { id: string } } };
+        attributes: { checkout_data: { custom: { billing_interval: string } } };
+      };
+    };
+
+    expect(requestBody.data.relationships.variant.data.id).toBe("444");
+    expect(requestBody.data.attributes.checkout_data.custom.billing_interval).toBe("annual");
   });
 
   it("returns not_found when trying to change subscription without hosted billing row", async () => {
@@ -245,6 +312,35 @@ describe("createBillingService", () => {
     });
   });
 
+  it("sends alert webhook on signature failure when alerting is configured", async () => {
+    const pool = {
+      query: vi.fn().mockResolvedValue({ rows: [{ id: "event-1" }] })
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const service = createBillingService(
+      buildEnv({
+        LEMON_SQUEEZY_WEBHOOK_SECRET: "secret",
+        BILLING_ALERT_WEBHOOK_URL: "https://alerts.example.com/billing"
+      }),
+      pool as never,
+      { error: vi.fn(), warn: vi.fn() } as never
+    );
+
+    const result = await service.processWebhook("{}", "invalid");
+
+    expect(result).toEqual({
+      ok: false,
+      error: "invalid_signature",
+      message: "Webhook signature verification failed."
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://alerts.example.com/billing");
+    expect(init.method).toBe("POST");
+  });
+
   it("marks duplicate webhook payloads as ignored", async () => {
     const pool = {
       query: vi.fn().mockResolvedValue({ rows: [{ exists: 1 }] })
@@ -312,5 +408,51 @@ describe("createBillingService", () => {
     expect(upsertCall[0]).toContain("INSERT INTO tenant_plan_subscription");
     expect(upsertCall[1][1]).toBe("free");
     expect(upsertCall[1][2]).toBe("canceled");
+  });
+
+  it("ignores webhook events with unknown variant ids and avoids unintended free downgrade", async () => {
+    const pool = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({ rows: [{ id: "event-1" }] })
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const payload = JSON.stringify({
+      meta: { event_name: "subscription_updated", custom_data: { tenant_id: "tenant-1" } },
+      data: {
+        id: "sub_123",
+        attributes: {
+          status: "active",
+          variant_id: "999999",
+          customer_id: "cust_1",
+          order_id: "ord_1",
+          cancelled: false
+        }
+      }
+    });
+    const signature = createHmac("sha256", "secret").update(payload, "utf8").digest("hex");
+
+    const service = createBillingService(
+      buildEnv({
+        LEMON_SQUEEZY_WEBHOOK_SECRET: "secret",
+        LEMON_SQUEEZY_VARIANT_PRO: "111",
+        LEMON_SQUEEZY_VARIANT_PRO_AI: "222",
+        BILLING_ALERT_WEBHOOK_URL: "https://alerts.example.com/billing"
+      }),
+      pool as never,
+      { error: vi.fn(), warn: vi.fn() } as never
+    );
+
+    const result = await service.processWebhook(payload, signature);
+
+    expect(result).toEqual({ ok: true, duplicate: false, status: "ignored", eventName: "subscription_updated" });
+    expect(pool.query).toHaveBeenCalledTimes(2);
+    const insertCall = (pool.query as ReturnType<typeof vi.fn>).mock.calls[1] as [string, unknown[]];
+    expect(insertCall[0]).toContain("INSERT INTO billing_webhook_event");
+    expect(insertCall[1][4]).toBe("failed");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

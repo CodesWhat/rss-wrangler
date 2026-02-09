@@ -453,8 +453,12 @@ export type AccountEntitlements = z.infer<typeof accountEntitlementsSchema>;
 export const hostedPlanIdSchema = z.enum(["pro", "pro_ai"]);
 export type HostedPlanId = z.infer<typeof hostedPlanIdSchema>;
 
+export const billingIntervalSchema = z.enum(["monthly", "annual"]);
+export type BillingInterval = z.infer<typeof billingIntervalSchema>;
+
 export const billingCheckoutRequestSchema = z.object({
-  planId: hostedPlanIdSchema
+  planId: hostedPlanIdSchema,
+  interval: billingIntervalSchema.default("monthly")
 });
 export type BillingCheckoutRequest = z.infer<typeof billingCheckoutRequestSchema>;
 
@@ -489,9 +493,20 @@ export const billingOverviewSchema = z.object({
   subscriptionStatus: planSubscriptionStatusSchema,
   trialEndsAt: z.string().datetime().nullable(),
   currentPeriodEndsAt: z.string().datetime().nullable(),
+  billingInterval: billingIntervalSchema.nullable(),
   cancelAtPeriodEnd: z.boolean(),
   customerPortalUrl: z.string().url().nullable(),
-  checkoutEnabled: z.boolean()
+  checkoutEnabled: z.boolean(),
+  checkoutAvailability: z.object({
+    pro: z.object({
+      monthly: z.boolean(),
+      annual: z.boolean()
+    }),
+    pro_ai: z.object({
+      monthly: z.boolean(),
+      annual: z.boolean()
+    })
+  })
 });
 export type BillingOverview = z.infer<typeof billingOverviewSchema>;
 

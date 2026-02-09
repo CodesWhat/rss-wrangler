@@ -1,7 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import type { Pool } from "pg";
-import type { BillingSubscriptionAction, HostedPlanId, PlanId, PlanSubscriptionStatus } from "@rss-wrangler/contracts";
+import type { BillingInterval, BillingSubscriptionAction, HostedPlanId, PlanId, PlanSubscriptionStatus } from "@rss-wrangler/contracts";
 import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 
@@ -48,9 +48,11 @@ interface BillingOverview {
   subscriptionStatus: PlanSubscriptionStatus;
   trialEndsAt: string | null;
   currentPeriodEndsAt: string | null;
+  billingInterval: BillingInterval | null;
   cancelAtPeriodEnd: boolean;
   customerPortalUrl: string | null;
   checkoutEnabled: boolean;
+  checkoutAvailability: Record<HostedPlanId, Record<BillingInterval, boolean>>;
 }
 
 type CheckoutResult =
@@ -83,6 +85,7 @@ interface TenantSubscriptionRow {
   cancel_at_period_end: boolean;
   customer_portal_url: string | null;
   lemon_subscription_id: string | null;
+  lemon_variant_id: string | null;
 }
 
 interface LemonUpsertPayload {
@@ -105,6 +108,7 @@ interface BillingService {
     tenantId: string;
     userId: string;
     planId: HostedPlanId;
+    interval: BillingInterval;
   }) => Promise<CheckoutResult>;
   getPortal: (tenantId: string) => Promise<PortalResult>;
   updateSubscription: (tenantId: string, action: BillingSubscriptionAction) => Promise<SubscriptionActionResult>;
@@ -254,28 +258,57 @@ function shouldDowngradeToFree(eventName: string, status: PlanSubscriptionStatus
 export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBaseLogger): BillingService {
   const lemonApiBase = env.LEMON_SQUEEZY_API_BASE_URL;
 
-  const variantByPlan: Record<HostedPlanId, string | undefined> = {
-    pro: env.LEMON_SQUEEZY_VARIANT_PRO,
-    pro_ai: env.LEMON_SQUEEZY_VARIANT_PRO_AI
+  const variantByPlanAndInterval: Record<HostedPlanId, Record<BillingInterval, string | undefined>> = {
+    pro: {
+      monthly: env.LEMON_SQUEEZY_VARIANT_PRO,
+      annual: env.LEMON_SQUEEZY_VARIANT_PRO_ANNUAL
+    },
+    pro_ai: {
+      monthly: env.LEMON_SQUEEZY_VARIANT_PRO_AI,
+      annual: env.LEMON_SQUEEZY_VARIANT_PRO_AI_ANNUAL
+    }
   };
 
-  function planForVariant(variantId: string | null): PlanId {
-    if (variantId && variantId === env.LEMON_SQUEEZY_VARIANT_PRO_AI) {
-      return "pro_ai";
+  function variantMetadata(variantId: string | null): { planId: HostedPlanId; interval: BillingInterval } | null {
+    if (!variantId) {
+      return null;
     }
-    if (variantId && variantId === env.LEMON_SQUEEZY_VARIANT_PRO) {
-      return "pro";
+
+    for (const planId of Object.keys(variantByPlanAndInterval) as HostedPlanId[]) {
+      for (const interval of Object.keys(variantByPlanAndInterval[planId]) as BillingInterval[]) {
+        if (variantByPlanAndInterval[planId][interval] === variantId) {
+          return { planId, interval };
+        }
+      }
     }
-    return "free";
+
+    return null;
+  }
+
+  function planForVariant(variantId: string | null): PlanId | null {
+    return variantMetadata(variantId)?.planId ?? null;
+  }
+
+  function intervalForVariant(variantId: string | null): BillingInterval | null {
+    return variantMetadata(variantId)?.interval ?? null;
+  }
+
+  function checkoutAvailability(): Record<HostedPlanId, Record<BillingInterval, boolean>> {
+    const providerReady = Boolean(env.LEMON_SQUEEZY_API_KEY && env.LEMON_SQUEEZY_STORE_ID);
+    return {
+      pro: {
+        monthly: providerReady && Boolean(variantByPlanAndInterval.pro.monthly),
+        annual: providerReady && Boolean(variantByPlanAndInterval.pro.annual)
+      },
+      pro_ai: {
+        monthly: providerReady && Boolean(variantByPlanAndInterval.pro_ai.monthly),
+        annual: providerReady && Boolean(variantByPlanAndInterval.pro_ai.annual)
+      }
+    };
   }
 
   function checkoutConfigured(): boolean {
-    return Boolean(
-      env.LEMON_SQUEEZY_API_KEY &&
-      env.LEMON_SQUEEZY_STORE_ID &&
-      env.LEMON_SQUEEZY_VARIANT_PRO &&
-      env.LEMON_SQUEEZY_VARIANT_PRO_AI
-    );
+    return Boolean(env.LEMON_SQUEEZY_API_KEY && env.LEMON_SQUEEZY_STORE_ID);
   }
 
   function webhookConfigured(): boolean {
@@ -309,7 +342,8 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
               current_period_ends_at,
               cancel_at_period_end,
               customer_portal_url,
-              lemon_subscription_id
+              lemon_subscription_id,
+              lemon_variant_id
        FROM tenant_plan_subscription
        WHERE tenant_id = $1
        LIMIT 1`,
@@ -319,15 +353,19 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
     const row = result.rows[0];
     const planId = normalizePlanId(row?.plan_id);
     const subscriptionStatus = normalizePlanStatus(row?.status);
+    const availability = checkoutAvailability();
+    const checkoutEnabled = Object.values(availability).some((planAvailability) => planAvailability.monthly || planAvailability.annual);
 
     return {
       planId,
       subscriptionStatus,
       trialEndsAt: toIsoOrNull(row?.trial_ends_at ?? null),
       currentPeriodEndsAt: toIsoOrNull(row?.current_period_ends_at ?? null),
+      billingInterval: intervalForVariant(row?.lemon_variant_id ?? null),
       cancelAtPeriodEnd: row?.cancel_at_period_end ?? false,
       customerPortalUrl: row?.customer_portal_url ?? null,
-      checkoutEnabled: checkoutConfigured()
+      checkoutEnabled,
+      checkoutAvailability: availability
     };
   }
 
@@ -335,6 +373,7 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
     tenantId: string;
     userId: string;
     planId: HostedPlanId;
+    interval: BillingInterval;
   }): Promise<CheckoutResult> {
     if (!checkoutConfigured()) {
       return {
@@ -344,12 +383,12 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
       };
     }
 
-    const variantId = variantByPlan[input.planId];
+    const variantId = variantByPlanAndInterval[input.planId][input.interval];
     if (!variantId || !env.LEMON_SQUEEZY_STORE_ID) {
       return {
         ok: false,
         error: "not_configured",
-        message: "Requested plan is not configured in billing settings."
+        message: `Requested plan (${input.planId}, ${input.interval}) is not configured in billing settings.`
       };
     }
 
@@ -375,7 +414,8 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
             custom: {
               tenant_id: input.tenantId,
               user_id: input.userId,
-              plan_id: input.planId
+              plan_id: input.planId,
+              billing_interval: input.interval
             }
           },
           checkout_options: {
@@ -747,7 +787,7 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
     payloadHash: string;
     eventName: string;
     payload: unknown;
-    status: "processed" | "ignored";
+    status: "processed" | "ignored" | "failed";
     tenantId: string | null;
   }): Promise<boolean> {
     const result = await pool.query<{ id: string }>(
@@ -776,21 +816,109 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
     return result.rows.length > 0;
   }
 
+  async function sendBillingAlert(input: {
+    code: string;
+    message: string;
+    severity: "warning" | "error";
+    details?: Record<string, unknown>;
+  }): Promise<void> {
+    if (!env.BILLING_ALERT_WEBHOOK_URL) {
+      return;
+    }
+
+    try {
+      const response = await fetch(env.BILLING_ALERT_WEBHOOK_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          service: "rss-wrangler-api",
+          subsystem: "billing-webhook",
+          code: input.code,
+          severity: input.severity,
+          message: input.message,
+          details: input.details ?? {},
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      if (!response.ok) {
+        const body = await response.text();
+        logger.error(
+          { code: input.code, status: response.status, body },
+          "failed to deliver billing alert webhook"
+        );
+      }
+    } catch (error) {
+      logger.error({ code: input.code, error }, "failed to send billing alert webhook");
+    }
+  }
+
   async function processWebhook(rawBody: string, signatureHeader: string | undefined): Promise<WebhookResult> {
-    if (!webhookConfigured()) {
+    const payloadHash = hashPayload(rawBody);
+
+    async function recordFailureEvent(
+      eventName: string,
+      message: string,
+      details: Record<string, unknown>
+    ): Promise<void> {
+      try {
+        await recordWebhookEvent({
+          payloadHash,
+          eventName,
+          payload: {
+            message,
+            details
+          },
+          status: "failed",
+          tenantId: null
+        });
+      } catch (error) {
+        logger.error({ error, eventName }, "failed to persist billing webhook failure event");
+      }
+    }
+
+    async function failWebhook(
+      errorCode: "not_configured" | "invalid_signature" | "invalid_payload",
+      eventName: string,
+      message: string,
+      details: Record<string, unknown>
+    ): Promise<WebhookResult> {
+      await recordFailureEvent(eventName, message, details);
+      await sendBillingAlert({
+        code: `billing_webhook_${errorCode}`,
+        severity: "error",
+        message,
+        details: {
+          eventName,
+          payloadHash,
+          ...details
+        }
+      });
       return {
         ok: false,
-        error: "not_configured",
-        message: "Webhook secret is not configured."
+        error: errorCode,
+        message
       };
     }
 
+    if (!webhookConfigured()) {
+      return failWebhook(
+        "not_configured",
+        "webhook_not_configured",
+        "Webhook secret is not configured.",
+        { payloadBytes: rawBody.length }
+      );
+    }
+
     if (!signatureHeader) {
-      return {
-        ok: false,
-        error: "invalid_signature",
-        message: "Missing webhook signature header."
-      };
+      return failWebhook(
+        "invalid_signature",
+        "signature_missing",
+        "Missing webhook signature header.",
+        { payloadBytes: rawBody.length }
+      );
     }
 
     const normalizedSignature = normalizeSignature(signatureHeader);
@@ -799,34 +927,36 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
       .digest("hex");
 
     if (!timingSafeHexEqual(normalizedSignature, expected)) {
-      return {
-        ok: false,
-        error: "invalid_signature",
-        message: "Webhook signature verification failed."
-      };
+      return failWebhook(
+        "invalid_signature",
+        "signature_invalid",
+        "Webhook signature verification failed.",
+        { payloadBytes: rawBody.length }
+      );
     }
 
     let parsedJson: unknown;
     try {
       parsedJson = JSON.parse(rawBody) as unknown;
     } catch {
-      return {
-        ok: false,
-        error: "invalid_payload",
-        message: "Webhook body is not valid JSON."
-      };
+      return failWebhook(
+        "invalid_payload",
+        "payload_invalid_json",
+        "Webhook body is not valid JSON.",
+        { payloadBytes: rawBody.length }
+      );
     }
 
     const parsedPayload = lemonWebhookSchema.safeParse(parsedJson);
     if (!parsedPayload.success) {
-      return {
-        ok: false,
-        error: "invalid_payload",
-        message: "Webhook payload does not match expected subscription schema."
-      };
+      return failWebhook(
+        "invalid_payload",
+        "payload_schema_invalid",
+        "Webhook payload does not match expected subscription schema.",
+        { issues: parsedPayload.error.issues.map((issue) => issue.message) }
+      );
     }
 
-    const payloadHash = hashPayload(rawBody);
     const eventName = parsedPayload.data.meta.event_name;
 
     const alreadyRecorded = await pool.query(
@@ -879,35 +1009,87 @@ export function createBillingService(env: ApiEnv, pool: Pool, logger: FastifyBas
       });
 
       logger.warn({ eventName, lemonSubscriptionId }, "billing webhook ignored because tenant could not be resolved");
+      await sendBillingAlert({
+        code: "billing_webhook_tenant_unresolved",
+        severity: "warning",
+        message: "Billing webhook ignored because tenant could not be resolved.",
+        details: {
+          eventName,
+          lemonSubscriptionId,
+          lemonCustomerId,
+          payloadHash
+        }
+      });
       return { ok: true, duplicate: false, status: "ignored", eventName };
     }
 
+    const shouldDowngrade = shouldDowngradeToFree(eventName, subscriptionStatus, currentPeriodEndsAt);
     const variantPlan = planForVariant(lemonVariantId);
-    const planId = shouldDowngradeToFree(eventName, subscriptionStatus, currentPeriodEndsAt)
-      ? "free"
-      : variantPlan;
+    if (!shouldDowngrade && !variantPlan) {
+      await recordFailureEvent(
+        eventName,
+        "Webhook referenced unknown Lemon variant ID.",
+        { lemonVariantId, tenantId, lemonSubscriptionId }
+      );
+      await sendBillingAlert({
+        code: "billing_webhook_unknown_variant",
+        severity: "error",
+        message: "Billing webhook ignored because variant ID is not mapped to a hosted plan.",
+        details: {
+          eventName,
+          tenantId,
+          lemonVariantId,
+          lemonSubscriptionId,
+          payloadHash
+        }
+      });
+      return { ok: true, duplicate: false, status: "ignored", eventName };
+    }
 
-    await upsertSubscriptionFromWebhook(tenantId, {
-      planId,
-      subscriptionStatus,
-      trialEndsAt,
-      currentPeriodEndsAt,
-      cancelAtPeriodEnd: asBoolean(attributes.cancelled),
-      lemonSubscriptionId,
-      lemonCustomerId,
-      lemonOrderId,
-      lemonVariantId,
-      customerPortalUrl: urls.customerPortalUrl,
-      updatePaymentMethodUrl: urls.updatePaymentMethodUrl
-    });
+    const planId: PlanId = shouldDowngrade ? "free" : (variantPlan ?? "free");
 
-    await recordWebhookEvent({
-      payloadHash,
-      eventName,
-      payload: parsedJson,
-      status: "processed",
-      tenantId
-    });
+    try {
+      await upsertSubscriptionFromWebhook(tenantId, {
+        planId,
+        subscriptionStatus,
+        trialEndsAt,
+        currentPeriodEndsAt,
+        cancelAtPeriodEnd: asBoolean(attributes.cancelled),
+        lemonSubscriptionId,
+        lemonCustomerId,
+        lemonOrderId,
+        lemonVariantId,
+        customerPortalUrl: urls.customerPortalUrl,
+        updatePaymentMethodUrl: urls.updatePaymentMethodUrl
+      });
+
+      await recordWebhookEvent({
+        payloadHash,
+        eventName,
+        payload: parsedJson,
+        status: "processed",
+        tenantId
+      });
+    } catch (error) {
+      await recordFailureEvent(
+        eventName,
+        "Webhook processing failed while persisting billing state.",
+        { tenantId, lemonSubscriptionId, lemonVariantId }
+      );
+      await sendBillingAlert({
+        code: "billing_webhook_processing_failed",
+        severity: "error",
+        message: "Billing webhook processing failed while persisting billing state.",
+        details: {
+          eventName,
+          tenantId,
+          lemonSubscriptionId,
+          lemonVariantId,
+          payloadHash
+        }
+      });
+      throw error;
+    }
 
     return { ok: true, duplicate: false, status: "processed", eventName };
   }

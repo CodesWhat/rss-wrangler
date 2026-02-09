@@ -200,7 +200,7 @@ Audited: 2026-02-08
 | Entitlements + plan-aware limit enforcement | ⚠️ | Baseline entitlement middleware now exists with account-facing contract surface (`/v1/account/entitlements`): plan defaults (`free/pro/pro_ai`), feed-cap checks on add/import, search-mode gating (title/source vs full-text), worker min-poll enforcement, daily ingest budget reservation/release (`tenant_usage_daily`), billing-webhook subscription sync into `tenant_plan_subscription`, and settings billing UI now surfaces account usage/limits (feeds, items/day, search mode, poll minimum). Remaining gaps: broader route coverage, retention/index-size meters, and hosted warning/usage telemetry hardening. |
 | Hosted performance/load testing + SLO baselines | ✅ | Baseline shipped with repeatable hosted API load profile + SLO thresholds (`infra/load/profiles/phase0-hosted-api-baseline.json`), worker queue SLO thresholds (`infra/load/profiles/phase0-worker-slo-baseline.json`), and automated perf gate scripts (`scripts/load/run-phase0-slo-gate.mjs`, `scripts/load/run-hosted-load.mjs`, `scripts/load/check-worker-slo.mjs`) documented in `.planning/PHASE0_HOSTED_SLO_BASELINE.md`. |
 | Hosted post-deploy smoke verification | ✅ | Fast hosted verification command shipped: `npm run hosted:smoke` (`scripts/load/run-hosted-smoke.mjs`) validates API health, auth login, and authenticated settings access (optional web home check) and writes report to `infra/load/results/latest-hosted-smoke.json`. |
-| Billing integration (Lemon Squeezy + pricing/upgrade + plan management UI) | ⚠️ | Billing foundation shipped: Lemon Squeezy checkout endpoint, signed webhook ingestion with idempotency/audit table, subscription-to-plan sync, `/v1/billing` overview, billing portal handoff, in-app cancel/reactivate controls (`POST /v1/billing/subscription-action`), settings billing section, and `/pricing` page. Remaining gaps: annual plan variants and production alerting around webhook failures. |
+| Billing integration (Lemon Squeezy + pricing/upgrade + plan management UI) | ✅ | Billing stack is live end-to-end: checkout endpoint with monthly/annual interval selection, signed webhook ingestion with idempotency/audit table, subscription-to-plan sync, `/v1/billing` overview, billing portal handoff, in-app cancel/reactivate controls (`POST /v1/billing/subscription-action`), settings billing UI, `/pricing` interval toggle, and optional webhook-failure alert sink via `BILLING_ALERT_WEBHOOK_URL`. |
 | Consent + CMP baseline (hosted) | ⚠️ | Baseline shipped: tenant/user consent storage (`user_privacy_consent`), `/v1/privacy/consent` read/write endpoints, necessary-only defaults, persistent privacy settings manager, and proxy-header region detection for explicit-consent locales. Remaining gaps: provider CMP adapter wiring, automated non-essential script gating tests, and policy-version migration tooling. |
 | Usage metering (feeds/items-day/retention/index size) | ⚠️ | Daily ingest metering baseline exists (`tenant_usage_daily` + reservation/release in worker + feed-count usage in entitlement responses). Remaining gaps: retention/index-size metering, billing-facing rollups, and usage surfacing in hosted account UI. |
 | Self-host Docker/OrbStack smoke loop | ✅ | Compose stack smoke baseline is now automated via `npm run orbstack:smoke` (`scripts/orbstack-smoke.sh`) with in-container API/web health checks and auth login probe (avoids host-port collisions). Worker boot resiliency added for legacy pg-boss state via `db/migrations/0021_pgboss_schema_compat.sql`. |
@@ -222,8 +222,8 @@ Audited: 2026-02-08
 
 ## SUMMARY COUNTS
 
-- ✅ IMPLEMENTED: 37
-- ⚠️ PARTIAL: 19
+- ✅ IMPLEMENTED: 38
+- ⚠️ PARTIAL: 18
 - 🔲 STUB: 6
 - ❌ MISSING: 49
 
@@ -240,7 +240,7 @@ Audited: 2026-02-08
 9. **+N outlets and folder labels not shown on cards**
 10. **Missing card actions** - mute keyword, prefer/mute source
 11. **Hosted onboarding nearly complete** - member approval/roles shipped; richer bootstrap logic still desired before hosted public launch
-12. **Hosted billing still needs final polish** - checkout/webhooks/portal/pricing plus in-app cancel/reactivate are live, but annual variants and webhook alerting still need finish
+12. **Hosted dogfood telemetry run pending** - billing stack is now launch-ready, but first live hosted cost/usage telemetry pass is still required
 13. **Entitlements are partial** - core feed/search/worker gates plus billing sync landed, but broader route coverage + richer usage/limit UX remain
 14. **Feed discovery + directory seeding missing** - need one-time DB seed from feed-directory.json + discovery engine for URL → candidates
 15. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail

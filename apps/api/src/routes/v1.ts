@@ -892,7 +892,8 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       const result = await billing.createCheckout({
         tenantId: authContext.tenantId,
         userId: authContext.userId,
-        planId: payload.planId
+        planId: payload.planId,
+        interval: payload.interval
       });
 
       if (!result.ok) {

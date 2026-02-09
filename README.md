@@ -116,6 +116,9 @@ See `infra/.env.example` for the full list. Key variables:
 | `LEMON_SQUEEZY_WEBHOOK_SECRET` | Hosted only | Shared secret used to verify Lemon webhook signatures |
 | `LEMON_SQUEEZY_VARIANT_PRO` | Hosted only | Variant ID mapped to hosted `pro` plan |
 | `LEMON_SQUEEZY_VARIANT_PRO_AI` | Hosted only | Variant ID mapped to hosted `pro_ai` plan |
+| `LEMON_SQUEEZY_VARIANT_PRO_ANNUAL` | Hosted only | Variant ID mapped to hosted `pro` annual plan |
+| `LEMON_SQUEEZY_VARIANT_PRO_AI_ANNUAL` | Hosted only | Variant ID mapped to hosted `pro_ai` annual plan |
+| `BILLING_ALERT_WEBHOOK_URL` | Hosted only | Optional alert sink URL for billing webhook failures |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `WORKER_POLL_MINUTES` | No | Feed poll interval in minutes (default: 60) |
 | `OPENAI_API_KEY` | No | Required for AI features (summaries, topic classification) |

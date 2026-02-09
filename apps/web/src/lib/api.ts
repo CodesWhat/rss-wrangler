@@ -28,6 +28,7 @@ import {
   type Annotation,
   type AuthTokens,
   type BillingOverview,
+  type BillingInterval,
   type BillingSubscriptionAction,
   type ChangePasswordRequest,
   type ClusterCard,
@@ -1237,14 +1238,15 @@ export async function getBillingOverview(): Promise<BillingOverview | null> {
 }
 
 export async function createBillingCheckout(
-  planId: HostedPlanId
+  planId: HostedPlanId,
+  interval: BillingInterval = "monthly"
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   try {
     const headers = await authedHeaders(true);
     const res = await fetch(`${API_BASE_URL}/v1/billing/checkout`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ planId }),
+      body: JSON.stringify({ planId, interval }),
     });
 
     if (!res.ok) {

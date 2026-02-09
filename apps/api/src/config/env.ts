@@ -27,7 +27,10 @@ const envSchema = z.object({
   LEMON_SQUEEZY_STORE_ID: z.string().optional(),
   LEMON_SQUEEZY_WEBHOOK_SECRET: z.string().optional(),
   LEMON_SQUEEZY_VARIANT_PRO: z.string().optional(),
-  LEMON_SQUEEZY_VARIANT_PRO_AI: z.string().optional()
+  LEMON_SQUEEZY_VARIANT_PRO_AI: z.string().optional(),
+  LEMON_SQUEEZY_VARIANT_PRO_ANNUAL: z.string().optional(),
+  LEMON_SQUEEZY_VARIANT_PRO_AI_ANNUAL: z.string().optional(),
+  BILLING_ALERT_WEBHOOK_URL: z.string().url().optional()
 }).refine(
   (env) => env.AUTH_JWT_SECRET !== "change-me-change-me",
   { message: "AUTH_JWT_SECRET must not use the placeholder value", path: ["AUTH_JWT_SECRET"] }

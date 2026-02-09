@@ -2427,6 +2427,11 @@ select {
   gap: var(--sp-2);
 }
 
+.billing-interval-toggle {
+  width: fit-content;
+  margin-bottom: var(--sp-1);
+}
+
 .billing-usage-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

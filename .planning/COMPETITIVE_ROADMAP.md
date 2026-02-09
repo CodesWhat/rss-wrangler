@@ -280,7 +280,7 @@ Features that only power users want or that only one app has.
 | Hosted account management + compliance controls | ⚠️ Partial | Password reset/change, account deletion lifecycle automation, and baseline account export are live; completion notifications + export hardening remain |
 | Entitlements + plan-limit middleware baseline | ⚠️ Partial | Plan defaults + API/worker feed/search/ingest gates landed; billing webhook sync now lands plan updates into entitlements, broader coverage/usage UX remain |
 | Hosted performance/load testing + SLO baseline | ✅ Implemented | Load harness, SLO policy, and calibration workflow are in repo |
-| Billing foundation (Lemon Squeezy + plan management UX) | ⚠️ Partial | Checkout + signed webhook sync + billing overview/portal APIs + settings/pricing surfaces + in-app cancel/reactivate controls shipped; annual variants + webhook alerting remain |
+| Billing foundation (Lemon Squeezy + plan management UX) | ✅ Implemented | Checkout + signed webhook sync + billing overview/portal APIs + settings/pricing surfaces, in-app cancel/reactivate controls, annual plan variants, and webhook failure alerting are live |
 | Consent + CMP baseline (hosted) | ⚠️ Partial | Necessary-only default + persistent privacy controls + region-aware consent metadata shipped; CMP adapter and automated non-essential script gating tests remain |
 | Hosted SaaS offering (dogfood pilot) | ⚠️ Partial | Infra/provider decisions plus Render blueprints (`render.free.yaml`, `render.yaml`) are in repo, self-host Docker/OrbStack smoke is green (`npm run orbstack:smoke`) with in-container health/login checks, and hosted post-deploy smoke is scripted (`npm run hosted:smoke`). First live hosted deploy + telemetry run still pending. |
 

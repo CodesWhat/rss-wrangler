@@ -37,6 +37,7 @@ import type {
   FilterType,
   FilterMode,
   BillingOverview,
+  BillingInterval,
   HostedPlanId,
   WorkspaceMember,
   MembershipPolicy,
@@ -398,9 +399,14 @@ function formatSearchMode(mode: AccountEntitlements["searchMode"]): string {
   return mode === "full_text" ? "Full text" : "Title + source";
 }
 
+function formatIntervalLabel(interval: BillingInterval): string {
+  return interval === "annual" ? "annual" : "monthly";
+}
+
 function BillingSection() {
   const [overview, setOverview] = useState<BillingOverview | null>(null);
   const [entitlements, setEntitlements] = useState<AccountEntitlements | null>(null);
+  const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyPlan, setBusyPlan] = useState<HostedPlanId | null>(null);
@@ -425,6 +431,9 @@ function BillingSection() {
         setError("Failed to load billing details.");
       } else {
         setOverview(billingData);
+        if (billingData.billingInterval) {
+          setBillingInterval(billingData.billingInterval);
+        }
       }
       setEntitlements(entitlementsData);
       setLoading(false);
@@ -437,7 +446,7 @@ function BillingSection() {
     setError("");
     setActionNotice("");
     setBusyPlan(planId);
-    const result = await createBillingCheckout(planId);
+    const result = await createBillingCheckout(planId, billingInterval);
     if (!result.ok) {
       setError(result.error);
       setBusyPlan(null);
@@ -516,6 +525,7 @@ function BillingSection() {
           <div className="billing-current-plan">
             <span className="badge badge-approved">Current plan: {formatPlanLabel(overview.planId)}</span>
             <span className="badge">{formatBillingStatus(overview.subscriptionStatus)}</span>
+            {overview.billingInterval && <span className="badge">Billed {overview.billingInterval}</span>}
             {overview.cancelAtPeriodEnd && <span className="badge badge-pending">Cancels at period end</span>}
           </div>
 
@@ -577,32 +587,74 @@ function BillingSection() {
             )}
           </div>
 
+          <div className="layout-toggle billing-interval-toggle" role="tablist" aria-label="Billing interval">
+            <button
+              type="button"
+              className={`layout-toggle-btn button-small ${billingInterval === "monthly" ? "button-active" : ""}`}
+              onClick={() => setBillingInterval("monthly")}
+              role="tab"
+              aria-selected={billingInterval === "monthly"}
+            >
+              Monthly
+            </button>
+            <button
+              type="button"
+              className={`layout-toggle-btn button-small ${billingInterval === "annual" ? "button-active" : ""}`}
+              onClick={() => setBillingInterval("annual")}
+              role="tab"
+              aria-selected={billingInterval === "annual"}
+            >
+              Annual (2 mo free)
+            </button>
+          </div>
           <div className="billing-plans">
             <div className="billing-plan-card">
               <div className="billing-plan-title">Pro</div>
-              <div className="billing-plan-price">$7 / month</div>
+              <div className="billing-plan-price">{billingInterval === "annual" ? "$70 / year" : "$7 / month"}</div>
               <p className="muted">Unlimited feeds, faster polling, full-text search.</p>
               <button
                 type="button"
                 className="button button-primary button-small"
-                disabled={!overview.checkoutEnabled || busyPlan !== null || overview.planId === "pro"}
+                disabled={
+                  !overview.checkoutEnabled ||
+                  busyPlan !== null ||
+                  !overview.checkoutAvailability.pro[billingInterval] ||
+                  (overview.planId === "pro" && overview.billingInterval === billingInterval)
+                }
                 onClick={() => handleUpgrade("pro")}
               >
-                {busyPlan === "pro" ? "Redirecting..." : overview.planId === "pro" ? "Current plan" : "Upgrade to Pro"}
+                {busyPlan === "pro"
+                  ? "Redirecting..."
+                  : !overview.checkoutAvailability.pro[billingInterval]
+                    ? "Unavailable"
+                    : overview.planId === "pro" && overview.billingInterval === billingInterval
+                      ? "Current plan"
+                      : `Switch to Pro (${formatIntervalLabel(billingInterval)})`}
               </button>
             </div>
 
             <div className="billing-plan-card">
               <div className="billing-plan-title">Pro + AI</div>
-              <div className="billing-plan-price">$14 / month</div>
+              <div className="billing-plan-price">{billingInterval === "annual" ? "$140 / year" : "$14 / month"}</div>
               <p className="muted">Everything in Pro plus summaries, digests, and AI ranking features.</p>
               <button
                 type="button"
                 className="button button-primary button-small"
-                disabled={!overview.checkoutEnabled || busyPlan !== null || overview.planId === "pro_ai"}
+                disabled={
+                  !overview.checkoutEnabled ||
+                  busyPlan !== null ||
+                  !overview.checkoutAvailability.pro_ai[billingInterval] ||
+                  (overview.planId === "pro_ai" && overview.billingInterval === billingInterval)
+                }
                 onClick={() => handleUpgrade("pro_ai")}
               >
-                {busyPlan === "pro_ai" ? "Redirecting..." : overview.planId === "pro_ai" ? "Current plan" : "Upgrade to Pro + AI"}
+                {busyPlan === "pro_ai"
+                  ? "Redirecting..."
+                  : !overview.checkoutAvailability.pro_ai[billingInterval]
+                    ? "Unavailable"
+                    : overview.planId === "pro_ai" && overview.billingInterval === billingInterval
+                      ? "Current plan"
+                      : `Switch to Pro + AI (${formatIntervalLabel(billingInterval)})`}
               </button>
             </div>
           </div>
@@ -610,6 +662,15 @@ function BillingSection() {
           {!overview.checkoutEnabled && (
             <p className="muted">Checkout is not configured for this deployment yet.</p>
           )}
+          {overview.checkoutEnabled &&
+            !overview.checkoutAvailability.pro[billingInterval] &&
+            !overview.checkoutAvailability.pro_ai[billingInterval] && (
+              <p className="muted">
+                {billingInterval === "annual"
+                  ? "Annual variants are not configured for this deployment yet."
+                  : "Monthly variants are not configured for this deployment yet."}
+              </p>
+            )}
         </div>
       ) : (
         <p className="muted">Billing details unavailable.</p>
