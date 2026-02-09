@@ -466,7 +466,7 @@ export function OnboardingWizard({
           max-width: 1180px;
           margin: 0 auto;
           border: none;
-          background: #d9dce3;
+          background: var(--bg-base);
           border-color: var(--border-default);
           box-shadow: 0 2px 10px rgba(10, 10, 10, 0.04);
         }
