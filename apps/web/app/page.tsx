@@ -254,7 +254,7 @@ function HomeFeed() {
               Latest
             </button>
           </div>
-          <div className="row">
+          <div className="row feed-actions">
             <LayoutToggle layout={layout} onChange={handleLayoutChange} />
             <button
               type="button"
