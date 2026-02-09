@@ -489,9 +489,7 @@ export function OnboardingWizard({
           flex-direction: column;
           gap: 0.75rem;
           background: var(--bg-surface);
-          border: 1px solid var(--border-default);
           padding: 0.9rem;
-          box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04);
         }
         .onboarding-step {
           display: flex;
@@ -507,8 +505,8 @@ export function OnboardingWizard({
           gap: 0.5rem;
         }
         .onboarding-method {
-          border: 1px solid var(--border-default);
-          background: var(--bg-surface);
+          border: none;
+          background: var(--bg-elevated);
           color: var(--text-secondary);
           font-family: var(--font-mono);
           font-size: 0.72rem;
@@ -522,18 +520,16 @@ export function OnboardingWizard({
           color: var(--text-primary);
         }
         .onboarding-method.is-active {
-          border-color: var(--accent);
           color: var(--accent);
           background: var(--accent-dim);
         }
         .onboarding-card {
-          border: 1px solid var(--border-default);
-          background: var(--bg-surface);
+          border: none;
+          background: var(--bg-elevated);
           padding: 0.75rem;
           display: flex;
           flex-direction: column;
           gap: 0.5rem;
-          box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04);
         }
         .onboarding-method-shell {
           min-height: 142px;
