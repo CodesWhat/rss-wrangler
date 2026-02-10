@@ -1,51 +1,59 @@
 import {
-  addFeedRequestSchema,
-  accountEntitlementsSchema,
-  clusterFeedbackRequestSchema,
   accountDataExportStatusSchema,
+  accountEntitlementsSchema,
+  addFeedRequestSchema,
+  aiUsageSummarySchema,
   billingCheckoutRequestSchema,
   billingCheckoutResponseSchema,
   billingOverviewSchema,
   billingPortalResponseSchema,
   billingSubscriptionActionRequestSchema,
   billingSubscriptionActionResponseSchema,
+  type ClusterCard,
   changePasswordRequestSchema,
-  createWorkspaceInviteRequestSchema,
+  clusterFeedbackRequestSchema,
   createAnnotationRequestSchema,
   createFilterRuleRequestSchema,
+  createMemberInviteRequestSchema,
+  directoryEntrySchema,
+  directoryListResponseSchema,
+  directoryQuerySchema,
   eventsBatchRequestSchema,
   forgotPasswordRequestSchema,
-  joinWorkspaceRequestSchema,
+  joinAccountRequestSchema,
   listClustersQuerySchema,
   loginRequestSchema,
-  resendVerificationRequestSchema,
-  resetPasswordRequestSchema,
-  signupRequestSchema,
+  markAllReadRequestSchema,
+  memberInviteSchema,
+  memberSchema,
+  opmlImportResponseSchema,
+  pollFeedNowRequestSchema,
+  privacyConsentSchema,
   pushSubscribeRequestSchema,
   pushUnsubscribeRequestSchema,
-  privacyConsentSchema,
-  requestAccountDeletionSchema,
   recordDwellRequestSchema,
   renameTopicRequestSchema,
+  requestAccountDeletionSchema,
+  resendVerificationRequestSchema,
+  resetPasswordRequestSchema,
   resolveTopicRequestSchema,
-  opmlImportResponseSchema,
+  type SearchQuery, 
   searchQuerySchema,
+  signupRequestSchema,
   statsQuerySchema,
   updateFeedRequestSchema,
   updateFilterRuleRequestSchema,
-  updatePrivacyConsentRequestSchema,
   updateMemberRequestSchema,
-  updateMembershipPolicyRequestSchema,
-  updateSettingsRequestSchema,
-  workspaceInviteSchema,
-  workspaceMemberSchema,
-  type ClusterCard,
-  type SearchQuery
+  updatePrivacyConsentRequestSchema,
+  updateSettingsRequestSchema
 } from "@rss-wrangler/contracts";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import { PgBoss } from "pg-boss";
 import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 import { getAccountEntitlements } from "../plugins/entitlements";
+import { createAiRegistry } from "@rss-wrangler/contracts";
+import { ensureAiUsageTable, getMonthlyUsage } from "../services/ai-usage-service";
 import { createAuthService } from "../services/auth-service";
 import { createBillingService } from "../services/billing-service";
 import { parseOpml } from "../services/opml-parser";
@@ -53,7 +61,7 @@ import { PostgresStore } from "../services/postgres-store";
 import { requiresExplicitConsent, resolveCountryCode } from "../services/privacy-consent-service";
 import { validateFeedUrl } from "../services/url-validator";
 
-const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
+const DEFAULT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000001";
 
 const clusterIdParams = z.object({ id: z.string().uuid() });
 const feedIdParams = z.object({ id: z.string().uuid() });
@@ -75,11 +83,25 @@ const verifyEmailQuerySchema = z.object({
   token: z.string().min(12).max(512)
 });
 
+const PROCESS_FEED_JOB = "process-feed";
+
 export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }) => {
   const auth = createAuthService(app, env, app.pg);
   const billing = createBillingService(env, app.pg, app.log);
+  const jobs = new PgBoss({
+    connectionString: env.DATABASE_URL,
+    application_name: "rss-wrangler-api"
+  });
 
-  async function releaseTenantClient(request: { dbClient?: { query: (sql: string, params?: unknown[]) => Promise<unknown>; release: () => void } }) {
+  await jobs.start();
+  await jobs.createQueue(PROCESS_FEED_JOB);
+  await ensureAiUsageTable(app.pg);
+
+  app.addHook("onClose", async () => {
+    await jobs.stop();
+  });
+
+  async function releaseAccountClient(request: { dbClient?: { query: (sql: string, params?: unknown[]) => Promise<unknown>; release: () => void } }) {
     if (!request.dbClient) {
       return;
     }
@@ -88,7 +110,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     request.dbClient = undefined;
 
     try {
-      await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_TENANT_ID]);
+      await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_ACCOUNT_ID]);
     } catch {
       // Best effort; client is being released either way.
     } finally {
@@ -97,6 +119,77 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
   }
 
   app.get("/health", async () => ({ ok: true, service: "api" }));
+
+  const aiRegistry = createAiRegistry(env);
+
+  app.get("/v1/ai/status", async () => {
+    const available = aiRegistry.listAvailable();
+    const defaultProvider = aiRegistry.getProvider();
+    return {
+      available: available.length > 0,
+      providers: available,
+      default: defaultProvider?.name ?? null,
+    };
+  });
+
+  // ---------- Feed directory (public, unauthenticated) ----------
+
+  app.get("/v1/directory", async (request) => {
+    const query = directoryQuerySchema.parse(request.query);
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let nextParam = 1;
+
+    if (query.category) {
+      conditions.push(`category = $${nextParam}`);
+      params.push(query.category);
+      nextParam++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const countResult = await app.pg.query<{ count: string }>(
+      `SELECT COUNT(*)::TEXT AS count FROM feed_directory ${whereClause}`,
+      params
+    );
+    const total = Number.parseInt(countResult.rows[0]?.count ?? "0", 10);
+
+    const dataParams = [...params, query.limit, query.offset];
+    const dataResult = await app.pg.query<{
+      id: string;
+      feed_url: string;
+      title: string;
+      description: string | null;
+      category: string;
+      site_url: string | null;
+      language: string | null;
+      popularity_rank: number | null;
+      created_at: Date;
+    }>(
+      `SELECT id, feed_url, title, description, category, site_url, language, popularity_rank, created_at
+       FROM feed_directory
+       ${whereClause}
+       ORDER BY popularity_rank DESC NULLS LAST, title ASC
+       LIMIT $${nextParam} OFFSET $${nextParam + 1}`,
+      dataParams
+    );
+
+    const items = dataResult.rows.map((row) =>
+      directoryEntrySchema.parse({
+        id: row.id,
+        feedUrl: row.feed_url,
+        title: row.title,
+        description: row.description,
+        category: row.category,
+        siteUrl: row.site_url,
+        language: row.language,
+        popularityRank: row.popularity_rank,
+        createdAt: row.created_at.toISOString(),
+      })
+    );
+
+    return directoryListResponseSchema.parse({ items, total });
+  });
 
   app.post("/v1/billing/webhooks/lemon-squeezy", {
     config: {
@@ -143,13 +236,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     }
   }, async (request, reply) => {
     const payload = loginRequestSchema.parse(request.body);
-    const tokens = await auth.login(payload.username, payload.password, payload.tenantSlug);
+    const accountSlug = payload.accountSlug ?? payload.tenantSlug;
+    const tokens = await auth.login(payload.username, payload.password, accountSlug);
 
     if (tokens === "email_not_verified") {
       return reply.forbidden("email not verified");
-    }
-    if (tokens === "pending_approval") {
-      return reply.forbidden("account is pending approval");
     }
     if (tokens === "suspended") {
       return reply.forbidden("account is suspended");
@@ -165,8 +256,8 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     const payload = signupRequestSchema.parse(request.body);
     const result = await auth.signup(payload);
 
-    if (result === "tenant_slug_taken") {
-      return reply.conflict("tenant slug already taken");
+    if (result === "account_slug_taken") {
+      return reply.conflict("account slug already taken");
     }
     if (result === "username_taken") {
       return reply.conflict("username already exists");
@@ -182,11 +273,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
   });
 
   app.post("/v1/auth/join", async (request, reply) => {
-    const payload = joinWorkspaceRequestSchema.parse(request.body);
-    const result = await auth.joinWorkspace(payload);
+    const payload = joinAccountRequestSchema.parse(request.body);
+    const result = await auth.joinAccount(payload);
 
-    if (result === "tenant_not_found") {
-      return reply.notFound("workspace not found");
+    if (result === "account_not_found") {
+      return reply.notFound("account not found");
     }
     if (result === "invite_required") {
       return reply.forbidden("invite code required");
@@ -199,9 +290,6 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     }
     if (result === "email_taken") {
       return reply.conflict("email already exists");
-    }
-    if (result === "pending_approval") {
-      return reply.code(202).send({ pendingApproval: true });
     }
     if (result === "verification_required") {
       return reply.code(202).send({ verificationRequired: true, expiresInSeconds: null });
@@ -257,61 +345,86 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     return { ok: true };
   });
 
+  // Fire-and-forget helper: update tenant.last_active_at at most once per 5 minutes.
+  // Uses the pool directly (not the per-request RLS client) to avoid lifecycle issues.
+  function touchLastActive(accountId: string): void {
+    app.pg
+      .query(
+        `UPDATE tenant SET last_active_at = NOW()
+         WHERE id = $1
+           AND (last_active_at IS NULL OR last_active_at < NOW() - INTERVAL '5 minutes')`,
+        [accountId]
+      )
+      .catch((err) => {
+        app.log.warn({ err, accountId }, "touchLastActive failed (non-fatal)");
+      });
+  }
+
   app.register(async (protectedRoutes) => {
     protectedRoutes.addHook("preHandler", protectedRoutes.verifyAccessToken);
     protectedRoutes.addHook("preHandler", async (request, reply) => {
-      const tenantId = request.authContext?.tenantId;
-      if (!tenantId) {
-        return reply.unauthorized("missing tenant context");
+      const accountId = request.authContext?.accountId;
+      if (!accountId) {
+        return reply.unauthorized("missing account context");
       }
 
       const client = await app.pg.connect();
       try {
-        await client.query("SELECT set_config('app.tenant_id', $1, false)", [tenantId]);
+        await client.query("SELECT set_config('app.tenant_id', $1, false)", [accountId]);
       } catch (err) {
         client.release();
         throw err;
       }
       request.dbClient = client;
+
+      // Debounced activity tracking (fire-and-forget, doesn't block response)
+      touchLastActive(accountId);
     });
     protectedRoutes.addHook("onResponse", async (request) => {
-      await releaseTenantClient(request);
+      await releaseAccountClient(request);
     });
     protectedRoutes.addHook("onError", async (request) => {
-      await releaseTenantClient(request);
+      await releaseAccountClient(request);
     });
 
     const storeFor = (request: FastifyRequest) => {
-      const tenantId = request.authContext?.tenantId;
-      if (!tenantId) {
-        throw app.httpErrors.unauthorized("missing tenant context");
+      const accountId = request.authContext?.accountId;
+      if (!accountId) {
+        throw app.httpErrors.unauthorized("missing account context");
       }
       if (!request.dbClient) {
-        throw app.httpErrors.internalServerError("missing tenant db context");
+        throw app.httpErrors.internalServerError("missing account db context");
       }
-      return new PostgresStore(request.dbClient, tenantId);
+      return new PostgresStore(request.dbClient, accountId);
     };
 
-    const tenantContextFor = (request: FastifyRequest) => {
-      const tenantId = request.authContext?.tenantId;
-      if (!tenantId) {
-        throw app.httpErrors.unauthorized("missing tenant context");
+    const accountContextFor = (request: FastifyRequest) => {
+      const accountId = request.authContext?.accountId;
+      if (!accountId) {
+        throw app.httpErrors.unauthorized("missing account context");
       }
       if (!request.dbClient) {
-        throw app.httpErrors.internalServerError("missing tenant db context");
+        throw app.httpErrors.internalServerError("missing account db context");
       }
-      return { tenantId, dbClient: request.dbClient };
+      return { accountId, dbClient: request.dbClient };
     };
 
     const entitlementsFor = async (request: FastifyRequest) => {
-      const { tenantId, dbClient } = tenantContextFor(request);
-      return getAccountEntitlements(dbClient, tenantId);
+      const { accountId, dbClient } = accountContextFor(request);
+      return getAccountEntitlements(dbClient, accountId);
     };
 
     protectedRoutes.get("/v1/clusters", async (request) => {
       const query = listClustersQuerySchema.parse(request.query);
       const store = storeFor(request);
       return store.listClusters(query);
+    });
+
+    protectedRoutes.post("/v1/clusters/mark-all-read", async (request) => {
+      const payload = markAllReadRequestSchema.parse(request.body ?? {});
+      const store = storeFor(request);
+      const result = await store.markAllRead(payload);
+      return { ok: true, marked: result.count, clusterIds: result.clusterIds };
     });
 
     protectedRoutes.get("/v1/clusters/:id", async (request, reply) => {
@@ -328,6 +441,15 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       const { id } = clusterIdParams.parse(request.params);
       const store = storeFor(request);
       if (!(await store.markRead(id))) {
+        return reply.notFound("cluster not found");
+      }
+      return { ok: true };
+    });
+
+    protectedRoutes.post("/v1/clusters/:id/unread", async (request, reply) => {
+      const { id } = clusterIdParams.parse(request.params);
+      const store = storeFor(request);
+      if (!(await store.markUnread(id))) {
         return reply.notFound("cluster not found");
       }
       return { ok: true };
@@ -495,6 +617,96 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return feed;
     });
 
+    protectedRoutes.post("/v1/feeds/:id/poll-now", {
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: "1 minute"
+        }
+      }
+    }, async (request, reply) => {
+      const { id } = feedIdParams.parse(request.params);
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      if (!request.dbClient) {
+        throw app.httpErrors.internalServerError("missing account db context");
+      }
+      const body = pollFeedNowRequestSchema.parse(request.body ?? {});
+      const backfillSince = typeof body.lookbackDays === "number"
+        ? new Date(Date.now() - body.lookbackDays * 24 * 60 * 60 * 1000).toISOString()
+        : null;
+
+      const result = await request.dbClient.query<{
+        id: string;
+        tenant_id: string;
+        url: string;
+        title: string;
+        site_url: string | null;
+        folder_id: string;
+        weight: "prefer" | "neutral" | "deprioritize";
+        etag: string | null;
+        last_modified: string | null;
+        classification_status: "pending_classification" | "classified" | "approved";
+      }>(
+        `SELECT id, tenant_id, url, title, site_url, folder_id, weight, etag, last_modified, classification_status
+         FROM feed
+         WHERE id = $1
+           AND tenant_id = $2
+         LIMIT 1`,
+        [id, authContext.accountId]
+      );
+
+      const feed = result.rows[0];
+      if (!feed) {
+        return reply.notFound("feed not found");
+      }
+
+      try {
+        const jobId = await jobs.send(PROCESS_FEED_JOB, {
+          id: feed.id,
+          accountId: feed.tenant_id,
+          // Keep tenantId for worker backward compat
+          tenantId: feed.tenant_id,
+          url: feed.url,
+          title: feed.title,
+          siteUrl: feed.site_url,
+          folderId: feed.folder_id,
+          weight: feed.weight,
+          etag: feed.etag,
+          lastModified: feed.last_modified,
+          // Force immediate poll regardless of the stored last_polled_at.
+          lastPolledAt: null,
+          classificationStatus: feed.classification_status,
+          backfillSince
+        });
+
+        if (!jobId) {
+          request.log.warn({
+            feedId: feed.id,
+            accountId: feed.tenant_id
+          }, "poll-now queue send returned null");
+          return reply.code(503).send({
+            error: "queue_unavailable",
+            message: "could not queue feed poll job"
+          });
+        }
+
+        return { ok: true, jobId };
+      } catch (error) {
+        request.log.error({
+          err: error,
+          feedId: feed.id,
+          accountId: feed.tenant_id
+        }, "poll-now queue send failed");
+        return reply.code(503).send({
+          error: "queue_unavailable",
+          message: "could not queue feed poll job"
+        });
+      }
+    });
+
     protectedRoutes.get("/v1/feeds/:id/topics", async (request) => {
       const { id } = feedIdParams.parse(request.params);
       const store = storeFor(request);
@@ -571,21 +783,35 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return store.listFilters();
     });
 
-    protectedRoutes.post("/v1/filters", async (request) => {
+    protectedRoutes.post("/v1/filters", async (request, reply) => {
       const payload = createFilterRuleRequestSchema.parse(request.body);
       const store = storeFor(request);
-      return store.createFilter(payload);
+      try {
+        return await store.createFilter(payload);
+      } catch (err: unknown) {
+        if (err && typeof err === "object" && "statusCode" in err && (err as { statusCode: number }).statusCode === 400) {
+          return reply.badRequest((err as unknown as Error).message);
+        }
+        throw err;
+      }
     });
 
     protectedRoutes.patch("/v1/filters/:id", async (request, reply) => {
       const { id } = filterIdParams.parse(request.params);
       const payload = updateFilterRuleRequestSchema.parse(request.body);
       const store = storeFor(request);
-      const filter = await store.updateFilter(id, payload);
-      if (!filter) {
-        return reply.notFound("filter not found");
+      try {
+        const filter = await store.updateFilter(id, payload);
+        if (!filter) {
+          return reply.notFound("filter not found");
+        }
+        return filter;
+      } catch (err: unknown) {
+        if (err && typeof err === "object" && "statusCode" in err && (err as { statusCode: number }).statusCode === 400) {
+          return reply.badRequest((err as unknown as Error).message);
+        }
+        throw err;
       }
-      return filter;
     });
 
     protectedRoutes.delete("/v1/filters/:id", async (request, reply) => {
@@ -617,7 +843,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
       const result = await auth.changePassword(
         authContext.userId,
-        authContext.tenantId,
+        authContext.accountId,
         payload.currentPassword,
         payload.newPassword
       );
@@ -640,7 +866,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       if (!authContext) {
         throw app.httpErrors.unauthorized("missing auth context");
       }
-      return auth.getAccountDeletionStatus(authContext.userId, authContext.tenantId);
+      return auth.getAccountDeletionStatus(authContext.userId, authContext.accountId);
     });
 
     protectedRoutes.post("/v1/account/deletion/request", async (request, reply) => {
@@ -650,7 +876,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       const payload = requestAccountDeletionSchema.parse(request.body);
-      const result = await auth.requestAccountDeletion(authContext.userId, authContext.tenantId, payload);
+      const result = await auth.requestAccountDeletion(authContext.userId, authContext.accountId, payload);
 
       if (result === "invalid_password") {
         return reply.unauthorized("current password is incorrect");
@@ -665,7 +891,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
 
-      const result = await auth.cancelAccountDeletion(authContext.userId, authContext.tenantId);
+      const result = await auth.cancelAccountDeletion(authContext.userId, authContext.accountId);
       if (!result) {
         return reply.notFound("no pending deletion request");
       }
@@ -677,8 +903,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       if (!authContext) {
         throw app.httpErrors.unauthorized("missing auth context");
       }
-      const invites = await auth.listWorkspaceInvites(authContext.userId, authContext.tenantId);
-      return invites.map((invite) => workspaceInviteSchema.parse(invite));
+      const invites = await auth.listMemberInvites(authContext.userId, authContext.accountId);
+      if (invites === "not_owner") {
+        throw app.httpErrors.forbidden("only account owner can perform this action");
+      }
+      return invites.map((invite) => memberInviteSchema.parse(invite));
     });
 
     protectedRoutes.post("/v1/account/invites", async (request, reply) => {
@@ -686,12 +915,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       if (!authContext) {
         throw app.httpErrors.unauthorized("missing auth context");
       }
-      const payload = createWorkspaceInviteRequestSchema.parse(request.body);
-      const invite = await auth.createWorkspaceInvite(authContext.userId, authContext.tenantId, payload);
+      const payload = createMemberInviteRequestSchema.parse(request.body);
+      const invite = await auth.createMemberInvite(authContext.userId, authContext.accountId, payload);
       if (invite === "not_owner") {
-        return reply.forbidden("only workspace owner can perform this action");
+        return reply.forbidden("only account owner can perform this action");
       }
-      return workspaceInviteSchema.parse(invite);
+      return memberInviteSchema.parse(invite);
     });
 
     protectedRoutes.post("/v1/account/invites/:id/revoke", async (request, reply) => {
@@ -700,14 +929,14 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
       const { id } = inviteIdParams.parse(request.params);
-      const invite = await auth.revokeWorkspaceInvite(authContext.userId, authContext.tenantId, id);
+      const invite = await auth.revokeMemberInvite(authContext.userId, authContext.accountId, id);
       if (invite === "not_owner") {
-        return reply.forbidden("only workspace owner can perform this action");
+        return reply.forbidden("only account owner can perform this action");
       }
       if (!invite) {
         return reply.notFound("pending invite not found");
       }
-      return workspaceInviteSchema.parse(invite);
+      return memberInviteSchema.parse(invite);
     });
 
     // ---------- Member management ----------
@@ -717,8 +946,8 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       if (!authContext) {
         throw app.httpErrors.unauthorized("missing auth context");
       }
-      const members = await auth.listMembers(authContext.tenantId);
-      return members.map((m) => workspaceMemberSchema.parse(m));
+      const members = await auth.listMembers(authContext.accountId);
+      return members.map((m) => memberSchema.parse(m));
     });
 
     protectedRoutes.patch("/v1/account/members/:id", async (request, reply) => {
@@ -730,9 +959,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       const body = updateMemberRequestSchema.parse(request.body);
 
       if (body.role) {
-        const result = await auth.updateMemberRole(authContext.userId, authContext.tenantId, id, body.role);
+        if (body.role === "owner") {
+          return reply.badRequest("single-owner mode enabled: promoting users to owner is disabled");
+        }
+        const result = await auth.updateMemberRole(authContext.userId, authContext.accountId, id, body.role);
         if (result === "not_owner") {
-          return reply.forbidden("only workspace owner can perform this action");
+          return reply.forbidden("only account owner can perform this action");
         }
         if (result === "user_not_found") {
           return reply.notFound("member not found");
@@ -740,50 +972,10 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         if (result === "cannot_modify_self") {
           return reply.badRequest("cannot modify your own role/status");
         }
-        return workspaceMemberSchema.parse(result);
+        return memberSchema.parse(result);
       }
 
       return reply.badRequest("no update fields provided");
-    });
-
-    protectedRoutes.post("/v1/account/members/:id/approve", async (request, reply) => {
-      const authContext = request.authContext;
-      if (!authContext) {
-        return reply.unauthorized("missing auth context");
-      }
-      const { id } = memberIdParams.parse(request.params);
-      const result = await auth.approveMember(authContext.userId, authContext.tenantId, id);
-
-      if (result === "not_owner") {
-        return reply.forbidden("only workspace owner can perform this action");
-      }
-      if (result === "user_not_found") {
-        return reply.notFound("member not found");
-      }
-      if (result === "not_pending") {
-        return reply.badRequest("member is not pending approval");
-      }
-      return workspaceMemberSchema.parse(result);
-    });
-
-    protectedRoutes.post("/v1/account/members/:id/reject", async (request, reply) => {
-      const authContext = request.authContext;
-      if (!authContext) {
-        return reply.unauthorized("missing auth context");
-      }
-      const { id } = memberIdParams.parse(request.params);
-      const result = await auth.rejectMember(authContext.userId, authContext.tenantId, id);
-
-      if (result === "not_owner") {
-        return reply.forbidden("only workspace owner can perform this action");
-      }
-      if (result === "user_not_found") {
-        return reply.notFound("member not found");
-      }
-      if (result === "not_pending") {
-        return reply.badRequest("member is not pending approval");
-      }
-      return { ok: true };
     });
 
     protectedRoutes.post("/v1/account/members/:id/remove", async (request, reply) => {
@@ -792,10 +984,10 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
       const { id } = memberIdParams.parse(request.params);
-      const result = await auth.removeMember(authContext.userId, authContext.tenantId, id);
+      const result = await auth.removeMember(authContext.userId, authContext.accountId, id);
 
       if (result === "not_owner") {
-        return reply.forbidden("only workspace owner can perform this action");
+        return reply.forbidden("only account owner can perform this action");
       }
       if (result === "user_not_found") {
         return reply.notFound("member not found");
@@ -806,37 +998,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return { ok: true };
     });
 
-    // ---------- Workspace policy ----------
-
-    protectedRoutes.get("/v1/workspace/policy", async (request) => {
-      const authContext = request.authContext;
-      if (!authContext) {
-        throw app.httpErrors.unauthorized("missing auth context");
-      }
-      const policy = await auth.getMembershipPolicy(authContext.tenantId);
-      return { policy: policy ?? "invite_only" };
-    });
-
-    protectedRoutes.put("/v1/workspace/policy", async (request, reply) => {
-      const authContext = request.authContext;
-      if (!authContext) {
-        return reply.unauthorized("missing auth context");
-      }
-      const body = updateMembershipPolicyRequestSchema.parse(request.body);
-      const result = await auth.updateMembershipPolicy(authContext.userId, authContext.tenantId, body.policy);
-
-      if (result === "not_owner") {
-        return reply.forbidden("only workspace owner can perform this action");
-      }
-      return { policy: result };
-    });
-
     protectedRoutes.get("/v1/account/data-export", async (request) => {
       const authContext = request.authContext;
       if (!authContext) {
         throw app.httpErrors.unauthorized("missing auth context");
       }
-      return auth.getAccountDataExportStatus(authContext.userId, authContext.tenantId);
+      return auth.getAccountDataExportStatus(authContext.userId, authContext.accountId);
     });
 
     protectedRoutes.post("/v1/account/data-export/request", async (request) => {
@@ -844,7 +1011,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       if (!authContext) {
         throw app.httpErrors.unauthorized("missing auth context");
       }
-      const status = await auth.requestAccountDataExport(authContext.userId, authContext.tenantId);
+      const status = await auth.requestAccountDataExport(authContext.userId, authContext.accountId);
       return accountDataExportStatusSchema.parse(status);
     });
 
@@ -854,7 +1021,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
 
-      const download = await auth.getAccountDataExportPayload(authContext.userId, authContext.tenantId);
+      const download = await auth.getAccountDataExportPayload(authContext.userId, authContext.accountId);
       if (!download) {
         return reply.notFound("no completed account export found");
       }
@@ -879,7 +1046,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       if (!authContext) {
         return reply.unauthorized("missing auth context");
       }
-      const overview = await billing.getOverview(authContext.tenantId);
+      const overview = await billing.getOverview(authContext.accountId);
       return billingOverviewSchema.parse(overview);
     });
 
@@ -890,7 +1057,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
       const payload = billingCheckoutRequestSchema.parse(request.body);
       const result = await billing.createCheckout({
-        tenantId: authContext.tenantId,
+        accountId: authContext.accountId,
         userId: authContext.userId,
         planId: payload.planId,
         interval: payload.interval
@@ -912,7 +1079,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
 
-      const result = await billing.getPortal(authContext.tenantId);
+      const result = await billing.getPortal(authContext.accountId);
       if (!result.ok) {
         if (result.error === "not_found") {
           return reply.notFound(result.message);
@@ -933,7 +1100,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       const payload = billingSubscriptionActionRequestSchema.parse(request.body);
-      const result = await billing.updateSubscription(authContext.tenantId, payload.action);
+      const result = await billing.updateSubscription(authContext.accountId, payload.action);
       if (!result.ok) {
         if (result.error === "not_found") {
           return reply.notFound(result.message);
@@ -958,7 +1125,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
       if (!request.dbClient) {
-        throw app.httpErrors.internalServerError("missing tenant db context");
+        throw app.httpErrors.internalServerError("missing account db context");
       }
 
       const countryCode = resolveCountryCode(request.headers);
@@ -974,7 +1141,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
          WHERE tenant_id = $1
            AND user_id = $2
          LIMIT 1`,
-        [authContext.tenantId, authContext.userId]
+        [authContext.accountId, authContext.userId]
       );
       const row = result.rows[0];
       const effectiveRegion = row?.region_code ?? countryCode;
@@ -996,7 +1163,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
       if (!request.dbClient) {
-        throw app.httpErrors.internalServerError("missing tenant db context");
+        throw app.httpErrors.internalServerError("missing account db context");
       }
 
       const payload = updatePrivacyConsentRequestSchema.parse(request.body);
@@ -1029,7 +1196,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
            updated_at = NOW()
          RETURNING analytics_enabled, advertising_enabled, functional_enabled, region_code, updated_at`,
         [
-          authContext.tenantId,
+          authContext.accountId,
           authContext.userId,
           payload.analytics,
           payload.advertising,
@@ -1070,8 +1237,8 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       const query = searchQuerySchema.parse(request.query);
       const entitlements = await entitlementsFor(request);
       if (entitlements.searchMode === "title_source") {
-        const { tenantId, dbClient } = tenantContextFor(request);
-        return searchClustersTitleAndSource(dbClient, tenantId, query);
+        const { accountId, dbClient } = accountContextFor(request);
+        return searchClustersTitleAndSource(dbClient, accountId, query);
       }
       const store = storeFor(request);
       return store.searchClusters(query);
@@ -1115,6 +1282,123 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       const query = statsQuerySchema.parse(request.query);
       const store = storeFor(request);
       return store.getReadingStats(query.period);
+    });
+
+    const aiUsageMonthQuerySchema = z.object({
+      month: z.string().regex(/^\d{4}-\d{2}$/).optional()
+    });
+
+    protectedRoutes.get("/v1/ai/usage", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      const query = aiUsageMonthQuerySchema.parse(request.query);
+      const summary = await getMonthlyUsage(app.pg, authContext.accountId, query.month);
+      return aiUsageSummarySchema.parse(summary);
+    });
+
+    // ---------- Sponsored placements ----------
+
+    const placementIdParams = z.object({ id: z.string().uuid() });
+
+    protectedRoutes.get("/v1/sponsored-placements", async (request) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        throw app.httpErrors.unauthorized("missing auth context");
+      }
+      if (!request.dbClient) {
+        throw app.httpErrors.internalServerError("missing account db context");
+      }
+
+      const result = await request.dbClient.query<{
+        id: string;
+        name: string;
+        headline: string;
+        image_url: string | null;
+        target_url: string;
+        cta_text: string;
+        position: number;
+      }>(
+        `SELECT id, name, headline, image_url, target_url, cta_text, position
+         FROM sponsored_placement
+         WHERE tenant_id = $1
+           AND active = true
+           AND (impression_budget IS NULL OR impressions_served < impression_budget)
+           AND (click_budget IS NULL OR clicks_served < click_budget)
+         ORDER BY position ASC`,
+        [authContext.accountId]
+      );
+
+      return result.rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        headline: row.headline,
+        imageUrl: row.image_url,
+        targetUrl: row.target_url,
+        ctaText: row.cta_text,
+        position: row.position,
+      }));
+    });
+
+    protectedRoutes.post("/v1/sponsored-placements/:id/impression", async (request, reply) => {
+      const { id } = placementIdParams.parse(request.params);
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      if (!request.dbClient) {
+        throw app.httpErrors.internalServerError("missing account db context");
+      }
+
+      const updated = await request.dbClient.query(
+        `UPDATE sponsored_placement
+         SET impressions_served = impressions_served + 1, updated_at = NOW()
+         WHERE id = $1 AND tenant_id = $2`,
+        [id, authContext.accountId]
+      );
+
+      if ((updated as { rowCount: number }).rowCount === 0) {
+        return reply.notFound("placement not found");
+      }
+
+      await request.dbClient.query(
+        `INSERT INTO sponsored_event (tenant_id, placement_id, event_type)
+         VALUES ($1, $2, 'impression')`,
+        [authContext.accountId, id]
+      );
+
+      return { ok: true };
+    });
+
+    protectedRoutes.post("/v1/sponsored-placements/:id/click", async (request, reply) => {
+      const { id } = placementIdParams.parse(request.params);
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+      if (!request.dbClient) {
+        throw app.httpErrors.internalServerError("missing account db context");
+      }
+
+      const updated = await request.dbClient.query(
+        `UPDATE sponsored_placement
+         SET clicks_served = clicks_served + 1, updated_at = NOW()
+         WHERE id = $1 AND tenant_id = $2`,
+        [id, authContext.accountId]
+      );
+
+      if ((updated as { rowCount: number }).rowCount === 0) {
+        return reply.notFound("placement not found");
+      }
+
+      await request.dbClient.query(
+        `INSERT INTO sponsored_event (tenant_id, placement_id, event_type)
+         VALUES ($1, $2, 'click')`,
+        [authContext.accountId, id]
+      );
+
+      return { ok: true };
     });
 
     protectedRoutes.get("/v1/opml/export", async (request, reply) => {
@@ -1161,17 +1445,36 @@ async function searchClustersTitleAndSource(
   dbClient: {
     query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
   },
-  tenantId: string,
+  accountId: string,
   query: SearchQuery
 ): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
   const offset = query.cursor ? Number.parseInt(query.cursor, 10) || 0 : 0;
   const limit = query.limit;
+  const whereConditions: string[] = [
+    "c.tenant_id = $2",
+    "i.tenant_id = $2",
+    "to_tsvector('english', COALESCE(i.title, '') || ' ' || COALESCE(source_feed.title, '')) @@ websearch_to_tsquery('english', $1)"
+  ];
+  const params: unknown[] = [query.q, accountId];
+  let nextParam = 3;
+
+  if (query.folderId) {
+    whereConditions.push(`c.folder_id = $${nextParam}`);
+    params.push(query.folderId);
+    nextParam++;
+  }
+  if (query.feedId) {
+    whereConditions.push(`i.feed_id = $${nextParam}`);
+    params.push(query.feedId);
+    nextParam++;
+  }
 
   const searchSql = `
       SELECT DISTINCT ON (c.id)
         c.id,
         COALESCE(rep_i.title, 'Untitled') AS headline,
         rep_i.hero_image_url,
+        COALESCE(rep_feed.id, '00000000-0000-0000-0000-000000000000') AS primary_feed_id,
         COALESCE(rep_feed.title, 'Unknown') AS primary_source,
         COALESCE(rep_i.published_at, c.created_at) AS primary_source_published_at,
         c.size AS outlet_count,
@@ -1180,11 +1483,16 @@ async function searchClustersTitleAndSource(
         c.topic_id,
         t.name AS topic_name,
         rep_i.summary,
+        CASE
+          WHEN latest_filter_event.action = 'breakout_shown'
+          THEN COALESCE(latest_filter_event.rule_pattern, 'breakout_shown')
+          ELSE NULL
+        END AS muted_breakout_reason,
         rs.read_at,
         rs.saved_at,
         ts_rank(
           to_tsvector('english', COALESCE(i.title, '') || ' ' || COALESCE(source_feed.title, '')),
-          plainto_tsquery('english', $1)
+          websearch_to_tsquery('english', $1)
         ) AS rank
       FROM item i
       JOIN feed source_feed
@@ -1209,23 +1517,33 @@ async function searchClustersTitleAndSource(
       LEFT JOIN read_state rs
         ON rs.cluster_id = c.id
        AND rs.tenant_id = c.tenant_id
-      WHERE c.tenant_id = $2
-        AND i.tenant_id = $2
-        AND to_tsvector('english', COALESCE(i.title, '') || ' ' || COALESCE(source_feed.title, ''))
-          @@ plainto_tsquery('english', $1)
+      LEFT JOIN LATERAL (
+        SELECT fe.action, fr.pattern AS rule_pattern
+        FROM filter_event fe
+        LEFT JOIN filter_rule fr
+          ON fr.id = fe.rule_id
+         AND fr.tenant_id = fe.tenant_id
+        WHERE fe.cluster_id = c.id
+          AND fe.tenant_id = c.tenant_id
+        ORDER BY fe.ts DESC
+        LIMIT 1
+      ) latest_filter_event ON TRUE
+      WHERE ${whereConditions.join("\n        AND ")}
       ORDER BY c.id, rank DESC
   `;
 
   const wrappedSql = `
       SELECT * FROM (${searchSql}) sub
       ORDER BY sub.rank DESC
-      OFFSET $3 LIMIT $4
+      OFFSET $${nextParam} LIMIT $${nextParam + 1}
   `;
 
+  params.push(offset, limit + 1);
   const result = await dbClient.query<{
     id: string;
     headline: string;
     hero_image_url: string | null;
+    primary_feed_id: string;
     primary_source: string;
     primary_source_published_at: Date;
     outlet_count: number;
@@ -1234,15 +1552,17 @@ async function searchClustersTitleAndSource(
     topic_id: string | null;
     topic_name: string | null;
     summary: string | null;
+    muted_breakout_reason: string | null;
     read_at: Date | null;
     saved_at: Date | null;
-  }>(wrappedSql, [query.q, tenantId, offset, limit + 1]);
+  }>(wrappedSql, params);
 
   const hasMore = result.rows.length > limit;
   const data: ClusterCard[] = result.rows.slice(0, limit).map((row) => ({
     id: row.id,
     headline: row.headline,
     heroImageUrl: row.hero_image_url,
+    primaryFeedId: row.primary_feed_id,
     primarySource: row.primary_source,
     primarySourcePublishedAt: row.primary_source_published_at.toISOString(),
     outletCount: Number(row.outlet_count),
@@ -1251,7 +1571,8 @@ async function searchClustersTitleAndSource(
     topicId: row.topic_id,
     topicName: row.topic_name,
     summary: row.summary,
-    mutedBreakoutReason: null,
+    mutedBreakoutReason: row.muted_breakout_reason,
+    rankingExplainability: null,
     isRead: row.read_at != null,
     isSaved: row.saved_at != null
   }));
