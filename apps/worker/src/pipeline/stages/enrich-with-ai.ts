@@ -1,16 +1,13 @@
 import type { Pool } from "pg";
 import type { UpsertedItem } from "./parse-and-upsert";
-import type { AiMode } from "@rss-wrangler/contracts";
-import OpenAI from "openai";
+import type { AiMode, AiProviderAdapter } from "@rss-wrangler/contracts";
 
 const OG_FETCH_TIMEOUT_MS = 10_000;
 const AI_BATCH_SIZE = 5;
-const AI_MODEL = "gpt-4o-mini";
 
 interface Settings {
   aiMode: AiMode;
   monthlyAiCapUsd: number;
-  openaiApiKey?: string;
 }
 
 interface EnrichableItem {
@@ -21,10 +18,10 @@ interface EnrichableItem {
   heroImageUrl: string | null;
 }
 
-async function getSettings(pool: Pool, tenantId: string): Promise<Settings> {
+async function getSettings(pool: Pool, accountId: string): Promise<Settings> {
   const result = await pool.query<{ data: unknown }>(
     `SELECT data FROM app_settings WHERE tenant_id = $1 AND key = 'main' LIMIT 1`,
-    [tenantId]
+    [accountId]
   );
   const row = result.rows[0];
   if (!row || !row.data || typeof row.data !== "object") {
@@ -34,7 +31,6 @@ async function getSettings(pool: Pool, tenantId: string): Promise<Settings> {
   return {
     aiMode: (data.aiMode as AiMode) ?? "off",
     monthlyAiCapUsd: (data.monthlyAiCapUsd as number) ?? 0,
-    openaiApiKey: (data.openaiApiKey as string) || undefined,
   };
 }
 
@@ -111,7 +107,7 @@ function extractOgImageFromHtml(html: string): string | null {
 }
 
 async function generateSummary(
-  client: OpenAI,
+  provider: AiProviderAdapter,
   title: string,
   existingSummary: string | null
 ): Promise<string | null> {
@@ -120,8 +116,7 @@ async function generateSummary(
     : `Title: ${title}`;
 
   try {
-    const response = await client.chat.completions.create({
-      model: AI_MODEL,
+    const response = await provider.complete({
       messages: [
         {
           role: "system",
@@ -130,11 +125,11 @@ async function generateSummary(
         },
         { role: "user", content },
       ],
-      max_tokens: 150,
+      maxTokens: 150,
       temperature: 0.3,
     });
 
-    return response.choices[0]?.message?.content?.trim() || null;
+    return response.text.trim() || null;
   } catch (err) {
     console.warn("[enrich-ai] summary generation failed", {
       title,
@@ -146,7 +141,7 @@ async function generateSummary(
 
 async function updateItemEnrichment(
   pool: Pool,
-  tenantId: string,
+  accountId: string,
   itemId: string,
   summary: string | null,
   heroImageUrl: string | null
@@ -166,7 +161,7 @@ async function updateItemEnrichment(
 
   if (setClauses.length === 0) return;
 
-  values.push(itemId, tenantId);
+  values.push(itemId, accountId);
   await pool.query(
     `UPDATE item
      SET ${setClauses.join(", ")}
@@ -178,7 +173,7 @@ async function updateItemEnrichment(
 
 async function updateClusterHeroImage(
   pool: Pool,
-  tenantId: string,
+  accountId: string,
   itemId: string,
   _heroImageUrl: string
 ): Promise<void> {
@@ -187,7 +182,7 @@ async function updateClusterHeroImage(
     `UPDATE cluster SET updated_at = NOW()
      WHERE rep_item_id = $1
        AND tenant_id = $2`,
-    [itemId, tenantId]
+    [itemId, accountId]
   );
 }
 
@@ -200,13 +195,13 @@ async function updateClusterHeroImage(
  */
 export async function enrichWithAi(
   pool: Pool,
-  tenantId: string,
+  accountId: string,
   items: UpsertedItem[],
-  openaiApiKey: string | undefined
+  provider: AiProviderAdapter | null
 ): Promise<void> {
   if (items.length === 0) return;
 
-  const settings = await getSettings(pool, tenantId);
+  const settings = await getSettings(pool, accountId);
 
   // Find items that need enrichment
   const needsEnrichment: EnrichableItem[] = items
@@ -242,8 +237,8 @@ export async function enrichWithAi(
           const ogImage = await fetchOgImage(item.url);
           if (ogImage) {
             item.heroImageUrl = ogImage;
-            await updateItemEnrichment(pool, tenantId, item.id, null, ogImage);
-            await updateClusterHeroImage(pool, tenantId, item.id, ogImage);
+            await updateItemEnrichment(pool, accountId, item.id, null, ogImage);
+            await updateClusterHeroImage(pool, accountId, item.id, ogImage);
           }
         })
       );
@@ -258,20 +253,16 @@ export async function enrichWithAi(
     }
   }
 
-  // Phase 2: AI summaries (only if AI mode is enabled and key is available)
+  // Phase 2: AI summaries (only if AI mode is enabled and provider is available)
   if (settings.aiMode === "off") {
     console.info("[enrich-ai] AI mode is off, skipping summary generation");
     return;
   }
 
-  // Prefer key from Settings UI, fall back to env var
-  const effectiveKey = settings.openaiApiKey || openaiApiKey;
-  if (!effectiveKey) {
-    console.warn("[enrich-ai] No OpenAI API key (set in Settings or OPENAI_API_KEY env), skipping AI enrichment");
+  if (!provider) {
+    console.warn("[enrich-ai] No AI provider configured, skipping AI enrichment");
     return;
   }
-
-  const client = new OpenAI({ apiKey: effectiveKey });
 
   const itemsMissingSummary = needsEnrichment.filter((i) => i.summary === null);
   if (itemsMissingSummary.length === 0) {
@@ -279,17 +270,20 @@ export async function enrichWithAi(
     return;
   }
 
-  console.info("[enrich-ai] generating AI summaries", { count: itemsMissingSummary.length });
+  console.info("[enrich-ai] generating AI summaries", {
+    count: itemsMissingSummary.length,
+    provider: provider.name,
+  });
 
   // Process in batches to respect rate limits
   for (let i = 0; i < itemsMissingSummary.length; i += AI_BATCH_SIZE) {
     const batch = itemsMissingSummary.slice(i, i + AI_BATCH_SIZE);
     const results = await Promise.allSettled(
       batch.map(async (item) => {
-        const summary = await generateSummary(client, item.title, item.summary);
+        const summary = await generateSummary(provider, item.title, item.summary);
         if (summary) {
           item.summary = summary;
-          await updateItemEnrichment(pool, tenantId, item.id, summary, null);
+          await updateItemEnrichment(pool, accountId, item.id, summary, null);
         }
       })
     );

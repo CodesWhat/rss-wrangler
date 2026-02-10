@@ -1,7 +1,5 @@
 import type { Pool } from "pg";
-import OpenAI from "openai";
-
-const AI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+import type { AiProviderAdapter } from "@rss-wrangler/contracts";
 
 interface ArticleRow {
   title: string;
@@ -11,17 +9,6 @@ interface ArticleRow {
 interface TopicSuggestion {
   topic: string;
   confidence: number;
-}
-
-async function getOpenAIKey(pool: Pool, tenantId: string): Promise<string | undefined> {
-  const result = await pool.query<{ data: unknown }>(
-    `SELECT data FROM app_settings WHERE tenant_id = $1 AND key = 'main' LIMIT 1`,
-    [tenantId]
-  );
-  const row = result.rows[0];
-  if (!row || !row.data || typeof row.data !== "object") return undefined;
-  const data = row.data as Record<string, unknown>;
-  return (data.openaiApiKey as string) || undefined;
 }
 
 /**
@@ -38,9 +25,9 @@ async function getOpenAIKey(pool: Pool, tenantId: string): Promise<string | unde
  */
 export async function classifyFeedTopics(
   pool: Pool,
-  tenantId: string,
+  accountId: string,
   feedId: string,
-  openaiApiKey: string | undefined
+  provider: AiProviderAdapter | null
 ): Promise<void> {
   // Fetch up to 20 recent items for context
   const articlesResult = await pool.query<ArticleRow>(
@@ -49,7 +36,7 @@ export async function classifyFeedTopics(
        AND tenant_id = $2
      ORDER BY published_at DESC
      LIMIT 20`,
-    [feedId, tenantId]
+    [feedId, accountId]
   );
 
   if (articlesResult.rows.length === 0) {
@@ -57,22 +44,17 @@ export async function classifyFeedTopics(
     return;
   }
 
-  // Fetch existing topic names
-  const topicsResult = await pool.query<{ name: string }>(
-    `SELECT name FROM topic WHERE tenant_id = $1 ORDER BY name`,
-    [tenantId]
-  );
-  const existingTopics = topicsResult.rows.map((r) => r.name);
-
-  // Resolve API key: prefer settings, fall back to parameter/env
-  const settingsKey = await getOpenAIKey(pool, tenantId);
-  const effectiveKey = settingsKey || openaiApiKey || process.env.OPENAI_API_KEY;
-  if (!effectiveKey) {
-    console.warn("[classify-feed-topics] no OpenAI API key available, skipping classification", { feedId });
+  if (!provider) {
+    console.warn("[classify-feed-topics] no AI provider available, skipping classification", { feedId });
     return;
   }
 
-  const client = new OpenAI({ apiKey: effectiveKey });
+  // Fetch existing topic names
+  const topicsResult = await pool.query<{ name: string }>(
+    `SELECT name FROM topic WHERE tenant_id = $1 ORDER BY name`,
+    [accountId]
+  );
+  const existingTopics = topicsResult.rows.map((r) => r.name);
 
   // Build article list for the prompt
   const articleLines = articlesResult.rows
@@ -96,15 +78,13 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
 
   let suggestions: TopicSuggestion[];
   try {
-    const response = await client.chat.completions.create({
-      model: AI_MODEL,
+    const response = await provider.complete({
       messages: [{ role: "user", content: prompt }],
-      response_format: { type: "json_object" },
-      max_tokens: 200,
+      maxTokens: 200,
       temperature: 0.3,
     });
 
-    const content = response.choices[0]?.message?.content?.trim();
+    const content = response.text.trim();
     if (!content) {
       console.warn("[classify-feed-topics] empty LLM response", { feedId });
       return;
@@ -145,6 +125,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
 
   console.info("[classify-feed-topics] LLM suggested topics", {
     feedId,
+    provider: provider.name,
     suggestions: suggestions.map((s) => `${s.topic} (${s.confidence})`),
   });
 
@@ -152,7 +133,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
   for (const suggestion of suggestions) {
     await pool.query(
       `INSERT INTO topic (tenant_id, name) VALUES ($1, $2) ON CONFLICT (tenant_id, name) DO NOTHING`,
-      [tenantId, suggestion.topic]
+      [accountId, suggestion.topic]
     );
   }
 
@@ -163,7 +144,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
      FROM topic
      WHERE name = ANY($1)
        AND tenant_id = $2`,
-    [topicNames, tenantId]
+    [topicNames, accountId]
   );
   const topicIdMap = new Map(topicIdsResult.rows.map((r) => [r.name, r.id]));
 
@@ -176,7 +157,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
       `INSERT INTO feed_topic (tenant_id, feed_id, topic_id, status, confidence, proposed_at)
        VALUES ($1, $2, $3, 'pending', $4, NOW())
        ON CONFLICT (feed_id, topic_id) DO NOTHING`,
-      [tenantId, feedId, topicId, suggestion.confidence]
+      [accountId, feedId, topicId, suggestion.confidence]
     );
   }
 
@@ -186,7 +167,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
      SET classification_status = 'classified'
      WHERE id = $1
        AND tenant_id = $2`,
-    [feedId, tenantId]
+    [feedId, accountId]
   );
 
   console.info("[classify-feed-topics] feed classified", {

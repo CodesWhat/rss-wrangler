@@ -1,8 +1,10 @@
 import { type Job, type PgBoss } from "pg-boss";
 import type { Pool } from "pg";
+import { createAiRegistry } from "@rss-wrangler/contracts";
 import type { WorkerEnv } from "../config/env";
-import { withTenantDbClient } from "../db-context";
+import { withAccountDbClient } from "../db-context";
 import { runFeedPipeline } from "../pipeline/run-feed-pipeline";
+import { backfillMissingFullText } from "../pipeline/stages/extract-fulltext";
 import { generateDigest } from "../pipeline/stages/generate-digest";
 import { FeedService } from "../services/feed-service";
 import {
@@ -11,6 +13,7 @@ import {
   processDueAccountDeletions
 } from "./account-deletion-automation";
 import { JOBS } from "./job-names";
+import { runRetentionCleanup } from "./retention-cleanup";
 
 interface Dependencies {
   env: WorkerEnv;
@@ -20,30 +23,40 @@ interface Dependencies {
 export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Promise<void> {
   const { env, pool } = dependencies;
   const feedService = new FeedService(pool);
+  const aiRegistry = createAiRegistry(env);
+  const aiProvider = aiRegistry.getProvider();
+
+  if (aiProvider) {
+    console.info("[worker] AI provider configured", { provider: aiProvider.name, available: aiRegistry.listAvailable() });
+  } else {
+    console.info("[worker] no AI provider configured, AI features will be skipped");
+  }
 
   await boss.createQueue(JOBS.pollFeeds);
   await boss.createQueue(JOBS.processFeed);
+  await boss.createQueue(JOBS.backfillFullText);
   await boss.createQueue(JOBS.generateDigest);
   await boss.createQueue(JOBS.processAccountDeletions);
+  await boss.createQueue(JOBS.retentionCleanup);
 
   await boss.schedule(JOBS.pollFeeds, toCron(env.WORKER_POLL_MINUTES), {}, {
     tz: "UTC"
   });
 
   await boss.work(JOBS.pollFeeds, async () => {
-    const tenantIds = await feedService.listTenantIds();
+    const accountIds = await feedService.listAccountIds();
     let sent = 0;
 
-    for (const tenantId of tenantIds) {
-      const dueFeeds = await withTenantDbClient(pool, tenantId, async (client) => {
-        const tenantFeedService = new FeedService(client as unknown as Pool);
-        return tenantFeedService.fetchDueFeeds(tenantId, env.WORKER_BATCH_SIZE);
+    for (const accountId of accountIds) {
+      const dueFeeds = await withAccountDbClient(pool, accountId, async (client) => {
+        const accountFeedService = new FeedService(client as unknown as Pool);
+        return accountFeedService.fetchDueFeeds(accountId, env.WORKER_BATCH_SIZE);
       });
 
       for (const feed of dueFeeds) {
         await boss.send(JOBS.processFeed, {
           id: feed.id,
-          tenantId: feed.tenantId,
+          accountId: feed.accountId,
           url: feed.url,
           title: feed.title,
           siteUrl: feed.siteUrl,
@@ -52,6 +65,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
           etag: feed.etag,
           lastModified: feed.lastModified,
           lastPolledAt: feed.lastPolledAt?.toISOString() || null,
+          backfillSince: feed.backfillSince?.toISOString() || null,
           classificationStatus: feed.classificationStatus,
         });
         sent++;
@@ -70,7 +84,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
     const data = job.data as Record<string, unknown>;
     const feed = {
       id: data.id as string,
-      tenantId: data.tenantId as string,
+      accountId: (data.accountId ?? data.tenantId) as string,
       url: data.url as string,
       title: data.title as string,
       siteUrl: (data.siteUrl as string) || null,
@@ -79,15 +93,16 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
       etag: (data.etag as string) || null,
       lastModified: (data.lastModified as string) || null,
       lastPolledAt: data.lastPolledAt ? new Date(data.lastPolledAt as string) : null,
+      backfillSince: data.backfillSince ? new Date(data.backfillSince as string) : null,
       classificationStatus: (data.classificationStatus as "pending_classification" | "classified" | "approved") || "approved",
     };
 
     try {
-      await withTenantDbClient(pool, feed.tenantId, async (client) => {
+      await withAccountDbClient(pool, feed.accountId, async (client) => {
         await runFeedPipeline({
           feed,
           pool: client as unknown as Pool,
-          openaiApiKey: env.OPENAI_API_KEY,
+          aiProvider,
           pushConfig: {
             vapidPublicKey: env.VAPID_PUBLIC_KEY,
             vapidPrivateKey: env.VAPID_PRIVATE_KEY,
@@ -101,6 +116,60 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
     }
   });
 
+  await boss.schedule(JOBS.backfillFullText, toCron(env.WORKER_FULLTEXT_BACKFILL_MINUTES), {}, {
+    tz: "UTC"
+  });
+
+  await boss.work(JOBS.backfillFullText, async () => {
+    try {
+      const accountIds = await feedService.listAccountIds();
+      let accountsWithCandidates = 0;
+      let totalCandidates = 0;
+      let totalAttempted = 0;
+      let totalExtracted = 0;
+      let totalPersisted = 0;
+
+      for (const accountId of accountIds) {
+        const stats = await withAccountDbClient(pool, accountId, async (client) => {
+          return backfillMissingFullText(
+            client as unknown as Pool,
+            accountId,
+            env.WORKER_FULLTEXT_BACKFILL_BATCH_SIZE
+          );
+        });
+
+        totalCandidates += stats.candidates;
+        totalAttempted += stats.attempted;
+        totalExtracted += stats.extracted;
+        totalPersisted += stats.persisted;
+        if (stats.candidates > 0) {
+          accountsWithCandidates += 1;
+        }
+      }
+
+      if (totalCandidates > 0 || totalPersisted > 0) {
+        console.info("[worker] full-text backfill processed", {
+          accountsWithCandidates,
+          totalCandidates,
+          totalAttempted,
+          totalExtracted,
+          totalPersisted
+        });
+      }
+
+      return {
+        accountsWithCandidates,
+        totalCandidates,
+        totalAttempted,
+        totalExtracted,
+        totalPersisted
+      };
+    } catch (err) {
+      console.error("[worker] full-text backfill failed", { error: err });
+      throw err;
+    }
+  });
+
   // Schedule digest generation daily at 7:00 AM UTC
   await boss.schedule(JOBS.generateDigest, "0 7 * * *", {}, {
     tz: "UTC"
@@ -108,10 +177,10 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
 
   await boss.work(JOBS.generateDigest, async () => {
     try {
-      const tenantIds = await feedService.listTenantIds();
-      for (const tenantId of tenantIds) {
-        await withTenantDbClient(pool, tenantId, async (client) => {
-          await generateDigest(client as unknown as Pool, tenantId);
+      const accountIds = await feedService.listAccountIds();
+      for (const accountId of accountIds) {
+        await withAccountDbClient(pool, accountId, async (client) => {
+          await generateDigest(client as unknown as Pool, accountId);
         });
       }
     } catch (err) {
@@ -127,15 +196,15 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
 
   await boss.work(JOBS.processAccountDeletions, async () => {
     try {
-      const tenantIds = await feedService.listTenantIds();
+      const accountIds = await feedService.listAccountIds();
       let processed = 0;
       let deletedUsers = 0;
-      let purgedTenants = 0;
+      let purgedAccounts = 0;
 
-      for (const tenantId of tenantIds) {
-        const result = await withTenantDbClient(pool, tenantId, async (client) => {
+      for (const accountId of accountIds) {
+        const result = await withAccountDbClient(pool, accountId, async (client) => {
           return processDueAccountDeletions(client, {
-            tenantId,
+            accountId,
             batchSize: ACCOUNT_DELETION_BATCH_SIZE,
             graceWindowDays: ACCOUNT_DELETION_GRACE_WINDOW_DAYS
           });
@@ -144,21 +213,67 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
         processed += result.processed;
         deletedUsers += result.deletedUsers;
         if (result.tenantPurged) {
-          purgedTenants += 1;
+          purgedAccounts += 1;
         }
       }
 
-      if (processed > 0 || purgedTenants > 0) {
+      if (processed > 0 || purgedAccounts > 0) {
         console.info("[worker] account deletion automation processed", {
           processed,
           deletedUsers,
-          purgedTenants
+          purgedAccounts
         });
       }
 
-      return { processed, deletedUsers, purgedTenants };
+      return { processed, deletedUsers, purgedAccounts };
     } catch (err) {
       console.error("[worker] account deletion automation failed", { error: err });
+      throw err;
+    }
+  });
+
+  await boss.schedule(JOBS.retentionCleanup, toCron(env.WORKER_RETENTION_MINUTES), {}, {
+    tz: "UTC"
+  });
+
+  await boss.work(JOBS.retentionCleanup, async () => {
+    try {
+      const accountIds = await feedService.listAccountIds();
+      let appliedAccounts = 0;
+      let totalAutoMarkedUnread = 0;
+      let totalPurgedReadClusters = 0;
+      let totalPurgedOrphanItems = 0;
+
+      for (const accountId of accountIds) {
+        const result = await withAccountDbClient(pool, accountId, async (client) => {
+          return runRetentionCleanup(client as unknown as Pool, accountId);
+        });
+        if (!result.applied) {
+          continue;
+        }
+        appliedAccounts += 1;
+        totalAutoMarkedUnread += result.autoMarkedUnread;
+        totalPurgedReadClusters += result.purgedReadClusters;
+        totalPurgedOrphanItems += result.purgedOrphanItems;
+      }
+
+      if (appliedAccounts > 0) {
+        console.info("[worker] retention cleanup processed", {
+          appliedAccounts,
+          totalAutoMarkedUnread,
+          totalPurgedReadClusters,
+          totalPurgedOrphanItems
+        });
+      }
+
+      return {
+        appliedAccounts,
+        totalAutoMarkedUnread,
+        totalPurgedReadClusters,
+        totalPurgedOrphanItems
+      };
+    } catch (err) {
+      console.error("[worker] retention cleanup failed", { error: err });
       throw err;
     }
   });
@@ -171,6 +286,9 @@ function toCron(minutes: number): string {
 
   if (minutes % 60 === 0) {
     const everyHours = Math.max(1, Math.floor(minutes / 60));
+    if (everyHours >= 24) {
+      return "0 0 * * *";
+    }
     return `0 */${everyHours} * * *`;
   }
 
