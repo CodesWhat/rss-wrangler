@@ -45,7 +45,8 @@ import {
   updateFilterRuleRequestSchema,
   updateMemberRequestSchema,
   updatePrivacyConsentRequestSchema,
-  updateSettingsRequestSchema
+  updateSettingsRequestSchema,
+  clusterAiSummaryResponseSchema
 } from "@rss-wrangler/contracts";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { PgBoss } from "pg-boss";
@@ -53,7 +54,7 @@ import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 import { getAccountEntitlements } from "../plugins/entitlements";
 import { createAiRegistry } from "@rss-wrangler/contracts";
-import { ensureAiUsageTable, getMonthlyUsage } from "../services/ai-usage-service";
+import { checkBudget, ensureAiUsageTable, getMonthlyUsage, recordAiUsage } from "../services/ai-usage-service";
 import { createAuthService } from "../services/auth-service";
 import { createBillingService } from "../services/billing-service";
 import { parseOpml } from "../services/opml-parser";
@@ -84,6 +85,7 @@ const verifyEmailQuerySchema = z.object({
 });
 
 const PROCESS_FEED_JOB = "process-feed";
+const GENERATE_DIGEST_FOR_ACCOUNT_JOB = "generate-digest-for-account";
 
 export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }) => {
   const auth = createAuthService(app, env, app.pg);
@@ -95,6 +97,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
   await jobs.start();
   await jobs.createQueue(PROCESS_FEED_JOB);
+  await jobs.createQueue(GENERATE_DIGEST_FOR_ACCOUNT_JOB);
   await ensureAiUsageTable(app.pg);
 
   app.addHook("onClose", async () => {
@@ -509,6 +512,127 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return { ok: true };
     });
 
+    // ---------- Cluster AI summary ----------
+
+    protectedRoutes.get("/v1/clusters/:id/summary", async (request, reply) => {
+      const { id } = clusterIdParams.parse(request.params);
+      const { accountId, dbClient } = accountContextFor(request);
+
+      // Check if AI provider is available at all
+      const provider = aiRegistry.getProvider();
+      if (!provider) {
+        return clusterAiSummaryResponseSchema.parse({ summary: null, generatedAt: null });
+      }
+
+      // Gate behind plan: on hosted (billing configured), require pro_ai tier
+      const isHostedBilling = Boolean(env.LEMON_SQUEEZY_API_KEY);
+      if (isHostedBilling) {
+        const entitlements = await getAccountEntitlements(dbClient, accountId);
+        if (entitlements.planId !== "pro_ai") {
+          return clusterAiSummaryResponseSchema.parse({ summary: null, generatedAt: null });
+        }
+      }
+
+      // Check for cached summary
+      const cached = await dbClient.query<{ ai_summary: string | null; ai_summary_generated_at: Date | null }>(
+        "SELECT ai_summary, ai_summary_generated_at FROM cluster WHERE id = $1 AND tenant_id = $2",
+        [id, accountId]
+      );
+      if (cached.rows.length === 0) {
+        return reply.notFound("cluster not found");
+      }
+      if (cached.rows[0].ai_summary) {
+        return clusterAiSummaryResponseSchema.parse({
+          summary: cached.rows[0].ai_summary,
+          generatedAt: cached.rows[0].ai_summary_generated_at
+            ? cached.rows[0].ai_summary_generated_at.toISOString()
+            : null
+        });
+      }
+
+      // Check token budget
+      const budget = await checkBudget(app.pg, accountId);
+      if (!budget.allowed) {
+        return clusterAiSummaryResponseSchema.parse({ summary: null, generatedAt: null });
+      }
+
+      // Gather cluster items for the prompt
+      const membersResult = await dbClient.query<{
+        title: string;
+        source_name: string;
+        summary: string | null;
+      }>(
+        `SELECT
+           COALESCE(i.title, 'Untitled') AS title,
+           COALESCE(f.title, 'Unknown') AS source_name,
+           i.summary
+         FROM cluster_member cm
+         JOIN item i ON i.id = cm.item_id
+         LEFT JOIN feed f ON f.id = i.feed_id
+         WHERE cm.cluster_id = $1
+           AND cm.tenant_id = $2
+         ORDER BY i.published_at DESC
+         LIMIT 20`,
+        [id, accountId]
+      );
+
+      if (membersResult.rows.length === 0) {
+        return clusterAiSummaryResponseSchema.parse({ summary: null, generatedAt: null });
+      }
+
+      const itemsText = membersResult.rows
+        .map((row, i) => `[${i + 1}] ${row.title} (${row.source_name})${row.summary ? `\n${row.summary}` : ""}`)
+        .join("\n\n");
+
+      try {
+        const completion = await provider.complete({
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are a concise news analyst. Given multiple news articles about the same story from different outlets, " +
+                "write a 2-4 sentence narrative summary that synthesizes the key facts across all sources into a coherent " +
+                "\"Story so far\" paragraph. Focus on what happened, who is involved, and why it matters. " +
+                "Do not reference the sources by name. Do not editorialize or speculate."
+            },
+            {
+              role: "user",
+              content: `Summarize the following ${membersResult.rows.length} articles about the same story:\n\n${itemsText}`
+            }
+          ],
+          maxTokens: 300,
+          temperature: 0.3
+        });
+
+        const summary = completion.text.trim();
+
+        // Cache the result
+        await dbClient.query(
+          "UPDATE cluster SET ai_summary = $1, ai_summary_generated_at = NOW() WHERE id = $2 AND tenant_id = $3",
+          [summary, id, accountId]
+        );
+
+        // Record AI usage
+        await recordAiUsage(app.pg, {
+          accountId,
+          provider: completion.provider,
+          model: completion.model,
+          inputTokens: completion.inputTokens,
+          outputTokens: completion.outputTokens,
+          feature: "story_summary",
+          durationMs: completion.durationMs
+        });
+
+        return clusterAiSummaryResponseSchema.parse({
+          summary,
+          generatedAt: new Date().toISOString()
+        });
+      } catch {
+        // If AI call fails, return null gracefully
+        return clusterAiSummaryResponseSchema.parse({ summary: null, generatedAt: null });
+      }
+    });
+
     protectedRoutes.get("/v1/folders", async (request) => {
       const store = storeFor(request);
       return store.listFolders();
@@ -826,6 +950,44 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     protectedRoutes.get("/v1/digests", async (request) => {
       const store = storeFor(request);
       return store.listDigests();
+    });
+
+    protectedRoutes.post("/v1/digest/generate", {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "1 minute"
+        }
+      }
+    }, async (request, reply) => {
+      const authContext = request.authContext;
+      if (!authContext) {
+        return reply.unauthorized("missing auth context");
+      }
+
+      try {
+        const jobId = await jobs.send(GENERATE_DIGEST_FOR_ACCOUNT_JOB, {
+          accountId: authContext.accountId,
+        });
+
+        if (!jobId) {
+          return reply.code(503).send({
+            error: "queue_unavailable",
+            message: "could not queue digest generation job"
+          });
+        }
+
+        return { ok: true, jobId };
+      } catch (error) {
+        request.log.error({
+          err: error,
+          accountId: authContext.accountId
+        }, "digest generate queue send failed");
+        return reply.code(503).send({
+          error: "queue_unavailable",
+          message: "could not queue digest generation job"
+        });
+      }
     });
 
     protectedRoutes.post("/v1/events", async (request) => {

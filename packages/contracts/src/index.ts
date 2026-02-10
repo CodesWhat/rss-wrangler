@@ -172,6 +172,12 @@ export const clusterDetailSchema = z.object({
 });
 export type ClusterDetail = z.infer<typeof clusterDetailSchema>;
 
+export const clusterAiSummaryResponseSchema = z.object({
+  summary: z.string().nullable(),
+  generatedAt: z.string().datetime().nullable()
+});
+export type ClusterAiSummaryResponse = z.infer<typeof clusterAiSummaryResponseSchema>;
+
 export const filterRuleSchema = z.object({
   id: z.string(),
   pattern: z.string().min(1),
@@ -767,6 +773,7 @@ export const aiUsageRecordSchema = z.object({
   model: z.string(),
   inputTokens: z.number().int().min(0),
   outputTokens: z.number().int().min(0),
+  estimatedCostUsd: z.number().min(0),
   feature: aiFeatureSchema,
   durationMs: z.number().int().min(0),
   createdAt: z.string().datetime()
@@ -781,18 +788,23 @@ export const aiUsageSummarySchema = z.object({
   totalInputTokens: z.number().int().min(0),
   totalOutputTokens: z.number().int().min(0),
   totalCalls: z.number().int().min(0),
+  totalCostUsd: z.number().min(0),
   byProvider: z.record(z.string(), z.object({
     inputTokens: z.number().int().min(0),
     outputTokens: z.number().int().min(0),
+    costUsd: z.number().min(0),
     calls: z.number().int().min(0)
   })),
   byFeature: z.record(z.string(), z.object({
     inputTokens: z.number().int().min(0),
     outputTokens: z.number().int().min(0),
+    costUsd: z.number().min(0),
     calls: z.number().int().min(0)
   })),
   budgetTokens: z.number().int().min(0).nullable(),
-  budgetUsedPercent: z.number().min(0).nullable()
+  budgetUsedPercent: z.number().min(0).nullable(),
+  budgetCapUsd: z.number().min(0).nullable(),
+  budgetCostPercent: z.number().min(0).nullable()
 });
 export type AiUsageSummary = z.infer<typeof aiUsageSummarySchema>;
 
@@ -800,7 +812,9 @@ export const aiBudgetCheckSchema = z.object({
   allowed: z.boolean(),
   remaining: z.number().int().nullable(),
   used: z.number().int().min(0),
-  limit: z.number().int().min(0).nullable()
+  limit: z.number().int().min(0).nullable(),
+  costUsd: z.number().min(0),
+  costLimitUsd: z.number().min(0).nullable()
 });
 export type AiBudgetCheck = z.infer<typeof aiBudgetCheckSchema>;
 
@@ -850,6 +864,7 @@ export const apiRoutes = {
   feedPollNow: "/v1/feeds/:id/poll-now",
   filters: "/v1/filters",
   digests: "/v1/digests",
+  digestGenerate: "/v1/digest/generate",
   events: "/v1/events",
   settings: "/v1/settings",
   authLogin: "/v1/auth/login",

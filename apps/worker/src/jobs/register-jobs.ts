@@ -36,6 +36,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   await boss.createQueue(JOBS.processFeed);
   await boss.createQueue(JOBS.backfillFullText);
   await boss.createQueue(JOBS.generateDigest);
+  await boss.createQueue(JOBS.generateDigestForAccount);
   await boss.createQueue(JOBS.processAccountDeletions);
   await boss.createQueue(JOBS.retentionCleanup);
 
@@ -180,11 +181,29 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
       const accountIds = await feedService.listAccountIds();
       for (const accountId of accountIds) {
         await withAccountDbClient(pool, accountId, async (client) => {
-          await generateDigest(client as unknown as Pool, accountId);
+          await generateDigest(client as unknown as Pool, accountId, aiProvider);
         });
       }
     } catch (err) {
       console.error("[worker] digest generation failed", { error: err });
+      throw err;
+    }
+  });
+
+  // On-demand digest generation for a specific account (triggered by API)
+  await boss.work(JOBS.generateDigestForAccount, async (jobs: Job<Record<string, unknown>>[]) => {
+    const job = jobs[0];
+    if (!job?.data || typeof job.data !== "object") return;
+    const data = job.data as Record<string, unknown>;
+    const accountId = data.accountId as string;
+    if (!accountId) return;
+
+    try {
+      await withAccountDbClient(pool, accountId, async (client) => {
+        await generateDigest(client as unknown as Pool, accountId, aiProvider);
+      });
+    } catch (err) {
+      console.error("[worker] on-demand digest generation failed", { accountId, error: err });
       throw err;
     }
   });

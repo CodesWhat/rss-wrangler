@@ -274,7 +274,7 @@ async function runFeedPipelineInner({
   await postClusterFilter(pool, feed.accountId, clusterIds);
 
   // Stage 10: Digest generation (if triggers met)
-  await maybeGenerateDigest(pool, feed.accountId);
+  await maybeGenerateDigest(pool, feed.accountId, aiProvider);
 
   // Send push notification if new clusters were created
   if (clusterIds.length > 0 && pushConfig?.vapidPublicKey && pushConfig?.vapidPrivateKey) {
