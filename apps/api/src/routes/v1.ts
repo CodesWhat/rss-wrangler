@@ -54,7 +54,7 @@ import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 import { getAccountEntitlements } from "../plugins/entitlements";
 import { createAiRegistry } from "@rss-wrangler/contracts";
-import { checkBudget, ensureAiUsageTable, getMonthlyUsage, recordAiUsage } from "../services/ai-usage-service";
+import { checkBudget, ensureAiUsageTable, estimateCostUsd, getMonthlyUsage, recordAiUsage } from "../services/ai-usage-service";
 import { createAuthService } from "../services/auth-service";
 import { createBillingService } from "../services/billing-service";
 import { parseOpml } from "../services/opml-parser";
@@ -538,14 +538,15 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         "SELECT ai_summary, ai_summary_generated_at FROM cluster WHERE id = $1 AND tenant_id = $2",
         [id, accountId]
       );
-      if (cached.rows.length === 0) {
+      const cachedRow = cached.rows[0];
+      if (!cachedRow) {
         return reply.notFound("cluster not found");
       }
-      if (cached.rows[0].ai_summary) {
+      if (cachedRow.ai_summary) {
         return clusterAiSummaryResponseSchema.parse({
-          summary: cached.rows[0].ai_summary,
-          generatedAt: cached.rows[0].ai_summary_generated_at
-            ? cached.rows[0].ai_summary_generated_at.toISOString()
+          summary: cachedRow.ai_summary,
+          generatedAt: cachedRow.ai_summary_generated_at
+            ? cachedRow.ai_summary_generated_at.toISOString()
             : null
         });
       }
@@ -619,7 +620,8 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
           model: completion.model,
           inputTokens: completion.inputTokens,
           outputTokens: completion.outputTokens,
-          feature: "story_summary",
+          estimatedCostUsd: estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens),
+          feature: "summary",
           durationMs: completion.durationMs
         });
 
