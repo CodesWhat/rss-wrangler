@@ -1,73 +1,81 @@
 import {
-  accountEntitlementsSchema,
+  type AccountDataExportStatus,
+  type AccountDeletionStatus,
+  type AccountEntitlements,
+  type AiUsageSummary,
+  type Annotation,
+  type AuthTokens,
+  type ClusterAiSummaryResponse,
+  clusterAiSummaryResponseSchema,
   accountDataExportStatusSchema,
   accountDeletionStatusSchema,
+  accountEntitlementsSchema,
+  aiUsageSummarySchema,
   annotationSchema,
   authTokensSchema,
+  type BillingInterval,
+  type BillingOverview,
+  type BillingSubscriptionAction,
   billingCheckoutResponseSchema,
   billingOverviewSchema,
   billingPortalResponseSchema,
   billingSubscriptionActionResponseSchema,
+  type ChangePasswordRequest,
+  type ClusterCard,
+  type ClusterDetail,
+  type ClusterFeedbackRequest,
+  type CreateAnnotationRequest,
+  type CreateFilterRuleRequest,
+  type CreateMemberInviteRequest,
   clusterCardSchema,
+  clusterDetailSchema,
+  type Digest,
   digestSchema,
+  type Feed,
+  type FeedTopic,
+  type FilterRule,
+  type Folder,
+  type ForgotPasswordRequest,
   feedSchema,
   feedTopicSchema,
   filterRuleSchema,
   folderSchema,
-  listClustersQuerySchema,
-  membershipPolicySchema,
-  privacyConsentSchema,
-  readingStatsSchema,
-  searchQuerySchema,
-  settingsSchema,
-  topicSchema,
-  workspaceMemberSchema,
-  type AccountDeletionStatus,
-  type AccountEntitlements,
-  type AccountDataExportStatus,
-  type Annotation,
-  type AuthTokens,
-  type BillingOverview,
-  type BillingInterval,
-  type BillingSubscriptionAction,
-  type ChangePasswordRequest,
-  type ClusterCard,
-  type ClusterFeedbackRequest,
   type HostedPlanId,
-  type CreateWorkspaceInviteRequest,
-  type CreateAnnotationRequest,
-  type CreateFilterRuleRequest,
-  type Digest,
-  type Feed,
-  type FeedTopic,
-  type ForgotPasswordRequest,
-  type FilterRule,
-  type Folder,
-  type JoinWorkspaceRequest,
+  type JoinAccountRequest,
   type ListClustersQuery,
   type LoginRequest,
-  type MembershipPolicy,
+  listClustersQuerySchema,
+  type MarkAllReadRequest,
+  type Member,
+  type MemberInvite,
+  memberInviteSchema,
+  memberSchema,
+  type PollFeedNowRequest,
   type PrivacyConsent,
+  privacyConsentSchema,
   type ReadingStats,
+  type RequestAccountDeletion,
   type ResendVerificationRequest,
   type ResetPasswordRequest,
-  type RequestAccountDeletion,
+  readingStatsSchema,
+  recordEventsResponseSchema,
   type Settings,
+  type SponsoredCard,
   type StatsPeriod,
+  searchQuerySchema,
+  settingsSchema,
+  sponsoredCardSchema,
   type Topic,
+  topicSchema,
   type UpdateFeedRequest,
   type UpdateMemberRequest,
   type UpdatePrivacyConsentRequest,
   type UpdateSettingsRequest,
-  type WorkspaceInvite,
-  type WorkspaceMember,
-  workspaceInviteSchema,
 } from "@rss-wrangler/contracts";
 
 export type SignupResult =
   | { status: "authenticated"; tokens: AuthTokens }
-  | { status: "verification_required" }
-  | { status: "pending_approval" };
+  | { status: "verification_required" };
 
 const API_BASE_URL =
   typeof window !== "undefined"
@@ -306,15 +314,21 @@ const fallbackClusters: ClusterCard[] = [
     id: "cccccccc-cccc-cccc-cccc-cccccccccccc",
     headline: "Welcome to RSS Wrangler",
     heroImageUrl: null,
+    primaryFeedId: "00000000-0000-0000-0000-000000000000",
     primarySource: "Local seed",
     primarySourcePublishedAt: new Date().toISOString(),
-    outletCount: 1,
+    outletCount: 3,
     folderId: "11111111-1111-1111-1111-111111111111",
     folderName: "Tech",
     topicId: null,
     topicName: null,
     summary: "API not reachable yet. Start api/worker containers and refresh.",
     mutedBreakoutReason: null,
+    rankingExplainability: null,
+    dedupeReason: "3 articles merged by URL similarity",
+    hiddenSignals: [
+      { label: "Muted keyword", reason: "\"crypto\" matched filter #3" },
+    ],
     isRead: false,
     isSaved: false,
   },
@@ -337,6 +351,17 @@ const fallbackSettings: Settings = {
   digestAwayHours: 24,
   digestBacklogThreshold: 50,
   feedPollMinutes: 60,
+  markReadOnScroll: "off",
+  markReadOnScrollListDelayMs: 1500,
+  markReadOnScrollCompactDelayMs: 1500,
+  markReadOnScrollCardDelayMs: 1500,
+  markReadOnScrollListThreshold: 0.6,
+  markReadOnScrollCompactThreshold: 0.6,
+  markReadOnScrollCardThreshold: 0.6,
+  markReadOnScrollFeedOverrides: {},
+  unreadMaxAgeDays: null,
+  readPurgeDays: null,
+  savedSearches: [],
   wallabagUrl: "",
 };
 
@@ -359,7 +384,7 @@ export async function login(req: LoginRequest): Promise<AuthTokens> {
   return tokens;
 }
 
-export async function joinWorkspace(req: JoinWorkspaceRequest): Promise<SignupResult> {
+export async function joinAccount(req: JoinAccountRequest): Promise<SignupResult> {
   const res = await fetch(`${API_BASE_URL}/v1/auth/join`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -384,12 +409,6 @@ export async function joinWorkspace(req: JoinWorkspaceRequest): Promise<SignupRe
   }
 
   if (res.status === 202) {
-    const body = (await res.json().catch(() => null)) as
-      | { pendingApproval?: boolean; verificationRequired?: boolean }
-      | null;
-    if (body?.pendingApproval) {
-      return { status: "pending_approval" };
-    }
     return { status: "verification_required" };
   }
 
@@ -516,17 +535,17 @@ export async function getAccountDataExportStatus(): Promise<AccountDataExportSta
   return accountDataExportStatusSchema.parse(payload);
 }
 
-export async function listWorkspaceInvites(): Promise<WorkspaceInvite[]> {
+export async function listMemberInvites(): Promise<MemberInvite[]> {
   const payload = await requestJson<unknown>("/v1/account/invites");
   if (!payload || !Array.isArray(payload)) {
     return [];
   }
-  return payload.map((entry) => workspaceInviteSchema.parse(entry));
+  return payload.map((entry) => memberInviteSchema.parse(entry));
 }
 
-export async function createWorkspaceInvite(
-  req: CreateWorkspaceInviteRequest
-): Promise<{ ok: true; invite: WorkspaceInvite } | { ok: false; error: string }> {
+export async function createMemberInvite(
+  req: CreateMemberInviteRequest
+): Promise<{ ok: true; invite: MemberInvite } | { ok: false; error: string }> {
   const attempt = async (): Promise<Response> => {
     const headers = await authedHeaders(true);
     return fetch(`${API_BASE_URL}/v1/account/invites`, {
@@ -550,16 +569,16 @@ export async function createWorkspaceInvite(
       return { ok: false, error: message || "Invite creation failed" };
     }
 
-    const invite = workspaceInviteSchema.parse(await response.json());
+    const invite = memberInviteSchema.parse(await response.json());
     return { ok: true, invite };
   } catch {
     return { ok: false, error: "Invite creation failed" };
   }
 }
 
-export async function revokeWorkspaceInvite(
+export async function revokeMemberInvite(
   inviteId: string
-): Promise<{ ok: true; invite: WorkspaceInvite } | { ok: false; error: string }> {
+): Promise<{ ok: true; invite: MemberInvite } | { ok: false; error: string }> {
   const attempt = async (): Promise<Response> => {
     const headers = await authedHeaders(true);
     return fetch(`${API_BASE_URL}/v1/account/invites/${encodeURIComponent(inviteId)}/revoke`, {
@@ -583,7 +602,7 @@ export async function revokeWorkspaceInvite(
       return { ok: false, error: message || "Invite revoke failed" };
     }
 
-    const invite = workspaceInviteSchema.parse(await response.json());
+    const invite = memberInviteSchema.parse(await response.json());
     return { ok: true, invite };
   } catch {
     return { ok: false, error: "Invite revoke failed" };
@@ -787,11 +806,65 @@ export async function listClusters(
   return { data, nextCursor };
 }
 
+export async function getClusterDetail(id: string): Promise<ClusterDetail | null> {
+  const payload = await requestJson<unknown>(`/v1/clusters/${encodeURIComponent(id)}`);
+  if (!payload) return null;
+
+  try {
+    return clusterDetailSchema.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
+export async function getClusterAiSummary(id: string): Promise<ClusterAiSummaryResponse | null> {
+  const payload = await requestJson<unknown>(`/v1/clusters/${encodeURIComponent(id)}/summary`);
+  if (!payload) return null;
+
+  try {
+    return clusterAiSummaryResponseSchema.parse(payload);
+  } catch {
+    return null;
+  }
+}
+
 export async function markClusterRead(id: string): Promise<boolean> {
   const res = await requestJson<unknown>(`/v1/clusters/${encodeURIComponent(id)}/read`, {
     method: "POST",
   });
   return res !== null;
+}
+
+export async function markClusterUnread(id: string): Promise<boolean> {
+  const res = await requestJson<unknown>(`/v1/clusters/${encodeURIComponent(id)}/unread`, {
+    method: "POST",
+  });
+  return res !== null;
+}
+
+export async function markAllRead(
+  body: MarkAllReadRequest = {}
+): Promise<{ ok: boolean; marked: number; clusterIds: string[] }> {
+  const payload = await requestJson<unknown>("/v1/clusters/mark-all-read", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, marked: 0, clusterIds: [] };
+  }
+
+  const marked = Number((payload as { marked?: unknown }).marked ?? 0);
+  const clusterIds = Array.isArray((payload as { clusterIds?: unknown }).clusterIds)
+    ? (payload as { clusterIds: unknown[] }).clusterIds.filter(
+        (v): v is string => typeof v === "string"
+      )
+    : [];
+  return {
+    ok: !Number.isNaN(marked),
+    marked: Number.isNaN(marked) ? 0 : marked,
+    clusterIds,
+  };
 }
 
 export async function saveCluster(id: string): Promise<boolean> {
@@ -847,6 +920,14 @@ export async function updateFeed(
   });
   if (!payload) return null;
   return feedSchema.parse(payload);
+}
+
+export async function pollFeedNow(id: string, body: PollFeedNowRequest = {}): Promise<boolean> {
+  const payload = await requestJson<unknown>(`/v1/feeds/${encodeURIComponent(id)}/poll-now`, {
+    method: "POST",
+    ...(typeof body.lookbackDays === "number" ? { body: JSON.stringify(body) } : {}),
+  });
+  return Boolean(payload && typeof payload === "object" && (payload as { ok?: unknown }).ok === true);
 }
 
 export async function importOpml(
@@ -932,17 +1013,25 @@ interface SearchClustersResponse {
   nextCursor: string | null;
 }
 
+interface SearchClustersOptions {
+  cursor?: string;
+  folderId?: string;
+  feedId?: string;
+}
+
 export async function searchClusters(
   q: string,
   limit = 20,
-  cursor?: string
+  options: SearchClustersOptions = {}
 ): Promise<SearchClustersResponse> {
-  const parsed = searchQuerySchema.parse({ q, limit, cursor });
+  const parsed = searchQuerySchema.parse({ q, limit, ...options });
   const search = new URLSearchParams({
     q: parsed.q,
     limit: String(parsed.limit),
   });
   if (parsed.cursor) search.set("cursor", parsed.cursor);
+  if (parsed.folderId) search.set("folderId", parsed.folderId);
+  if (parsed.feedId) search.set("feedId", parsed.feedId);
 
   const payload = await requestJson<unknown>(`/v1/search?${search.toString()}`);
   if (!payload) return { data: [], nextCursor: null };
@@ -1038,6 +1127,43 @@ export async function recordDwell(clusterId: string, seconds: number): Promise<b
   return res !== null;
 }
 
+type AutoReadEventType = "auto_read_on_scroll" | "auto_read_on_open";
+type AutoReadLayout = "list" | "compact" | "card";
+
+function buildIdempotencyKey(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}:${crypto.randomUUID()}`;
+  }
+  return `${prefix}:${Date.now()}:${Math.random().toString(36).slice(2, 10)}`;
+}
+
+export async function recordAutoReadEvent(
+  type: AutoReadEventType,
+  payload: { clusterId: string; feedId: string; layout: AutoReadLayout }
+): Promise<boolean> {
+  const response = await requestJson<unknown>("/v1/events", {
+    method: "POST",
+    body: JSON.stringify({
+      events: [
+        {
+          idempotencyKey: buildIdempotencyKey(type),
+          ts: new Date().toISOString(),
+          type,
+          payload,
+        },
+      ],
+    }),
+  });
+
+  if (!response) return false;
+  try {
+    recordEventsResponseSchema.parse(response);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Topics ----------
 
 export async function listTopics(): Promise<Topic[]> {
@@ -1096,6 +1222,17 @@ export async function getReadingStats(period: StatsPeriod = "7d"): Promise<Readi
       articlesReadToday: 0,
       articlesReadWeek: 0,
       articlesReadMonth: 0,
+      autoReadOnScrollCount: 0,
+      autoReadOnOpenCount: 0,
+      autoReadTotalCount: 0,
+      feedParseSuccessCount: 0,
+      feedParseFailureCount: 0,
+      feedParseByFormat: {
+        rss: 0,
+        atom: 0,
+        rdf: 0,
+        json: 0,
+      },
       avgDwellSeconds: 0,
       folderBreakdown: [],
       topSources: [],
@@ -1107,50 +1244,16 @@ export async function getReadingStats(period: StatsPeriod = "7d"): Promise<Readi
   return readingStatsSchema.parse(payload);
 }
 
-// ---------- Workspace Members ----------
+// ---------- Members ----------
 
-export async function listMembers(): Promise<WorkspaceMember[]> {
+export async function listAccountMembers(): Promise<Member[]> {
   const payload = await requestJson<unknown>("/v1/account/members");
   if (!payload || !Array.isArray(payload)) return [];
-  return payload.map((entry) => workspaceMemberSchema.parse(entry));
+  return payload.map((entry) => memberSchema.parse(entry));
 }
 
-export async function approveMember(
-  id: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const headers = await authedHeaders(true);
-    const res = await fetch(
-      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}/approve`,
-      { method: "POST", headers, body: JSON.stringify({}) }
-    );
-    if (!res.ok) {
-      const message = await res.text();
-      return { ok: false, error: message || "Approve failed" };
-    }
-    return { ok: true };
-  } catch {
-    return { ok: false, error: "Approve failed" };
-  }
-}
-
-export async function rejectMember(
-  id: string
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const headers = await authedHeaders(true);
-    const res = await fetch(
-      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}/reject`,
-      { method: "POST", headers, body: JSON.stringify({}) }
-    );
-    if (!res.ok) {
-      const message = await res.text();
-      return { ok: false, error: message || "Reject failed" };
-    }
-    return { ok: true };
-  } catch {
-    return { ok: false, error: "Reject failed" };
-  }
+export async function listMembers(): Promise<Member[]> {
+  return listAccountMembers();
 }
 
 export async function removeMember(
@@ -1189,37 +1292,6 @@ export async function updateMemberRole(
     return { ok: true };
   } catch {
     return { ok: false, error: "Update failed" };
-  }
-}
-
-export async function getWorkspacePolicy(): Promise<MembershipPolicy> {
-  const payload = await requestJson<unknown>("/v1/workspace/policy");
-  if (!payload || typeof payload !== "object") return "invite_only";
-  const parsed = (payload as { policy?: unknown }).policy;
-  try {
-    return membershipPolicySchema.parse(parsed);
-  } catch {
-    return "invite_only";
-  }
-}
-
-export async function updateWorkspacePolicy(
-  policy: MembershipPolicy
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  try {
-    const headers = await authedHeaders(true);
-    const res = await fetch(`${API_BASE_URL}/v1/workspace/policy`, {
-      method: "PUT",
-      headers,
-      body: JSON.stringify({ policy }),
-    });
-    if (!res.ok) {
-      const message = await res.text();
-      return { ok: false, error: message || "Policy update failed" };
-    }
-    return { ok: true };
-  } catch {
-    return { ok: false, error: "Policy update failed" };
   }
 }
 
@@ -1349,4 +1421,33 @@ export async function updatePrivacyConsent(
   } catch {
     return { ok: false, error: "Privacy settings update failed" };
   }
+}
+
+// ---------- AI Usage ----------
+
+export async function getAiUsage(month?: string): Promise<AiUsageSummary | null> {
+  const params = month ? `?month=${encodeURIComponent(month)}` : "";
+  const payload = await requestJson<unknown>(`/v1/ai/usage${params}`);
+  if (!payload) return null;
+  return aiUsageSummarySchema.parse(payload);
+}
+
+// ---------- Sponsored Placements ----------
+
+export async function listSponsoredPlacements(): Promise<SponsoredCard[]> {
+  const payload = await requestJson<unknown>("/v1/sponsored-placements");
+  if (!payload || !Array.isArray(payload)) return [];
+  return payload.map((entry) => sponsoredCardSchema.parse(entry));
+}
+
+export async function trackSponsoredImpression(id: string): Promise<void> {
+  await requestJson<unknown>(`/v1/sponsored-placements/${encodeURIComponent(id)}/impression`, {
+    method: "POST",
+  });
+}
+
+export async function trackSponsoredClick(id: string): Promise<void> {
+  await requestJson<unknown>(`/v1/sponsored-placements/${encodeURIComponent(id)}/click`, {
+    method: "POST",
+  });
 }
