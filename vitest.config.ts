@@ -20,6 +20,7 @@ export default defineConfig({
           name: "web",
           include: ["apps/web/**/__tests__/**/*.test.{ts,tsx}"],
           environment: "jsdom",
+          setupFiles: ["apps/web/src/test-setup.ts"],
         },
         esbuild: {
           jsx: "automatic",
