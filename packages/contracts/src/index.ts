@@ -1,16 +1,18 @@
 import { z } from "zod";
 
+export { estimateCostUsd, MODEL_COST_TABLE } from "./ai-cost.js";
+export { stripMarkdownFences } from "./ai-parse.js";
 export type {
   AiCompletionRequest,
   AiCompletionResponse,
   AiProviderAdapter,
 } from "./ai-provider.js";
-
-export { createOpenAiProvider } from "./ai-providers/openai.js";
 export { createAnthropicProvider } from "./ai-providers/anthropic.js";
 export { createOllamaProvider } from "./ai-providers/ollama.js";
-export { createAiRegistry } from "./ai-providers/registry.js";
+export { createOpenAiProvider } from "./ai-providers/openai.js";
 export type { AiRegistry } from "./ai-providers/registry.js";
+export { createAiRegistry } from "./ai-providers/registry.js";
+export { sanitizeForPrompt } from "./ai-sanitize.js";
 
 export const storyStateSchema = z.enum(["unread", "saved", "all"]);
 export type StoryState = z.infer<typeof storyStateSchema>;
@@ -50,7 +52,7 @@ export type SearchMode = z.infer<typeof searchModeSchema>;
 
 export const folderSchema = z.object({
   id: z.string(),
-  name: z.string().min(1)
+  name: z.string().min(1),
 });
 export type Folder = z.infer<typeof folderSchema>;
 
@@ -72,7 +74,11 @@ export const feedTopicSchema = z.object({
 });
 export type FeedTopic = z.infer<typeof feedTopicSchema>;
 
-export const classificationStatusSchema = z.enum(["pending_classification", "classified", "approved"]);
+export const classificationStatusSchema = z.enum([
+  "pending_classification",
+  "classified",
+  "approved",
+]);
 export type ClassificationStatus = z.infer<typeof classificationStatusSchema>;
 
 export const feedWeightSchema = z.enum(["prefer", "neutral", "deprioritize"]);
@@ -85,7 +91,7 @@ export const feedParseFailureStageSchema = z.enum([
   "url_validation",
   "parse",
   "http",
-  "network_or_unknown"
+  "network_or_unknown",
 ]);
 export type FeedParseFailureStage = z.infer<typeof feedParseFailureStageSchema>;
 
@@ -106,9 +112,12 @@ export const feedSchema = z.object({
   lastParseFailureAt: z.string().datetime().nullable(),
   lastParseFailureStage: feedParseFailureStageSchema.nullable(),
   lastParseFailureError: z.string().nullable(),
-  defaultReaderMode: readerModeSchema.nullable()
+  defaultReaderMode: readerModeSchema.nullable(),
 });
 export type Feed = z.infer<typeof feedSchema>;
+
+export const displayModeSchema = z.enum(["full", "summary", "headline"]);
+export type DisplayMode = z.infer<typeof displayModeSchema>;
 
 export const clusterCardSchema = z.object({
   id: z.string(),
@@ -124,25 +133,35 @@ export const clusterCardSchema = z.object({
   topicName: z.string().nullable(),
   summary: z.string().nullable(),
   mutedBreakoutReason: z.string().nullable(),
-  rankingExplainability: z.object({
-    finalScore: z.number(),
-    recency: z.number(),
-    saved: z.number(),
-    clusterSize: z.number(),
-    sourceWeight: z.number(),
-    engagement: z.number(),
-    topicAffinity: z.number(),
-    folderAffinity: z.number(),
-    diversityPenalty: z.number(),
-    explorationBoost: z.number()
-  }).nullable(),
+  displayMode: displayModeSchema.default("full"),
+  rankingExplainability: z
+    .object({
+      finalScore: z.number(),
+      recency: z.number(),
+      saved: z.number(),
+      clusterSize: z.number(),
+      sourceWeight: z.number(),
+      engagement: z.number(),
+      topicAffinity: z.number(),
+      folderAffinity: z.number(),
+      diversityPenalty: z.number(),
+      explorationBoost: z.number(),
+    })
+    .nullable(),
+  aiFocusScore: z.number().min(0).max(1).nullable().optional(),
+  aiRelevantLabel: z.string().nullable().optional(),
+  aiSuggestedTags: z.array(z.string()).nullable().optional(),
   dedupeReason: z.string().optional(),
-  hiddenSignals: z.array(z.object({
-    label: z.string(),
-    reason: z.string()
-  })).optional(),
+  hiddenSignals: z
+    .array(
+      z.object({
+        label: z.string(),
+        reason: z.string(),
+      }),
+    )
+    .optional(),
   isRead: z.boolean(),
-  isSaved: z.boolean()
+  isSaved: z.boolean(),
 });
 export type ClusterCard = z.infer<typeof clusterCardSchema>;
 
@@ -151,14 +170,14 @@ export const clusterDetailMemberSchema = z.object({
   title: z.string(),
   sourceName: z.string(),
   url: z.string(),
-  publishedAt: z.string().datetime()
+  publishedAt: z.string().datetime(),
 });
 export type ClusterDetailMember = z.infer<typeof clusterDetailMemberSchema>;
 
 export const clusterStoryTextSourceSchema = z.enum([
   "extracted_full_text",
   "summary_fallback",
-  "unavailable"
+  "unavailable",
 ]);
 export type ClusterStoryTextSource = z.infer<typeof clusterStoryTextSourceSchema>;
 
@@ -168,13 +187,13 @@ export const clusterDetailSchema = z.object({
   storyTextSource: clusterStoryTextSourceSchema,
   storyExtractedAt: z.string().datetime().nullable(),
   members: z.array(clusterDetailMemberSchema),
-  primaryFeedDefaultReaderMode: readerModeSchema.nullable()
+  primaryFeedDefaultReaderMode: readerModeSchema.nullable(),
 });
 export type ClusterDetail = z.infer<typeof clusterDetailSchema>;
 
 export const clusterAiSummaryResponseSchema = z.object({
   summary: z.string().nullable(),
-  generatedAt: z.string().datetime().nullable()
+  generatedAt: z.string().datetime().nullable(),
 });
 export type ClusterAiSummaryResponse = z.infer<typeof clusterAiSummaryResponseSchema>;
 
@@ -187,7 +206,7 @@ export const filterRuleSchema = z.object({
   breakoutEnabled: z.boolean(),
   feedId: z.string().nullable(),
   folderId: z.string().nullable(),
-  createdAt: z.string().datetime()
+  createdAt: z.string().datetime(),
 });
 export type FilterRule = z.infer<typeof filterRuleSchema>;
 
@@ -197,14 +216,14 @@ export const annotationSchema = z.object({
   highlightedText: z.string(),
   note: z.string().nullable(),
   color: annotationColorSchema,
-  createdAt: z.string().datetime()
+  createdAt: z.string().datetime(),
 });
 export type Annotation = z.infer<typeof annotationSchema>;
 
 export const createAnnotationRequestSchema = z.object({
   highlightedText: z.string().min(1),
   note: z.string().optional(),
-  color: annotationColorSchema.default("yellow")
+  color: annotationColorSchema.default("yellow"),
 });
 export type CreateAnnotationRequest = z.infer<typeof createAnnotationRequestSchema>;
 
@@ -212,7 +231,7 @@ export const digestEntrySchema = z.object({
   clusterId: z.string(),
   headline: z.string(),
   section: z.enum(["top_picks", "big_stories", "quick_scan"]),
-  oneLiner: z.string().nullable()
+  oneLiner: z.string().nullable(),
 });
 export type DigestEntry = z.infer<typeof digestEntrySchema>;
 
@@ -223,7 +242,7 @@ export const digestSchema = z.object({
   endTs: z.string().datetime(),
   title: z.string(),
   body: z.string(),
-  entries: z.array(digestEntrySchema)
+  entries: z.array(digestEntrySchema),
 });
 export type Digest = z.infer<typeof digestSchema>;
 
@@ -232,7 +251,7 @@ export type MarkReadOnScroll = z.infer<typeof markReadOnScrollSchema>;
 export const markReadOnScrollOverrideSchema = z.object({
   mode: markReadOnScrollSchema.optional(),
   delayMs: z.number().int().min(0).max(5000).optional(),
-  threshold: z.number().min(0).max(1).optional()
+  threshold: z.number().min(0).max(1).optional(),
 });
 export type MarkReadOnScrollOverride = z.infer<typeof markReadOnScrollOverrideSchema>;
 
@@ -242,7 +261,7 @@ export const savedSearchSchema = z.object({
   query: z.string().min(1),
   folderId: z.string().nullable(),
   feedId: z.string().nullable(),
-  createdAt: z.string().datetime()
+  createdAt: z.string().datetime(),
 });
 export type SavedSearch = z.infer<typeof savedSearchSchema>;
 
@@ -267,34 +286,43 @@ export const settingsSchema = z.object({
   readPurgeDays: z.number().int().min(1).max(3650).nullable().default(null),
   savedSearches: z.array(savedSearchSchema).max(50).default([]),
   wallabagUrl: z.string().optional().default(""),
-  onboardingCompletedAt: z.string().datetime().nullable().optional()
+  onboardingCompletedAt: z.string().datetime().nullable().optional(),
+  progressiveSummarizationEnabled: z.boolean().default(true),
+  progressiveFreshHours: z.number().int().min(1).max(24).default(6),
+  progressiveAgingDays: z.number().int().min(1).max(14).default(3),
 });
 export type Settings = z.infer<typeof settingsSchema>;
 
 export const listClustersQuerySchema = z.object({
   folder_id: z.string().optional(),
   topic_id: z.string().optional(),
+  feed_id: z.string().optional(),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   state: storyStateSchema.default("unread"),
-  sort: storySortSchema.default("personal")
+  sort: storySortSchema.default("personal"),
 });
 export type ListClustersQuery = z.infer<typeof listClustersQuerySchema>;
 
 export const markAllReadRequestSchema = z.object({
-  olderThanHours: z.number().int().min(0).max(24 * 365).optional(),
+  olderThanHours: z
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 365)
+    .optional(),
   folderId: z.string().optional(),
-  topicId: z.string().optional()
+  topicId: z.string().optional(),
 });
 export type MarkAllReadRequest = z.infer<typeof markAllReadRequestSchema>;
 
 export const addFeedRequestSchema = z.object({
-  url: z.string()
+  url: z.string(),
 });
 export type AddFeedRequest = z.infer<typeof addFeedRequestSchema>;
 
 export const pollFeedNowRequestSchema = z.object({
-  lookbackDays: z.number().int().min(1).max(30).optional()
+  lookbackDays: z.number().int().min(1).max(30).optional(),
 });
 export type PollFeedNowRequest = z.infer<typeof pollFeedNowRequestSchema>;
 
@@ -303,7 +331,7 @@ export const updateFeedRequestSchema = z.object({
   weight: feedWeightSchema.optional(),
   muted: z.boolean().optional(),
   trial: z.boolean().optional(),
-  defaultReaderMode: readerModeSchema.nullable().optional()
+  defaultReaderMode: readerModeSchema.nullable().optional(),
 });
 export type UpdateFeedRequest = z.infer<typeof updateFeedRequestSchema>;
 
@@ -314,7 +342,7 @@ export const createFilterRuleRequestSchema = z.object({
   mode: filterModeSchema,
   breakoutEnabled: z.boolean().default(true),
   feedId: z.string().nullable().default(null),
-  folderId: z.string().nullable().default(null)
+  folderId: z.string().nullable().default(null),
 });
 export type CreateFilterRuleRequest = z.infer<typeof createFilterRuleRequestSchema>;
 
@@ -322,7 +350,7 @@ export const updateFilterRuleRequestSchema = createFilterRuleRequestSchema.parti
 export type UpdateFilterRuleRequest = z.infer<typeof updateFilterRuleRequestSchema>;
 
 export const clusterFeedbackRequestSchema = z.object({
-  type: clusterFeedbackTypeSchema
+  type: clusterFeedbackTypeSchema,
 });
 export type ClusterFeedbackRequest = z.infer<typeof clusterFeedbackRequestSchema>;
 
@@ -330,12 +358,12 @@ export const eventSchema = z.object({
   idempotencyKey: z.string().min(6),
   ts: z.string().datetime(),
   type: z.string().min(1),
-  payload: z.record(z.string(), z.unknown()).default({})
+  payload: z.record(z.string(), z.unknown()).default({}),
 });
 export type Event = z.infer<typeof eventSchema>;
 
 export const eventsBatchRequestSchema = z.object({
-  events: z.array(eventSchema).max(100)
+  events: z.array(eventSchema).max(100),
 });
 export type EventsBatchRequest = z.infer<typeof eventsBatchRequestSchema>;
 
@@ -352,7 +380,7 @@ export const loginRequestSchema = z.object({
   password: z.string().min(1),
   accountSlug: accountSlugWithDefaultSchema,
   /** @deprecated Use accountSlug instead */
-  tenantSlug: accountSlugWithDefaultSchema
+  tenantSlug: accountSlugWithDefaultSchema,
 });
 export type LoginRequest = z.input<typeof loginRequestSchema>;
 
@@ -367,7 +395,7 @@ export const signupRequestSchema = z.object({
   /** Preferred field name -- falls back to tenantName */
   accountName: z.string().trim().min(2).max(100).optional(),
   /** Preferred field name -- falls back to tenantSlug */
-  accountSlug: accountSlugSchema.optional()
+  accountSlug: accountSlugSchema.optional(),
 });
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 
@@ -378,13 +406,13 @@ export const joinAccountRequestSchema = z.object({
   password: z.string().min(8),
   inviteCode: z.string().trim().min(12).max(256).optional(),
   /** @deprecated Use accountSlug instead */
-  tenantSlug: accountSlugWithDefaultSchema
+  tenantSlug: accountSlugWithDefaultSchema,
 });
 export type JoinAccountRequest = z.input<typeof joinAccountRequestSchema>;
 
 export const createMemberInviteRequestSchema = z.object({
   email: z.string().trim().email().max(320).optional(),
-  expiresInDays: z.number().int().min(1).max(30).default(7)
+  expiresInDays: z.number().int().min(1).max(30).default(7),
 });
 export type CreateMemberInviteRequest = z.infer<typeof createMemberInviteRequestSchema>;
 
@@ -397,19 +425,19 @@ export const memberInviteSchema = z.object({
   createdAt: z.string().datetime(),
   expiresAt: z.string().datetime(),
   consumedAt: z.string().datetime().nullable(),
-  revokedAt: z.string().datetime().nullable()
+  revokedAt: z.string().datetime().nullable(),
 });
 export type MemberInvite = z.infer<typeof memberInviteSchema>;
 
 export const signupResponseSchema = z.object({
   verificationRequired: z.boolean().default(false),
-  expiresInSeconds: z.number().int().positive().nullable().optional()
+  expiresInSeconds: z.number().int().positive().nullable().optional(),
 });
 export type SignupResponse = z.infer<typeof signupResponseSchema>;
 
 export const changePasswordRequestSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword: z.string().min(8).max(256)
+  newPassword: z.string().min(8).max(256),
 });
 export type ChangePasswordRequest = z.infer<typeof changePasswordRequestSchema>;
 
@@ -417,13 +445,13 @@ export const forgotPasswordRequestSchema = z.object({
   accountSlug: accountSlugWithDefaultSchema,
   email: z.string().trim().email().max(320),
   /** @deprecated Use accountSlug instead */
-  tenantSlug: accountSlugWithDefaultSchema
+  tenantSlug: accountSlugWithDefaultSchema,
 });
 export type ForgotPasswordRequest = z.input<typeof forgotPasswordRequestSchema>;
 
 export const resetPasswordRequestSchema = z.object({
   token: z.string().min(12).max(512),
-  newPassword: z.string().min(8).max(256)
+  newPassword: z.string().min(8).max(256),
 });
 export type ResetPasswordRequest = z.infer<typeof resetPasswordRequestSchema>;
 
@@ -431,18 +459,18 @@ export const resendVerificationRequestSchema = z.object({
   accountSlug: accountSlugWithDefaultSchema,
   email: z.string().trim().email().max(320),
   /** @deprecated Use accountSlug instead */
-  tenantSlug: accountSlugWithDefaultSchema
+  tenantSlug: accountSlugWithDefaultSchema,
 });
 export type ResendVerificationRequest = z.input<typeof resendVerificationRequestSchema>;
 
 export const verifyEmailRequestSchema = z.object({
-  token: z.string().min(12).max(512)
+  token: z.string().min(12).max(512),
 });
 export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
 
 export const requestAccountDeletionSchema = z.object({
   password: z.string().min(1),
-  confirmText: z.literal("DELETE")
+  confirmText: z.literal("DELETE"),
 });
 export type RequestAccountDeletion = z.infer<typeof requestAccountDeletionSchema>;
 
@@ -451,7 +479,7 @@ export const accountDeletionStatusSchema = z.object({
   status: z.enum(["pending", "cancelled", "completed"]),
   requestedAt: z.string().datetime(),
   cancelledAt: z.string().datetime().nullable(),
-  completedAt: z.string().datetime().nullable()
+  completedAt: z.string().datetime().nullable(),
 });
 export type AccountDeletionStatus = z.infer<typeof accountDeletionStatusSchema>;
 
@@ -463,7 +491,7 @@ export const accountDataExportStatusSchema = z.object({
   completedAt: z.string().datetime().nullable(),
   failedAt: z.string().datetime().nullable(),
   errorMessage: z.string().nullable(),
-  fileSizeBytes: z.number().int().nonnegative().nullable()
+  fileSizeBytes: z.number().int().nonnegative().nullable(),
 });
 export type AccountDataExportStatus = z.infer<typeof accountDataExportStatusSchema>;
 
@@ -482,13 +510,13 @@ export const memberSchema = z.object({
   role: userRoleSchema,
   status: memberStatusSchema,
   joinedAt: z.string().datetime(),
-  lastLoginAt: z.string().datetime().nullable()
+  lastLoginAt: z.string().datetime().nullable(),
 });
 export type Member = z.infer<typeof memberSchema>;
 
 export const updateMemberRequestSchema = z.object({
   role: userRoleSchema.optional(),
-  status: memberStatusSchema.optional()
+  status: memberStatusSchema.optional(),
 });
 export type UpdateMemberRequest = z.infer<typeof updateMemberRequestSchema>;
 
@@ -498,14 +526,14 @@ export const memberEventSchema = z.object({
   actorUserId: z.string(),
   eventType: z.enum(["suspended", "role_changed", "removed"]),
   metadata: z.record(z.string(), z.unknown()).default({}),
-  createdAt: z.string().datetime()
+  createdAt: z.string().datetime(),
 });
 export type MemberEvent = z.infer<typeof memberEventSchema>;
 
 export const authTokensSchema = z.object({
   accessToken: z.string(),
   refreshToken: z.string(),
-  expiresInSeconds: z.number().int().positive()
+  expiresInSeconds: z.number().int().positive(),
 });
 export type AuthTokens = z.infer<typeof authTokensSchema>;
 
@@ -515,12 +543,12 @@ export type UpdateSettingsRequest = z.infer<typeof updateSettingsRequestSchema>;
 // ---------- Auth request/response schemas ----------
 
 export const authRefreshRequestSchema = z.object({
-  refreshToken: z.string().min(1)
+  refreshToken: z.string().min(1),
 });
 export type AuthRefreshRequest = z.infer<typeof authRefreshRequestSchema>;
 
 export const authLogoutRequestSchema = z.object({
-  refreshToken: z.string().optional()
+  refreshToken: z.string().optional(),
 });
 export type AuthLogoutRequest = z.infer<typeof authLogoutRequestSchema>;
 
@@ -531,12 +559,12 @@ export type DigestSection = z.infer<typeof digestSectionSchema>;
 
 export const listClustersResponseSchema = z.object({
   data: z.array(clusterCardSchema),
-  nextCursor: z.string().nullable()
+  nextCursor: z.string().nullable(),
 });
 export type ListClustersResponse = z.infer<typeof listClustersResponseSchema>;
 
 export const okResponseSchema = z.object({
-  ok: z.literal(true)
+  ok: z.literal(true),
 });
 export type OkResponse = z.infer<typeof okResponseSchema>;
 
@@ -547,7 +575,7 @@ export const opmlImportResponseSchema = z.object({
   total: z.number().int().min(0),
   limitedByPlan: z.boolean().optional(),
   rejectedCount: z.number().int().min(0).optional(),
-  remainingSlots: z.number().int().min(0).optional()
+  remainingSlots: z.number().int().min(0).optional(),
 });
 export type OpmlImportResponse = z.infer<typeof opmlImportResponseSchema>;
 
@@ -563,8 +591,8 @@ export const accountEntitlementsSchema = z.object({
   usage: z.object({
     date: z.string(),
     itemsIngested: z.number().int().min(0),
-    feeds: z.number().int().min(0)
-  })
+    feeds: z.number().int().min(0),
+  }),
 });
 export type AccountEntitlements = z.infer<typeof accountEntitlementsSchema>;
 
@@ -578,17 +606,17 @@ export type BillingInterval = z.infer<typeof billingIntervalSchema>;
 
 export const billingCheckoutRequestSchema = z.object({
   planId: hostedPlanIdSchema,
-  interval: billingIntervalSchema.default("monthly")
+  interval: billingIntervalSchema.default("monthly"),
 });
 export type BillingCheckoutRequest = z.infer<typeof billingCheckoutRequestSchema>;
 
 export const billingCheckoutResponseSchema = z.object({
-  url: z.string()
+  url: z.string(),
 });
 export type BillingCheckoutResponse = z.infer<typeof billingCheckoutResponseSchema>;
 
 export const billingPortalResponseSchema = z.object({
-  url: z.string()
+  url: z.string(),
 });
 export type BillingPortalResponse = z.infer<typeof billingPortalResponseSchema>;
 
@@ -596,17 +624,21 @@ export const billingSubscriptionActionSchema = z.enum(["cancel", "resume"]);
 export type BillingSubscriptionAction = z.infer<typeof billingSubscriptionActionSchema>;
 
 export const billingSubscriptionActionRequestSchema = z.object({
-  action: billingSubscriptionActionSchema
+  action: billingSubscriptionActionSchema,
 });
-export type BillingSubscriptionActionRequest = z.infer<typeof billingSubscriptionActionRequestSchema>;
+export type BillingSubscriptionActionRequest = z.infer<
+  typeof billingSubscriptionActionRequestSchema
+>;
 
 export const billingSubscriptionActionResponseSchema = z.object({
   subscriptionStatus: planSubscriptionStatusSchema,
   cancelAtPeriodEnd: z.boolean(),
   currentPeriodEndsAt: z.string().datetime().nullable(),
-  customerPortalUrl: z.string().nullable()
+  customerPortalUrl: z.string().nullable(),
 });
-export type BillingSubscriptionActionResponse = z.infer<typeof billingSubscriptionActionResponseSchema>;
+export type BillingSubscriptionActionResponse = z.infer<
+  typeof billingSubscriptionActionResponseSchema
+>;
 
 export const billingOverviewSchema = z.object({
   planId: planIdSchema,
@@ -620,13 +652,13 @@ export const billingOverviewSchema = z.object({
   checkoutAvailability: z.object({
     pro: z.object({
       monthly: z.boolean(),
-      annual: z.boolean()
+      annual: z.boolean(),
     }),
     pro_ai: z.object({
       monthly: z.boolean(),
-      annual: z.boolean()
-    })
-  })
+      annual: z.boolean(),
+    }),
+  }),
 });
 export type BillingOverview = z.infer<typeof billingOverviewSchema>;
 
@@ -639,20 +671,20 @@ export const privacyConsentSchema = z.object({
   functional: z.boolean(),
   consentCapturedAt: z.string().datetime().nullable(),
   regionCode: z.string().nullable(),
-  requiresExplicitConsent: z.boolean()
+  requiresExplicitConsent: z.boolean(),
 });
 export type PrivacyConsent = z.infer<typeof privacyConsentSchema>;
 
 export const updatePrivacyConsentRequestSchema = z.object({
   analytics: z.boolean(),
   advertising: z.boolean(),
-  functional: z.boolean()
+  functional: z.boolean(),
 });
 export type UpdatePrivacyConsentRequest = z.infer<typeof updatePrivacyConsentRequestSchema>;
 
 export const recordEventsResponseSchema = z.object({
   accepted: z.number().int().min(0),
-  deduped: z.number().int().min(0)
+  deduped: z.number().int().min(0),
 });
 export type RecordEventsResponse = z.infer<typeof recordEventsResponseSchema>;
 
@@ -660,7 +692,7 @@ export const opmlFeedSchema = z.object({
   xmlUrl: z.string(),
   title: z.string(),
   htmlUrl: z.string().nullable(),
-  category: z.string().nullable()
+  category: z.string().nullable(),
 });
 export type OpmlFeed = z.infer<typeof opmlFeedSchema>;
 
@@ -669,13 +701,13 @@ export const searchQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
   folderId: z.string().optional(),
-  feedId: z.string().optional()
+  feedId: z.string().optional(),
 });
 export type SearchQuery = z.infer<typeof searchQuerySchema>;
 
 export const searchResponseSchema = z.object({
   data: z.array(clusterCardSchema),
-  nextCursor: z.string().nullable()
+  nextCursor: z.string().nullable(),
 });
 export type SearchResponse = z.infer<typeof searchResponseSchema>;
 
@@ -685,20 +717,20 @@ export const pushSubscribeRequestSchema = z.object({
   endpoint: z.string(),
   keys: z.object({
     p256dh: z.string().min(1),
-    auth: z.string().min(1)
-  })
+    auth: z.string().min(1),
+  }),
 });
 export type PushSubscribeRequest = z.infer<typeof pushSubscribeRequestSchema>;
 
 export const pushUnsubscribeRequestSchema = z.object({
-  endpoint: z.string()
+  endpoint: z.string(),
 });
 export type PushUnsubscribeRequest = z.infer<typeof pushUnsubscribeRequestSchema>;
 
 // ---------- Dwell tracking ----------
 
 export const recordDwellRequestSchema = z.object({
-  seconds: z.number().int().min(1).max(86400)
+  seconds: z.number().int().min(1).max(86400),
 });
 export type RecordDwellRequest = z.infer<typeof recordDwellRequestSchema>;
 
@@ -720,31 +752,39 @@ export const readingStatsSchema = z.object({
     rss: z.number().int(),
     atom: z.number().int(),
     rdf: z.number().int(),
-    json: z.number().int()
+    json: z.number().int(),
   }),
   avgDwellSeconds: z.number(),
-  folderBreakdown: z.array(z.object({
-    folderName: z.string(),
-    count: z.number().int()
-  })),
-  topSources: z.array(z.object({
-    feedTitle: z.string(),
-    count: z.number().int()
-  })),
+  folderBreakdown: z.array(
+    z.object({
+      folderName: z.string(),
+      count: z.number().int(),
+    }),
+  ),
+  topSources: z.array(
+    z.object({
+      feedTitle: z.string(),
+      count: z.number().int(),
+    }),
+  ),
   readingStreak: z.number().int(),
-  peakHours: z.array(z.object({
-    hour: z.number().int().min(0).max(23),
-    count: z.number().int()
-  })),
-  dailyReads: z.array(z.object({
-    date: z.string(),
-    count: z.number().int()
-  }))
+  peakHours: z.array(
+    z.object({
+      hour: z.number().int().min(0).max(23),
+      count: z.number().int(),
+    }),
+  ),
+  dailyReads: z.array(
+    z.object({
+      date: z.string(),
+      count: z.number().int(),
+    }),
+  ),
 });
 export type ReadingStats = z.infer<typeof readingStatsSchema>;
 
 export const statsQuerySchema = z.object({
-  period: statsPeriodSchema.default("7d")
+  period: statsPeriodSchema.default("7d"),
 });
 export type StatsQuery = z.infer<typeof statsQuerySchema>;
 
@@ -776,7 +816,7 @@ export const aiUsageRecordSchema = z.object({
   estimatedCostUsd: z.number().min(0),
   feature: aiFeatureSchema,
   durationMs: z.number().int().min(0),
-  createdAt: z.string().datetime()
+  createdAt: z.string().datetime(),
 });
 export type AiUsageRecord = z.infer<typeof aiUsageRecordSchema>;
 
@@ -789,22 +829,28 @@ export const aiUsageSummarySchema = z.object({
   totalOutputTokens: z.number().int().min(0),
   totalCalls: z.number().int().min(0),
   totalCostUsd: z.number().min(0),
-  byProvider: z.record(z.string(), z.object({
-    inputTokens: z.number().int().min(0),
-    outputTokens: z.number().int().min(0),
-    costUsd: z.number().min(0),
-    calls: z.number().int().min(0)
-  })),
-  byFeature: z.record(z.string(), z.object({
-    inputTokens: z.number().int().min(0),
-    outputTokens: z.number().int().min(0),
-    costUsd: z.number().min(0),
-    calls: z.number().int().min(0)
-  })),
+  byProvider: z.record(
+    z.string(),
+    z.object({
+      inputTokens: z.number().int().min(0),
+      outputTokens: z.number().int().min(0),
+      costUsd: z.number().min(0),
+      calls: z.number().int().min(0),
+    }),
+  ),
+  byFeature: z.record(
+    z.string(),
+    z.object({
+      inputTokens: z.number().int().min(0),
+      outputTokens: z.number().int().min(0),
+      costUsd: z.number().min(0),
+      calls: z.number().int().min(0),
+    }),
+  ),
   budgetTokens: z.number().int().min(0).nullable(),
   budgetUsedPercent: z.number().min(0).nullable(),
   budgetCapUsd: z.number().min(0).nullable(),
-  budgetCostPercent: z.number().min(0).nullable()
+  budgetCostPercent: z.number().min(0).nullable(),
 });
 export type AiUsageSummary = z.infer<typeof aiUsageSummarySchema>;
 
@@ -814,7 +860,7 @@ export const aiBudgetCheckSchema = z.object({
   used: z.number().int().min(0),
   limit: z.number().int().min(0).nullable(),
   costUsd: z.number().min(0),
-  costLimitUsd: z.number().min(0).nullable()
+  costLimitUsd: z.number().min(0).nullable(),
 });
 export type AiBudgetCheck = z.infer<typeof aiBudgetCheckSchema>;
 
@@ -844,6 +890,24 @@ export const directoryQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
 });
 export type DirectoryQuery = z.infer<typeof directoryQuerySchema>;
+
+// --- Feed recommendations ---
+export const feedRecommendationSchema = z.object({
+  id: z.string(),
+  feedDirectoryId: z.string(),
+  title: z.string(),
+  feedUrl: z.string(),
+  description: z.string().nullable(),
+  category: z.string(),
+  score: z.number().min(0).max(1),
+  reason: z.string().nullable(),
+});
+export type FeedRecommendation = z.infer<typeof feedRecommendationSchema>;
+
+export const feedRecommendationsResponseSchema = z.object({
+  recommendations: z.array(feedRecommendationSchema),
+});
+export type FeedRecommendationsResponse = z.infer<typeof feedRecommendationsResponseSchema>;
 
 // --- Sponsored placements ---
 export const sponsoredCardSchema = z.object({
@@ -908,4 +972,6 @@ export const apiRoutes = {
   aiUsage: "/v1/ai/usage",
   sponsoredPlacements: "/v1/sponsored-placements",
   directory: "/v1/directory",
+  recommendations: "/v1/recommendations",
+  recommendationDismiss: "/v1/recommendations/:id/dismiss",
 } as const;

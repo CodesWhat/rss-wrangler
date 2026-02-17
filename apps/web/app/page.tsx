@@ -1,109 +1,220 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StoryCard } from "@/components/story-card";
-import { ProtectedRoute } from "@/components/protected-route";
-import { getSettings, listClusters, listFeeds, updateSettings } from "@/lib/api";
-import { cn } from "@/lib/cn";
-import { ShortcutsHelp, ShortcutsButton } from "@/components/shortcuts-help";
-import { LayoutToggle, getStoredLayout, storeLayout } from "@/components/layout-toggle";
+import type {
+  AiMode,
+  ClusterCard,
+  Feed,
+  Folder,
+  ListClustersQuery,
+  StorySort,
+} from "@rss-wrangler/contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ClusterListRow } from "@/components/cluster-list-row";
+import { FeedSidebar, type SidebarFilter } from "@/components/feed-sidebar";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
-import type { ViewLayout } from "@/components/layout-toggle";
-import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import type { AiMode, ClusterCard, StorySort } from "@rss-wrangler/contracts";
+import { ProtectedRoute } from "@/components/protected-route";
+import { ReaderPanel } from "@/components/reader-panel";
+import {
+  getSettings,
+  listClusters,
+  listFeeds,
+  listFolders,
+  markAllRead,
+  markClusterUnread,
+  saveCluster,
+  updateSettings,
+} from "@/lib/api";
+import { cn } from "@/lib/cn";
+
+// ---------------------------------------------------------------------------
+// Display settings persistence
+// ---------------------------------------------------------------------------
+
+interface DisplaySettings {
+  density: "compact" | "default" | "comfortable";
+  readerSize: "S" | "M" | "L";
+  fontSize: "sm" | "md" | "lg";
+}
+
+const DISPLAY_SETTINGS_KEY = "h3-display-settings";
+
+function loadDisplaySettings(): DisplaySettings {
+  if (typeof window === "undefined") {
+    return { density: "default", readerSize: "M", fontSize: "md" };
+  }
+  try {
+    const raw = localStorage.getItem(DISPLAY_SETTINGS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<DisplaySettings>;
+      return {
+        density: parsed.density ?? "default",
+        readerSize: parsed.readerSize ?? "M",
+        fontSize: parsed.fontSize ?? "md",
+      };
+    }
+  } catch {
+    // ignore corrupt data
+  }
+  return { density: "default", readerSize: "M", fontSize: "md" };
+}
+
+function saveDisplaySettings(settings: DisplaySettings): void {
+  if (typeof window !== "undefined") {
+    localStorage.setItem(DISPLAY_SETTINGS_KEY, JSON.stringify(settings));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// HomeFeed component
+// ---------------------------------------------------------------------------
 
 function HomeFeed() {
+  // --- Sidebar ---
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>({
+    type: "smart",
+    state: "unread",
+    label: "Unread",
+  });
+
+  // --- Feeds / folders for sidebar ---
+  const [feeds, setFeeds] = useState<Feed[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+
+  // --- Cluster list ---
   const [clusters, setClusters] = useState<ClusterCard[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [sort, setSort] = useState<StorySort>("personal");
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
-  const [layout, setLayout] = useState<ViewLayout>("card");
-  const [selectedIndex, setSelectedIndex] = useState(-1);
-  const [showHelp, setShowHelp] = useState(false);
-  const [showEmptyBanner, setShowEmptyBanner] = useState(true);
+
+  // --- Reader ---
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+
+  // --- Display settings ---
+  const [density, setDensity] = useState<"compact" | "default" | "comfortable">("default");
+  const [readerSize, setReaderSize] = useState<"S" | "M" | "L">("M");
+  const [fontSize, setFontSize] = useState<"sm" | "md" | "lg">("md");
+  const [showSettings, setShowSettings] = useState(false);
+
+  // --- Onboarding ---
   const [showOnboarding, setShowOnboarding] = useState(true);
   const [setupLoading, setSetupLoading] = useState(true);
   const [feedsCount, setFeedsCount] = useState(0);
   const [initialAiMode, setInitialAiMode] = useState<AiMode>("off");
   const [onboardingCompletedAt, setOnboardingCompletedAt] = useState<string | null>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const cardRefs = useRef<Map<number, HTMLElement>>(new Map());
 
-  // Load layout preference from localStorage on mount
+  // --- Mark all read ---
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+  const [confirmingMarkAllRead, setConfirmingMarkAllRead] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // --- Keyboard navigation ---
+  const [selectedIndex, setSelectedIndex] = useState(-1);
+
+  // --- Undo toast ---
+  const [undoToast, setUndoToast] = useState<{
+    message: string;
+    clusterIds: string[];
+  } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // --- Refs ---
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  // -------------------------------------------------------------------------
+  // body dataset: hide layout chrome when home page is active
+  // -------------------------------------------------------------------------
   useEffect(() => {
-    setLayout(getStoredLayout());
+    document.body.dataset.homeActive = "true";
+    return () => {
+      delete document.body.dataset.homeActive;
+    };
   }, []);
 
+  // -------------------------------------------------------------------------
+  // Load display settings from localStorage on mount
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const ds = loadDisplaySettings();
+    setDensity(ds.density);
+    setReaderSize(ds.readerSize);
+    setFontSize(ds.fontSize);
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Initial data fetch: feeds, folders, settings in parallel
+  // -------------------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listFeeds(), getSettings()]).then(([feeds, settings]) => {
-      if (cancelled) return;
-      setFeedsCount(feeds.length);
-      setInitialAiMode(settings.aiMode);
-      setOnboardingCompletedAt(settings.onboardingCompletedAt ?? null);
-      setSetupLoading(false);
-    });
+    Promise.all([listFeeds(), listFolders(), getSettings()]).then(
+      ([feedsResult, foldersResult, settings]) => {
+        if (cancelled) return;
+        setFeeds(feedsResult);
+        setFolders(foldersResult);
+        setFeedsCount(feedsResult.length);
+        setInitialAiMode(settings.aiMode);
+        setOnboardingCompletedAt(settings.onboardingCompletedAt ?? null);
+        setSetupLoading(false);
+      },
+    );
     return () => {
       cancelled = true;
     };
   }, []);
 
-  function handleLayoutChange(newLayout: ViewLayout) {
-    setLayout(newLayout);
-    storeLayout(newLayout);
-  }
-
-  const fetchClusters = useCallback(
-    async (reset: boolean) => {
-      if (reset) setLoading(true);
-      else setLoadingMore(true);
-
-      const result = await listClusters({
-        limit: 20,
-        state: "unread",
-        sort,
-        cursor: reset ? undefined : (cursor ?? undefined),
-      });
-
-      if (reset) {
-        setClusters(result.data);
-      } else {
-        setClusters((prev) => [...prev, ...result.data]);
+  // -------------------------------------------------------------------------
+  // Build cluster query from current sidebar filter + sort
+  // -------------------------------------------------------------------------
+  const buildQuery = useCallback(
+    (extraCursor?: string): Partial<ListClustersQuery> => {
+      const query: Partial<ListClustersQuery> = { limit: 20, sort };
+      if (sidebarFilter.type === "smart") {
+        query.state = (sidebarFilter.state as "all" | "unread" | "saved") ?? "unread";
+      } else if (sidebarFilter.type === "folder") {
+        query.state = "unread";
+        query.folder_id = sidebarFilter.folderId;
+      } else if (sidebarFilter.type === "feed") {
+        query.state = "unread";
+        query.feed_id = sidebarFilter.feedId;
       }
-      setCursor(result.nextCursor);
-      setLoading(false);
-      setLoadingMore(false);
+      if (extraCursor) query.cursor = extraCursor;
+      return query;
     },
-    [sort, cursor]
+    [sidebarFilter, sort],
   );
 
-  // Initial load and re-fetch when sort changes
+  // -------------------------------------------------------------------------
+  // Fetch clusters on filter / sort change
+  // -------------------------------------------------------------------------
   useEffect(() => {
     setClusters([]);
     setCursor(null);
     setLoading(true);
     setSelectedIndex(-1);
-    listClusters({ limit: 20, state: "unread", sort }).then((result) => {
+    const query = buildQuery();
+    listClusters(query).then((result) => {
       setClusters(result.data);
       setCursor(result.nextCursor);
       setLoading(false);
     });
-  }, [sort]);
+  }, [buildQuery]);
 
-  // Auto-refresh every 2 minutes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      listClusters({ limit: 20, state: "unread", sort }).then((result) => {
-        setClusters(result.data);
-        setCursor(result.nextCursor);
-      });
-    }, 120_000);
-    return () => clearInterval(interval);
-  }, [sort]);
+  // -------------------------------------------------------------------------
+  // Infinite scroll: load more when sentinel is visible
+  // -------------------------------------------------------------------------
+  const fetchMore = useCallback(async () => {
+    if (!cursor || loadingMore) return;
+    setLoadingMore(true);
+    const query = buildQuery(cursor);
+    const result = await listClusters(query);
+    setClusters((prev) => [...prev, ...result.data]);
+    setCursor(result.nextCursor);
+    setLoadingMore(false);
+  }, [cursor, loadingMore, buildQuery]);
 
-  // Infinite scroll via IntersectionObserver
   useEffect(() => {
     if (!cursor) return;
     const sentinel = sentinelRef.current;
@@ -111,19 +222,48 @@ function HomeFeed() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && !loadingMore) {
-          fetchClusters(false);
+        if (entries[0]?.isIntersecting) {
+          fetchMore();
         }
       },
-      { rootMargin: "200px" }
+      { rootMargin: "200px" },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [cursor, loadingMore, fetchClusters]);
+  }, [cursor, fetchMore]);
 
-  function handleRemove(id: string) {
-    setClusters((prev) => prev.filter((c) => c.id !== id));
-  }
+  // -------------------------------------------------------------------------
+  // Auto-refresh every 2 minutes
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const query = buildQuery();
+      listClusters(query).then((result) => {
+        setClusters(result.data);
+        setCursor(result.nextCursor);
+      });
+    }, 120_000);
+    return () => clearInterval(interval);
+  }, [buildQuery]);
+
+  // -------------------------------------------------------------------------
+  // Refresh handler
+  // -------------------------------------------------------------------------
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    const query = buildQuery();
+    const result = await listClusters(query);
+    setClusters(result.data);
+    setCursor(result.nextCursor);
+    setSelectedIndex(-1);
+    setRefreshing(false);
+  }, [buildQuery]);
+
+  // -------------------------------------------------------------------------
+  // Onboarding
+  // -------------------------------------------------------------------------
+  const shouldShowOnboarding =
+    !setupLoading && feedsCount === 0 && showOnboarding && !onboardingCompletedAt;
 
   async function dismissOnboarding() {
     setShowOnboarding(false);
@@ -135,140 +275,510 @@ function HomeFeed() {
     }
   }
 
-  async function reopenOnboarding() {
-    setShowOnboarding(true);
-    setOnboardingCompletedAt(null);
-    await updateSettings({ onboardingCompletedAt: null });
+  // -------------------------------------------------------------------------
+  // Sidebar filter change -- re-fetch clusters
+  // -------------------------------------------------------------------------
+  function handleFilterChange(filter: SidebarFilter) {
+    setSidebarFilter(filter);
+    setSelectedClusterId(null);
+    setClusters([]);
+    setCursor(null);
+    setLoading(true);
+
+    const query: Partial<ListClustersQuery> = { limit: 20, sort };
+    if (filter.type === "smart") {
+      query.state = (filter.state as "all" | "unread" | "saved") ?? "unread";
+    } else if (filter.type === "folder") {
+      query.state = "unread";
+      query.folder_id = filter.folderId;
+    } else if (filter.type === "feed") {
+      query.state = "unread";
+      query.feed_id = filter.feedId;
+    }
+
+    listClusters(query).then((result) => {
+      setClusters(result.data);
+      setCursor(result.nextCursor);
+      setLoading(false);
+    });
   }
 
-  const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    const result = await listClusters({ limit: 20, state: "unread", sort });
-    setClusters(result.data);
-    setCursor(result.nextCursor);
-    setSelectedIndex(-1);
-    setRefreshing(false);
-  }, [sort]);
+  // -------------------------------------------------------------------------
+  // Cluster selection / reader open + close
+  // -------------------------------------------------------------------------
+  const handleSelectCluster = useCallback((clusterId: string) => {
+    setSelectedClusterId(clusterId);
+    history.pushState({ clusterId }, "", `/clusters/${clusterId}`);
+  }, []);
 
-  const scrollToCard = useCallback((index: number) => {
-    const el = cardRefs.current.get(index);
-    if (el) {
-      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  const handleCloseReader = useCallback(() => {
+    setSelectedClusterId(null);
+    history.pushState(null, "", "/");
+  }, []);
+
+  // popstate handler for browser back/forward
+  useEffect(() => {
+    function handlePopState(e: PopStateEvent) {
+      const state = e.state as { clusterId?: string } | null;
+      if (state?.clusterId) {
+        setSelectedClusterId(state.clusterId);
+      } else {
+        setSelectedClusterId(null);
+      }
+    }
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Toggle star
+  // -------------------------------------------------------------------------
+  const handleToggleStar = useCallback(async (id: string) => {
+    await saveCluster(id);
+    setClusters((prev) => prev.map((c) => (c.id === id ? { ...c, isSaved: !c.isSaved } : c)));
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Mark all read with undo support
+  // -------------------------------------------------------------------------
+  const dismissUndoToast = useCallback(() => {
+    setUndoToast(null);
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
     }
   }, []);
 
-  // Keyboard shortcut actions
-  const shortcutActions = useMemo(
-    () => ({
-      onNextCard: () => {
-        setSelectedIndex((prev) => {
-          const next = Math.min(prev + 1, clusters.length - 1);
-          setTimeout(() => scrollToCard(next), 0);
-          return next;
+  const handleUndo = useCallback(async () => {
+    if (!undoToast) return;
+    const ids = undoToast.clusterIds;
+    dismissUndoToast();
+    await Promise.all(ids.map((id) => markClusterUnread(id)));
+    await handleRefresh();
+  }, [undoToast, dismissUndoToast, handleRefresh]);
+
+  const handleMarkAllRead = useCallback(async () => {
+    if (markingAllRead) return;
+    setMarkingAllRead(true);
+    try {
+      const result = await markAllRead({});
+      if (result.ok) {
+        dismissUndoToast();
+        setUndoToast({
+          message: `Marked ${result.marked} ${result.marked === 1 ? "story" : "stories"} as read`,
+          clusterIds: result.clusterIds,
         });
-      },
-      onPrevCard: () => {
-        setSelectedIndex((prev) => {
-          const next = Math.max(prev - 1, 0);
-          setTimeout(() => scrollToCard(next), 0);
-          return next;
-        });
-      },
-      onOpenSelected: () => {
-        if (selectedIndex < 0 || selectedIndex >= clusters.length) return;
-        const el = cardRefs.current.get(selectedIndex);
-        const url = el?.dataset.articleUrl;
-        if (url) window.open(url, "_blank", "noopener,noreferrer");
-      },
-      onToggleRead: () => {
-        if (selectedIndex < 0 || selectedIndex >= clusters.length) return;
-        const el = cardRefs.current.get(selectedIndex);
-        if (el) {
-          const buttons = el.querySelectorAll<HTMLButtonElement>("button");
-          for (const b of buttons) {
-            if (b.textContent?.trim() === "Mark read") {
-              b.click();
-              break;
+        undoTimerRef.current = setTimeout(() => {
+          setUndoToast(null);
+          undoTimerRef.current = null;
+        }, 8000);
+        await handleRefresh();
+      }
+    } finally {
+      setMarkingAllRead(false);
+      setConfirmingMarkAllRead(false);
+    }
+  }, [dismissUndoToast, handleRefresh, markingAllRead]);
+
+  // Cleanup undo timer on unmount
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    };
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // Display settings handlers -- persist to localStorage
+  // -------------------------------------------------------------------------
+  function handleDensityChange(d: "compact" | "default" | "comfortable") {
+    setDensity(d);
+    saveDisplaySettings({ density: d, readerSize, fontSize });
+  }
+
+  function handleReaderSizeChange(s: "S" | "M" | "L") {
+    setReaderSize(s);
+    saveDisplaySettings({ density, readerSize: s, fontSize });
+  }
+
+  function handleFontSizeChange(f: "sm" | "md" | "lg") {
+    setFontSize(f);
+    saveDisplaySettings({ density, readerSize, fontSize: f });
+  }
+
+  // Click outside to close settings popover
+  useEffect(() => {
+    if (!showSettings) return;
+    function handleClick(e: MouseEvent) {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setShowSettings(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showSettings]);
+
+  // -------------------------------------------------------------------------
+  // Keyboard shortcuts
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      // Do not intercept when typing in inputs
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if ((e.target as HTMLElement).isContentEditable) return;
+
+      switch (e.key) {
+        case "j": {
+          e.preventDefault();
+          setSelectedIndex((prev) => {
+            const next = Math.min(prev + 1, clusters.length - 1);
+            const cluster = clusters[next];
+            if (cluster) {
+              const row = listRef.current?.querySelector(`[data-cluster-id="${cluster.id}"]`);
+              if (row)
+                (row as HTMLElement).scrollIntoView({
+                  behavior: "smooth",
+                  block: "nearest",
+                });
             }
-          }
+            return next;
+          });
+          break;
         }
-      },
-      onToggleSave: () => {
-        if (selectedIndex < 0 || selectedIndex >= clusters.length) return;
-        const el = cardRefs.current.get(selectedIndex);
-        if (el) {
-          const buttons = el.querySelectorAll<HTMLButtonElement>("button");
-          for (const b of buttons) {
-            if (b.textContent?.trim() === "Save") {
-              b.click();
-              break;
+        case "k": {
+          e.preventDefault();
+          setSelectedIndex((prev) => {
+            const next = Math.max(prev - 1, 0);
+            const cluster = clusters[next];
+            if (cluster) {
+              const row = listRef.current?.querySelector(`[data-cluster-id="${cluster.id}"]`);
+              if (row)
+                (row as HTMLElement).scrollIntoView({
+                  behavior: "smooth",
+                  block: "nearest",
+                });
             }
-          }
+            return next;
+          });
+          break;
         }
-      },
-      onRefresh: () => {
-        handleRefresh();
-      },
-      onToggleHelp: () => {
-        setShowHelp((prev) => !prev);
-      },
-      onFocusSearch: () => {
-        const searchInput = document.querySelector<HTMLInputElement>("input[type='search'], input[placeholder*='search' i]");
-        if (searchInput) searchInput.focus();
-      },
-    }),
-    [clusters.length, selectedIndex, handleRefresh, scrollToCard]
-  );
+        case "s": {
+          e.preventDefault();
+          if (selectedIndex >= 0 && selectedIndex < clusters.length) {
+            const c = clusters[selectedIndex];
+            if (c) handleToggleStar(c.id);
+          }
+          break;
+        }
+        case "Enter":
+        case "o": {
+          e.preventDefault();
+          if (selectedIndex >= 0 && selectedIndex < clusters.length) {
+            const c = clusters[selectedIndex];
+            if (c) handleSelectCluster(c.id);
+          }
+          break;
+        }
+        case "Escape": {
+          e.preventDefault();
+          if (showSettings) {
+            setShowSettings(false);
+          } else if (selectedClusterId) {
+            handleCloseReader();
+          }
+          break;
+        }
+        case "r": {
+          e.preventDefault();
+          handleRefresh();
+          break;
+        }
+      }
+    }
 
-  useKeyboardShortcuts(shortcutActions);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    clusters,
+    selectedIndex,
+    selectedClusterId,
+    showSettings,
+    handleSelectCluster,
+    handleCloseReader,
+    handleRefresh,
+    handleToggleStar,
+  ]);
 
-  const shouldShowOnboarding = !setupLoading
-    && feedsCount === 0
-    && showOnboarding
-    && !onboardingCompletedAt;
+  // Keep selectedIndex in bounds when clusters change
+  useEffect(() => {
+    if (selectedIndex >= clusters.length) {
+      setSelectedIndex(Math.max(0, clusters.length - 1));
+    }
+  }, [clusters.length, selectedIndex]);
 
+  // -------------------------------------------------------------------------
+  // Grid column computation
+  // -------------------------------------------------------------------------
+  const sidebarW = sidebarCollapsed ? 0 : 240;
+  const readerFraction = selectedClusterId
+    ? readerSize === "S"
+      ? 0.35
+      : readerSize === "M"
+        ? 0.5
+        : 0.65
+    : 0;
+  const listFr = selectedClusterId
+    ? `minmax(280px, ${((1 - readerFraction) * 100).toFixed(0)}fr)`
+    : "1fr";
+  const readerFr = selectedClusterId ? `${(readerFraction * 100).toFixed(0)}fr` : "0px";
+  const gridCols = `${sidebarW}px ${listFr} ${readerFr}`;
+
+  const fontSizePx = fontSize === "sm" ? "15px" : fontSize === "md" ? "17px" : "20px";
+
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
   return (
-    <>
-      <div className="home-shell">
-        <div className="page-header">
-          <h1 className="page-title">Your Feed</h1>
-          <p className="page-meta">
-            <span className="count">{clusters.length} stories</span>
-          </p>
+    <div
+      className="h3-shell"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 200,
+        display: "grid",
+        gridTemplateRows: "auto 1fr",
+        gridTemplateColumns: gridCols,
+      }}
+    >
+      {/* ================================================================ */}
+      {/* HEADER ROW -- spans all columns                                  */}
+      {/* ================================================================ */}
+      <div className="h3-header" style={{ gridColumn: "1 / -1", display: "flex" }}>
+        {/* Sidebar header cell */}
+        <div
+          className="h3-hdr-sidebar"
+          style={{
+            width: sidebarCollapsed ? 0 : 240,
+            overflow: "hidden",
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          {!sidebarCollapsed && (
+            <>
+              <span className="h3-brand">RSS_WRANGLER</span>
+              <button
+                type="button"
+                onClick={() => setSidebarCollapsed(true)}
+                className="h3-collapse-btn"
+                title="Collapse sidebar"
+              >
+                &laquo;
+              </button>
+            </>
+          )}
         </div>
 
-        <div className="feed-controls">
-          <div className="feed-sort">
+        {/* List header cell */}
+        <div
+          className="h3-hdr-list"
+          style={{
+            flex: 1,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            minWidth: 0,
+          }}
+        >
+          {sidebarCollapsed && (
             <button
               type="button"
-              className={cn("sort-btn", sort === "personal" && "active")}
-              onClick={() => setSort("personal")}
+              onClick={() => setSidebarCollapsed(false)}
+              className="h3-expand-btn"
+              title="Show sidebar"
             >
-              For You
+              &raquo;
             </button>
+          )}
+          <span className="h3-hdr-label">{sidebarFilter.label}</span>
+          <span className="h3-hdr-count">{clusters.length}</span>
+          <div style={{ flex: 1 }} />
+
+          {/* Sort buttons */}
+          <button
+            type="button"
+            className={cn("h3-sort-btn", sort === "personal" && "active")}
+            onClick={() => setSort("personal")}
+          >
+            For You
+          </button>
+          <button
+            type="button"
+            className={cn("h3-sort-btn", sort === "latest" && "active")}
+            onClick={() => setSort("latest")}
+          >
+            Latest
+          </button>
+
+          {/* Mark all read */}
+          {confirmingMarkAllRead ? (
+            <>
+              <button
+                type="button"
+                className="h3-btn"
+                onClick={() => {
+                  void handleMarkAllRead();
+                }}
+                disabled={markingAllRead}
+              >
+                {markingAllRead ? "Marking..." : "Confirm"}
+              </button>
+              <button
+                type="button"
+                className="h3-btn muted"
+                onClick={() => setConfirmingMarkAllRead(false)}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
             <button
               type="button"
-              className={cn("sort-btn", sort === "latest" && "active")}
-              onClick={() => setSort("latest")}
+              className="h3-btn"
+              onClick={() => setConfirmingMarkAllRead(true)}
+              disabled={clusters.length === 0}
             >
-              Latest
+              Mark all read
             </button>
-          </div>
-          <div className="row feed-actions">
-            <LayoutToggle layout={layout} onChange={handleLayoutChange} />
+          )}
+
+          <button
+            type="button"
+            className="h3-btn"
+            onClick={() => {
+              void handleRefresh();
+            }}
+            disabled={refreshing}
+          >
+            {refreshing ? "..." : "Refresh"}
+          </button>
+
+          {/* Display settings gear */}
+          <div className="h3-gear-wrap" ref={settingsRef}>
             <button
               type="button"
-              className="button button-small"
-              onClick={handleRefresh}
-              disabled={refreshing}
+              className="h3-gear-btn"
+              onClick={() => setShowSettings((v) => !v)}
+              title="Display settings"
             >
-              {refreshing ? "Refreshing..." : "Refresh"}
+              &#9881;
             </button>
+            {showSettings && (
+              <div className="h3-settings-popover">
+                <div className="h3-settings-group">
+                  <span className="h3-settings-label">Density</span>
+                  <div className="h3-settings-btns">
+                    {(["compact", "default", "comfortable"] as const).map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        className={cn("h3-btn", density === d && "active")}
+                        onClick={() => handleDensityChange(d)}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="h3-settings-group">
+                  <span className="h3-settings-label">Reader Size</span>
+                  <div className="h3-settings-btns">
+                    {(["S", "M", "L"] as const).map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        className={cn("h3-btn", readerSize === s && "active")}
+                        onClick={() => handleReaderSizeChange(s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="h3-settings-group">
+                  <span className="h3-settings-label">Font Size</span>
+                  <div className="h3-settings-btns">
+                    {(["sm", "md", "lg"] as const).map((f) => (
+                      <button
+                        key={f}
+                        type="button"
+                        className={cn("h3-btn", fontSize === f && "active")}
+                        onClick={() => handleFontSizeChange(f)}
+                      >
+                        {f === "sm" ? "A-" : f === "md" ? "A" : "A+"}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
-        {loading ? (
-          <p className="muted">Loading stories...</p>
+        {/* Reader header cell */}
+        {selectedClusterId && (
+          <div
+            className="h3-hdr-reader"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              paddingRight: 8,
+            }}
+          >
+            <button
+              type="button"
+              className="h3-btn"
+              onClick={handleCloseReader}
+              title="Close reader"
+            >
+              &times;
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ================================================================ */}
+      {/* SIDEBAR                                                          */}
+      {/* ================================================================ */}
+      <div
+        className="h3-sidebar"
+        style={{
+          width: sidebarCollapsed ? 0 : 240,
+          overflow: sidebarCollapsed ? "hidden" : undefined,
+          flexShrink: 0,
+        }}
+      >
+        <FeedSidebar
+          feeds={feeds}
+          folders={folders}
+          activeFilter={sidebarFilter}
+          onFilterChange={handleFilterChange}
+          collapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+          unreadCount={clusters.length}
+          savedCount={0}
+          totalCount={clusters.length}
+        />
+      </div>
+
+      {/* ================================================================ */}
+      {/* ARTICLE LIST                                                     */}
+      {/* ================================================================ */}
+      <div className="h3-list" ref={listRef} style={{ overflowY: "auto" }}>
+        {loading || setupLoading ? (
+          <div className="h3-loading">Loading...</div>
         ) : shouldShowOnboarding ? (
           <OnboardingWizard
             feedsCount={feedsCount}
@@ -278,90 +788,89 @@ function HomeFeed() {
               void dismissOnboarding();
             }}
           />
-        ) : clusters.length === 0 && feedsCount === 0 && showEmptyBanner ? (
-          <section className="banner">
-            <div>
-              <strong>No sources configured yet.</strong>
-              <p>Run guided setup, or add feeds manually in Sources.</p>
-            </div>
-            <div className="row">
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => {
-                  void reopenOnboarding();
-                }}
-              >
-                Start setup
-              </button>
-              <a href="/sources" className="button button-secondary">
-                Sources
-              </a>
-              <button
-                type="button"
-                className="banner-dismiss"
-                onClick={() => setShowEmptyBanner(false)}
-                aria-label="Dismiss"
-              >
-                &times;
-              </button>
-            </div>
-          </section>
-        ) : clusters.length === 0 && showEmptyBanner ? (
-          <section className="banner">
-            <div>
-              <strong>No unread stories.</strong>
-              <p>Add some feeds in Sources to get started.</p>
-            </div>
-            <div className="row">
-              <a href="/sources" className="button button-secondary">
-                Sources
-              </a>
-              <button
-                type="button"
-                className="banner-dismiss"
-                onClick={() => setShowEmptyBanner(false)}
-                aria-label="Dismiss"
-              >
-                &times;
-              </button>
-            </div>
-          </section>
+        ) : clusters.length === 0 ? (
+          <div className="h3-empty">No stories. Add feeds in Sources.</div>
         ) : (
-          <section className="cards" aria-label="Story cards">
-            {clusters.map((cluster, i) => (
-              <StoryCard
+          <>
+            {clusters.map((cluster, idx) => (
+              <ClusterListRow
                 key={cluster.id}
                 cluster={cluster}
-                layout={layout}
-                selected={i === selectedIndex}
-                onRemove={handleRemove}
-                ref={(el) => {
-                  if (el) cardRefs.current.set(i, el);
-                  else cardRefs.current.delete(i);
-                }}
+                isActive={cluster.id === selectedClusterId || idx === selectedIndex}
+                onSelect={handleSelectCluster}
+                onToggleStar={handleToggleStar}
+                density={density}
               />
             ))}
-            {cursor && <div ref={sentinelRef} className="scroll-sentinel" />}
-            {loadingMore && <p className="muted">Loading more...</p>}
-            {cursor && !loadingMore && (
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => fetchClusters(false)}
-              >
-                Load more
-              </button>
-            )}
-          </section>
+            {cursor && <div ref={sentinelRef} className="h3-sentinel" />}
+            {loadingMore && <div className="h3-loading-more">Loading more...</div>}
+          </>
         )}
       </div>
 
-      <ShortcutsHelp open={showHelp} onClose={() => setShowHelp(false)} />
-      <ShortcutsButton onClick={() => setShowHelp((prev) => !prev)} />
-    </>
+      {/* ================================================================ */}
+      {/* READER                                                           */}
+      {/* ================================================================ */}
+      {selectedClusterId && (
+        <div className="h3-reader" style={{ fontSize: fontSizePx, overflowY: "auto" }}>
+          <ReaderPanel clusterId={selectedClusterId} onClose={handleCloseReader} />
+        </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* KEYBOARD HINTS                                                   */}
+      {/* ================================================================ */}
+      <div className="h3-kbar" style={{ gridColumn: "1 / -1" }}>
+        <span>
+          <kbd>j</kbd>/<kbd>k</kbd> navigate
+        </span>
+        <span>
+          <kbd>s</kbd> star
+        </span>
+        <span>
+          <kbd>o</kbd> open
+        </span>
+        <span>
+          <kbd>esc</kbd> close
+        </span>
+      </div>
+
+      {/* ================================================================ */}
+      {/* UNDO TOAST                                                       */}
+      {/* ================================================================ */}
+      {undoToast && (
+        <div
+          className="undo-toast"
+          role="status"
+          aria-live="polite"
+          style={{ gridColumn: "1 / -1" }}
+        >
+          <span>{undoToast.message}</span>
+          <button
+            type="button"
+            onClick={() => {
+              void handleUndo();
+            }}
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            className="undo-toast-dismiss"
+            onClick={dismissUndoToast}
+            aria-label="Dismiss"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Page default export
+// ---------------------------------------------------------------------------
 
 export default function HomePage() {
   return (

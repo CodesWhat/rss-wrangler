@@ -5,8 +5,6 @@ import {
   type AiUsageSummary,
   type Annotation,
   type AuthTokens,
-  type ClusterAiSummaryResponse,
-  clusterAiSummaryResponseSchema,
   accountDataExportStatusSchema,
   accountDeletionStatusSchema,
   accountEntitlementsSchema,
@@ -21,21 +19,25 @@ import {
   billingPortalResponseSchema,
   billingSubscriptionActionResponseSchema,
   type ChangePasswordRequest,
+  type ClusterAiSummaryResponse,
   type ClusterCard,
   type ClusterDetail,
   type ClusterFeedbackRequest,
   type CreateAnnotationRequest,
   type CreateFilterRuleRequest,
   type CreateMemberInviteRequest,
+  clusterAiSummaryResponseSchema,
   clusterCardSchema,
   clusterDetailSchema,
   type Digest,
   digestSchema,
   type Feed,
+  type FeedRecommendation,
   type FeedTopic,
   type FilterRule,
   type Folder,
   type ForgotPasswordRequest,
+  feedRecommendationsResponseSchema,
   feedSchema,
   feedTopicSchema,
   filterRuleSchema,
@@ -324,11 +326,10 @@ const fallbackClusters: ClusterCard[] = [
     topicName: null,
     summary: "API not reachable yet. Start api/worker containers and refresh.",
     mutedBreakoutReason: null,
+    displayMode: "full",
     rankingExplainability: null,
     dedupeReason: "3 articles merged by URL similarity",
-    hiddenSignals: [
-      { label: "Muted keyword", reason: "\"crypto\" matched filter #3" },
-    ],
+    hiddenSignals: [{ label: "Muted keyword", reason: '"crypto" matched filter #3' }],
     isRead: false,
     isSaved: false,
   },
@@ -363,6 +364,9 @@ const fallbackSettings: Settings = {
   readPurgeDays: null,
   savedSearches: [],
   wallabagUrl: "",
+  progressiveSummarizationEnabled: true,
+  progressiveFreshHours: 6,
+  progressiveAgingDays: 3,
 };
 
 // ---------- Auth ----------
@@ -375,7 +379,9 @@ export async function login(req: LoginRequest): Promise<AuthTokens> {
   });
   if (!res.ok) {
     if (res.status === 403) {
-      throw new Error("Email not verified. Check your inbox or request another verification email.");
+      throw new Error(
+        "Email not verified. Check your inbox or request another verification email.",
+      );
     }
     throw new Error(res.status === 401 ? "Invalid username or password" : "Login failed");
   }
@@ -418,7 +424,7 @@ export async function joinAccount(req: JoinAccountRequest): Promise<SignupResult
 }
 
 export async function resendVerification(
-  req: ResendVerificationRequest
+  req: ResendVerificationRequest,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const res = await fetch(`${API_BASE_URL}/v1/auth/resend-verification`, {
@@ -437,7 +443,7 @@ export async function resendVerification(
 }
 
 export async function requestPasswordReset(
-  req: ForgotPasswordRequest
+  req: ForgotPasswordRequest,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const res = await fetch(`${API_BASE_URL}/v1/auth/forgot-password`, {
@@ -456,7 +462,7 @@ export async function requestPasswordReset(
 }
 
 export async function resetPassword(
-  req: ResetPasswordRequest
+  req: ResetPasswordRequest,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const res = await fetch(`${API_BASE_URL}/v1/auth/reset-password`, {
@@ -475,7 +481,7 @@ export async function resetPassword(
 }
 
 export async function verifyEmail(
-  token: string
+  token: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const url = new URL(`${API_BASE_URL}/v1/auth/verify-email`);
@@ -492,7 +498,7 @@ export async function verifyEmail(
 }
 
 export async function changePassword(
-  req: ChangePasswordRequest
+  req: ChangePasswordRequest,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const attempt = async (): Promise<Response> => {
     const headers = await authedHeaders(true);
@@ -544,7 +550,7 @@ export async function listMemberInvites(): Promise<MemberInvite[]> {
 }
 
 export async function createMemberInvite(
-  req: CreateMemberInviteRequest
+  req: CreateMemberInviteRequest,
 ): Promise<{ ok: true; invite: MemberInvite } | { ok: false; error: string }> {
   const attempt = async (): Promise<Response> => {
     const headers = await authedHeaders(true);
@@ -577,7 +583,7 @@ export async function createMemberInvite(
 }
 
 export async function revokeMemberInvite(
-  inviteId: string
+  inviteId: string,
 ): Promise<{ ok: true; invite: MemberInvite } | { ok: false; error: string }> {
   const attempt = async (): Promise<Response> => {
     const headers = await authedHeaders(true);
@@ -610,7 +616,7 @@ export async function revokeMemberInvite(
 }
 
 export async function requestAccountDeletion(
-  req: RequestAccountDeletion
+  req: RequestAccountDeletion,
 ): Promise<{ ok: true; status: AccountDeletionStatus } | { ok: false; error: string }> {
   const attempt = async (): Promise<Response> => {
     const headers = await authedHeaders(true);
@@ -675,7 +681,9 @@ export async function requestAccountDataExport(): Promise<
   }
 }
 
-export async function downloadAccountDataExport(): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function downloadAccountDataExport(): Promise<
+  { ok: true } | { ok: false; error: string }
+> {
   const attempt = async (): Promise<Response> => {
     const headers = await authedHeaders(false);
     return fetch(`${API_BASE_URL}/v1/account/data-export/download`, {
@@ -779,7 +787,7 @@ interface ListClustersResponse {
 }
 
 export async function listClusters(
-  query: Partial<ListClustersQuery> = {}
+  query: Partial<ListClustersQuery> = {},
 ): Promise<ListClustersResponse> {
   const parsed = listClustersQuerySchema.parse(query);
   const search = new URLSearchParams({
@@ -789,6 +797,7 @@ export async function listClusters(
   });
   if (parsed.folder_id) search.set("folder_id", parsed.folder_id);
   if (parsed.topic_id) search.set("topic_id", parsed.topic_id);
+  if (parsed.feed_id) search.set("feed_id", parsed.feed_id);
   if (parsed.cursor) search.set("cursor", parsed.cursor);
 
   const payload = await requestJson<unknown>(`/v1/clusters?${search.toString()}`);
@@ -843,7 +852,7 @@ export async function markClusterUnread(id: string): Promise<boolean> {
 }
 
 export async function markAllRead(
-  body: MarkAllReadRequest = {}
+  body: MarkAllReadRequest = {},
 ): Promise<{ ok: boolean; marked: number; clusterIds: string[] }> {
   const payload = await requestJson<unknown>("/v1/clusters/mark-all-read", {
     method: "POST",
@@ -857,7 +866,7 @@ export async function markAllRead(
   const marked = Number((payload as { marked?: unknown }).marked ?? 0);
   const clusterIds = Array.isArray((payload as { clusterIds?: unknown }).clusterIds)
     ? (payload as { clusterIds: unknown[] }).clusterIds.filter(
-        (v): v is string => typeof v === "string"
+        (v): v is string => typeof v === "string",
       )
     : [];
   return {
@@ -874,10 +883,7 @@ export async function saveCluster(id: string): Promise<boolean> {
   return res !== null;
 }
 
-export async function clusterFeedback(
-  id: string,
-  body: ClusterFeedbackRequest
-): Promise<boolean> {
+export async function clusterFeedback(id: string, body: ClusterFeedbackRequest): Promise<boolean> {
   const res = await requestJson<unknown>(`/v1/clusters/${encodeURIComponent(id)}/feedback`, {
     method: "POST",
     body: JSON.stringify(body),
@@ -910,10 +916,7 @@ export async function addFeed(url: string): Promise<Feed | null> {
   return feedSchema.parse(payload);
 }
 
-export async function updateFeed(
-  id: string,
-  body: UpdateFeedRequest
-): Promise<Feed | null> {
+export async function updateFeed(id: string, body: UpdateFeedRequest): Promise<Feed | null> {
   const payload = await requestJson<unknown>(`/v1/feeds/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(body),
@@ -927,11 +930,13 @@ export async function pollFeedNow(id: string, body: PollFeedNowRequest = {}): Pr
     method: "POST",
     ...(typeof body.lookbackDays === "number" ? { body: JSON.stringify(body) } : {}),
   });
-  return Boolean(payload && typeof payload === "object" && (payload as { ok?: unknown }).ok === true);
+  return Boolean(
+    payload && typeof payload === "object" && (payload as { ok?: unknown }).ok === true,
+  );
 }
 
 export async function importOpml(
-  file: File
+  file: File,
 ): Promise<{ imported: number; skipped: number; total: number } | null> {
   const xml = await file.text();
   const payload = await requestJson<unknown>("/v1/opml/import", {
@@ -946,11 +951,7 @@ export async function importOpml(
   const skipped = Number((payload as { skipped?: unknown }).skipped ?? 0);
   const total = Number((payload as { total?: unknown }).total ?? imported + skipped);
 
-  if (
-    Number.isNaN(imported) ||
-    Number.isNaN(skipped) ||
-    Number.isNaN(total)
-  ) {
+  if (Number.isNaN(imported) || Number.isNaN(skipped) || Number.isNaN(total)) {
     return null;
   }
 
@@ -1022,7 +1023,7 @@ interface SearchClustersOptions {
 export async function searchClusters(
   q: string,
   limit = 20,
-  options: SearchClustersOptions = {}
+  options: SearchClustersOptions = {},
 ): Promise<SearchClustersResponse> {
   const parsed = searchQuerySchema.parse({ q, limit, ...options });
   const search = new URLSearchParams({
@@ -1076,11 +1077,11 @@ export async function exportOpml(): Promise<void> {
 
 export async function createAnnotation(
   clusterId: string,
-  body: CreateAnnotationRequest
+  body: CreateAnnotationRequest,
 ): Promise<Annotation | null> {
   const payload = await requestJson<unknown>(
     `/v1/clusters/${encodeURIComponent(clusterId)}/annotations`,
-    { method: "POST", body: JSON.stringify(body) }
+    { method: "POST", body: JSON.stringify(body) },
   );
   if (!payload) return null;
   return annotationSchema.parse(payload);
@@ -1097,7 +1098,7 @@ export async function getVapidKey(): Promise<string | null> {
 export async function subscribePush(
   endpoint: string,
   p256dh: string,
-  auth: string
+  auth: string,
 ): Promise<boolean> {
   const res = await requestJson<unknown>("/v1/push/subscribe", {
     method: "POST",
@@ -1117,13 +1118,10 @@ export async function unsubscribePush(endpoint: string): Promise<boolean> {
 // ---------- Dwell Tracking ----------
 
 export async function recordDwell(clusterId: string, seconds: number): Promise<boolean> {
-  const res = await requestJson<unknown>(
-    `/v1/clusters/${encodeURIComponent(clusterId)}/dwell`,
-    {
-      method: "POST",
-      body: JSON.stringify({ seconds }),
-    }
-  );
+  const res = await requestJson<unknown>(`/v1/clusters/${encodeURIComponent(clusterId)}/dwell`, {
+    method: "POST",
+    body: JSON.stringify({ seconds }),
+  });
   return res !== null;
 }
 
@@ -1139,7 +1137,7 @@ function buildIdempotencyKey(prefix: string): string {
 
 export async function recordAutoReadEvent(
   type: AutoReadEventType,
-  payload: { clusterId: string; feedId: string; layout: AutoReadLayout }
+  payload: { clusterId: string; feedId: string; layout: AutoReadLayout },
 ): Promise<boolean> {
   const response = await requestJson<unknown>("/v1/events", {
     method: "POST",
@@ -1193,22 +1191,19 @@ export async function getFeedTopics(feedId: string): Promise<FeedTopic[]> {
 export async function resolveFeedTopic(
   feedId: string,
   topicId: string,
-  action: "approve" | "reject"
+  action: "approve" | "reject",
 ): Promise<boolean> {
-  const res = await requestJson<unknown>(
-    `/v1/feeds/${encodeURIComponent(feedId)}/topics/resolve`,
-    {
-      method: "POST",
-      body: JSON.stringify({ topicId, action }),
-    }
-  );
+  const res = await requestJson<unknown>(`/v1/feeds/${encodeURIComponent(feedId)}/topics/resolve`, {
+    method: "POST",
+    body: JSON.stringify({ topicId, action }),
+  });
   return res !== null;
 }
 
 export async function approveAllFeedTopics(feedId: string): Promise<boolean> {
   const res = await requestJson<unknown>(
     `/v1/feeds/${encodeURIComponent(feedId)}/topics/approve-all`,
-    { method: "POST" }
+    { method: "POST" },
   );
   return res !== null;
 }
@@ -1257,14 +1252,15 @@ export async function listMembers(): Promise<Member[]> {
 }
 
 export async function removeMember(
-  id: string
+  id: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const headers = await authedHeaders(true);
-    const res = await fetch(
-      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}/remove`,
-      { method: "POST", headers, body: JSON.stringify({}) }
-    );
+    const res = await fetch(`${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}/remove`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({}),
+    });
     if (!res.ok) {
       const message = await res.text();
       return { ok: false, error: message || "Remove failed" };
@@ -1277,14 +1273,15 @@ export async function removeMember(
 
 export async function updateMemberRole(
   id: string,
-  body: UpdateMemberRequest
+  body: UpdateMemberRequest,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const headers = await authedHeaders(true);
-    const res = await fetch(
-      `${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}`,
-      { method: "PATCH", headers, body: JSON.stringify(body) }
-    );
+    const res = await fetch(`${API_BASE_URL}/v1/account/members/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify(body),
+    });
     if (!res.ok) {
       const message = await res.text();
       return { ok: false, error: message || "Update failed" };
@@ -1311,7 +1308,7 @@ export async function getBillingOverview(): Promise<BillingOverview | null> {
 
 export async function createBillingCheckout(
   planId: HostedPlanId,
-  interval: BillingInterval = "monthly"
+  interval: BillingInterval = "monthly",
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   try {
     const headers = await authedHeaders(true);
@@ -1333,13 +1330,15 @@ export async function createBillingCheckout(
   }
 }
 
-export async function getBillingPortalUrl(): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+export async function getBillingPortalUrl(): Promise<
+  { ok: true; url: string } | { ok: false; error: string }
+> {
   try {
     const headers = await authedHeaders(false);
     const res = await fetch(`${API_BASE_URL}/v1/billing/portal`, {
       method: "GET",
       headers,
-      cache: "no-store"
+      cache: "no-store",
     });
 
     if (!res.ok) {
@@ -1354,9 +1353,7 @@ export async function getBillingPortalUrl(): Promise<{ ok: true; url: string } |
   }
 }
 
-export async function updateBillingSubscription(
-  action: BillingSubscriptionAction
-): Promise<
+export async function updateBillingSubscription(action: BillingSubscriptionAction): Promise<
   | {
       ok: true;
       subscriptionStatus: BillingOverview["subscriptionStatus"];
@@ -1371,7 +1368,7 @@ export async function updateBillingSubscription(
     const res = await fetch(`${API_BASE_URL}/v1/billing/subscription-action`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ action })
+      body: JSON.stringify({ action }),
     });
 
     if (!res.ok) {
@@ -1385,7 +1382,7 @@ export async function updateBillingSubscription(
       subscriptionStatus: body.subscriptionStatus,
       cancelAtPeriodEnd: body.cancelAtPeriodEnd,
       currentPeriodEndsAt: body.currentPeriodEndsAt,
-      customerPortalUrl: body.customerPortalUrl
+      customerPortalUrl: body.customerPortalUrl,
     };
   } catch {
     return { ok: false, error: "Subscription update failed" };
@@ -1401,14 +1398,14 @@ export async function getPrivacyConsent(): Promise<PrivacyConsent | null> {
 }
 
 export async function updatePrivacyConsent(
-  body: UpdatePrivacyConsentRequest
+  body: UpdatePrivacyConsentRequest,
 ): Promise<{ ok: true; consent: PrivacyConsent } | { ok: false; error: string }> {
   try {
     const headers = await authedHeaders(true);
     const res = await fetch(`${API_BASE_URL}/v1/privacy/consent`, {
       method: "PUT",
       headers,
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -1450,4 +1447,24 @@ export async function trackSponsoredClick(id: string): Promise<void> {
   await requestJson<unknown>(`/v1/sponsored-placements/${encodeURIComponent(id)}/click`, {
     method: "POST",
   });
+}
+
+// ---------- Feed Recommendations ----------
+
+export async function getRecommendations(): Promise<FeedRecommendation[]> {
+  const payload = await requestJson<unknown>("/v1/recommendations");
+  if (!payload || typeof payload !== "object") return [];
+  try {
+    const parsed = feedRecommendationsResponseSchema.parse(payload);
+    return parsed.recommendations;
+  } catch {
+    return [];
+  }
+}
+
+export async function dismissRecommendation(id: string): Promise<boolean> {
+  const res = await requestJson<unknown>(`/v1/recommendations/${encodeURIComponent(id)}/dismiss`, {
+    method: "POST",
+  });
+  return res !== null;
 }

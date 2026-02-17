@@ -1,4 +1,3 @@
-import type { Pool, PoolClient } from "pg";
 import type {
   AddFeedRequest,
   Annotation,
@@ -9,21 +8,41 @@ import type {
   CreateAnnotationRequest,
   CreateFilterRuleRequest,
   Digest,
+  DisplayMode,
   Event,
   Feed,
   FeedTopic,
   FilterRule,
   Folder,
   ListClustersQuery,
+  MarkAllReadRequest,
   ReadingStats,
   SearchQuery,
   Settings,
   StatsPeriod,
   UpdateFeedRequest,
   UpdateFilterRuleRequest,
-  UpdateSettingsRequest
+  UpdateSettingsRequest,
 } from "@rss-wrangler/contracts";
 import { settingsSchema } from "@rss-wrangler/contracts";
+import type { Pool, PoolClient } from "pg";
+
+export function computeDisplayMode(
+  publishedAt: string,
+  freshHours: number,
+  agingDays: number,
+  enabled: boolean,
+): DisplayMode {
+  if (!enabled) return "full";
+  const now = Date.now();
+  const published = new Date(publishedAt).getTime();
+  const ageMs = now - published;
+  const freshMs = freshHours * 60 * 60 * 1000;
+  const agingMs = agingDays * 24 * 60 * 60 * 1000;
+  if (ageMs < freshMs) return "full";
+  if (ageMs < agingMs) return "summary";
+  return "headline";
+}
 
 const DEFAULT_SETTINGS: Settings = settingsSchema.parse({
   aiMode: "summaries_digest",
@@ -33,22 +52,37 @@ const DEFAULT_SETTINGS: Settings = settingsSchema.parse({
   aiFallbackToLocal: false,
   digestAwayHours: 24,
   digestBacklogThreshold: 50,
-  feedPollMinutes: 60
+  feedPollMinutes: 60,
+  markReadOnScroll: "off",
+  markReadOnScrollListDelayMs: 1500,
+  markReadOnScrollCompactDelayMs: 1500,
+  markReadOnScrollCardDelayMs: 1500,
+  markReadOnScrollListThreshold: 0.6,
+  markReadOnScrollCompactThreshold: 0.6,
+  markReadOnScrollCardThreshold: 0.6,
+  unreadMaxAgeDays: null,
+  readPurgeDays: null,
+  savedSearches: [],
+  progressiveSummarizationEnabled: true,
+  progressiveFreshHours: 6,
+  progressiveAgingDays: 3,
 });
 
 export class PostgresStore {
   constructor(
     private readonly pool: Pool | PoolClient,
-    private readonly tenantId: string
+    private readonly accountId: string,
   ) {}
 
-  async listClusters(query: ListClustersQuery): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
+  async listClusters(
+    query: ListClustersQuery,
+  ): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
     const conditions: string[] = [];
     const params: unknown[] = [];
     let paramIndex = 1;
 
     conditions.push(`c.tenant_id = $${paramIndex}`);
-    params.push(this.tenantId);
+    params.push(this.accountId);
     paramIndex++;
 
     if (query.folder_id) {
@@ -63,22 +97,62 @@ export class PostgresStore {
       paramIndex++;
     }
 
+    if (query.feed_id) {
+      conditions.push(`i.feed_id = $${paramIndex}`);
+      params.push(query.feed_id);
+      paramIndex++;
+    }
+
     if (query.state === "unread") {
       conditions.push(`(rs.read_at IS NULL)`);
+      conditions.push(`(rs.not_interested_at IS NULL)`);
     } else if (query.state === "saved") {
       conditions.push(`(rs.saved_at IS NOT NULL)`);
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
+    const recencyFactorSql =
+      "1.0 / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - COALESCE(i.published_at, c.created_at))) / 3600)";
+    const savedFactorSql = "CASE WHEN rs.saved_at IS NOT NULL THEN 0.5 ELSE 0 END";
+    const clusterSizeFactorSql = "LEAST(c.size / 10.0, 1)";
+    const sourceWeightFactorSql = `CASE
+            WHEN f.weight = 'prefer' THEN 0.3
+            WHEN f.weight = 'deprioritize' THEN -0.3
+            ELSE 0
+          END`;
+    const engagementFactorSql =
+      "LEAST(COALESCE(rs.dwell_seconds, 0) / 120.0, 0.25) + CASE WHEN rs.clicked_at IS NOT NULL THEN 0.15 ELSE 0 END - CASE WHEN rs.not_interested_at IS NOT NULL THEN 2.5 ELSE 0 END";
+    const topicAffinityFactorSql = "LEAST(GREATEST(COALESCE(ta.affinity_score, 0), -0.35), 0.35)";
+    const folderAffinityFactorSql = "LEAST(GREATEST(COALESCE(fa.affinity_score, 0), -0.25), 0.25)";
+    const diversityPenaltyFactorSql =
+      "-LEAST(GREATEST(COALESCE(td.unread_count, 0) - 3, 0) * 0.05, 0.35)";
+    const explorationBoostFactorSql = `CASE
+            WHEN rs.saved_at IS NULL
+              AND rs.not_interested_at IS NULL
+              AND rs.clicked_at IS NULL
+              AND COALESCE(rs.dwell_seconds, 0) < 20
+              AND COALESCE(f.weight, 'neutral') = 'neutral'
+              AND MOD(ABS(hashtext(c.id::text)::bigint), 100) < 8
+            THEN 0.22
+            ELSE 0
+          END`;
+    const personalScoreSql = [
+      recencyFactorSql,
+      savedFactorSql,
+      clusterSizeFactorSql,
+      sourceWeightFactorSql,
+      engagementFactorSql,
+      topicAffinityFactorSql,
+      folderAffinityFactorSql,
+      diversityPenaltyFactorSql,
+      explorationBoostFactorSql,
+    ].join(" + ");
+
     // Defense-in-depth: only allow known sort values even though Zod validates upstream
     const SORT_CLAUSES: Record<string, string> = {
       latest: "ORDER BY i.published_at DESC NULLS LAST, c.created_at DESC",
-      personal: `ORDER BY (
-        1.0 / GREATEST(1, EXTRACT(EPOCH FROM (NOW() - COALESCE(i.published_at, c.created_at))) / 3600)
-        + CASE WHEN rs.saved_at IS NOT NULL THEN 0.5 ELSE 0 END
-        + LEAST(c.size / 10.0, 1)
-      ) DESC`
+      personal: `ORDER BY (${personalScoreSql}) DESC`,
     };
     const orderClause = SORT_CLAUSES[query.sort] ?? SORT_CLAUSES.personal;
 
@@ -86,10 +160,58 @@ export class PostgresStore {
     const limit = query.limit;
 
     const sql = `
+      WITH topic_affinity AS (
+        SELECT
+          c2.topic_id,
+          (
+            COUNT(*) FILTER (WHERE rs2.saved_at IS NOT NULL) * 0.12
+            + COUNT(*) FILTER (WHERE rs2.read_at IS NOT NULL) * 0.04
+            + COALESCE(SUM(LEAST(rs2.dwell_seconds, 300)), 0) / 6000.0
+            - COUNT(*) FILTER (WHERE rs2.not_interested_at IS NOT NULL) * 0.2
+          ) / NULLIF(COUNT(*), 0) AS affinity_score
+        FROM read_state rs2
+        JOIN cluster c2
+          ON c2.id = rs2.cluster_id
+         AND c2.tenant_id = rs2.tenant_id
+        WHERE rs2.tenant_id = $1
+          AND c2.topic_id IS NOT NULL
+        GROUP BY c2.topic_id
+      ),
+      folder_affinity AS (
+        SELECT
+          c3.folder_id,
+          (
+            COUNT(*) FILTER (WHERE rs3.saved_at IS NOT NULL) * 0.08
+            + COUNT(*) FILTER (WHERE rs3.read_at IS NOT NULL) * 0.03
+            + COALESCE(SUM(LEAST(rs3.dwell_seconds, 300)), 0) / 8000.0
+            - COUNT(*) FILTER (WHERE rs3.not_interested_at IS NOT NULL) * 0.15
+          ) / NULLIF(COUNT(*), 0) AS affinity_score
+        FROM read_state rs3
+        JOIN cluster c3
+          ON c3.id = rs3.cluster_id
+         AND c3.tenant_id = rs3.tenant_id
+        WHERE rs3.tenant_id = $1
+        GROUP BY c3.folder_id
+      ),
+      topic_density AS (
+        SELECT
+          c4.topic_id,
+          COUNT(*) AS unread_count
+        FROM cluster c4
+        LEFT JOIN read_state rs4
+          ON rs4.cluster_id = c4.id
+         AND rs4.tenant_id = c4.tenant_id
+        WHERE c4.tenant_id = $1
+          AND c4.topic_id IS NOT NULL
+          AND rs4.read_at IS NULL
+          AND rs4.not_interested_at IS NULL
+        GROUP BY c4.topic_id
+      )
       SELECT
         c.id,
         COALESCE(i.title, 'Untitled') AS headline,
         i.hero_image_url,
+        COALESCE(f.id, '00000000-0000-0000-0000-000000000000') AS primary_feed_id,
         COALESCE(f.title, 'Unknown') AS primary_source,
         COALESCE(i.published_at, c.created_at) AS primary_source_published_at,
         c.size AS outlet_count,
@@ -98,39 +220,100 @@ export class PostgresStore {
         c.topic_id,
         t.name AS topic_name,
         i.summary,
+        CASE
+          WHEN latest_filter_event.action = 'breakout_shown'
+          THEN COALESCE(latest_filter_event.rule_pattern, 'breakout_shown')
+          ELSE NULL
+        END AS muted_breakout_reason,
+        (${personalScoreSql}) AS ranking_score,
+        (${recencyFactorSql}) AS recency_factor,
+        (${savedFactorSql}) AS saved_factor,
+        (${clusterSizeFactorSql}) AS cluster_size_factor,
+        (${sourceWeightFactorSql}) AS source_weight_factor,
+        (${engagementFactorSql}) AS engagement_factor,
+        (${topicAffinityFactorSql}) AS topic_affinity_factor,
+        (${folderAffinityFactorSql}) AS folder_affinity_factor,
+        (${diversityPenaltyFactorSql}) AS diversity_penalty_factor,
+        (${explorationBoostFactorSql}) AS exploration_boost_factor,
+        i.ai_focus_score,
+        i.ai_relevant_label,
+        i.ai_suggested_tags,
         rs.read_at,
-        rs.saved_at
+        rs.saved_at,
+        rs.not_interested_at
       FROM cluster c
       LEFT JOIN item i ON i.id = c.rep_item_id
       LEFT JOIN feed f ON i.feed_id = f.id
       LEFT JOIN folder fo ON c.folder_id = fo.id
       LEFT JOIN topic t ON c.topic_id = t.id
       LEFT JOIN read_state rs ON rs.cluster_id = c.id AND rs.tenant_id = c.tenant_id
+      LEFT JOIN topic_affinity ta ON ta.topic_id = c.topic_id
+      LEFT JOIN folder_affinity fa ON fa.folder_id = c.folder_id
+      LEFT JOIN topic_density td ON td.topic_id = c.topic_id
+      LEFT JOIN LATERAL (
+        SELECT fe.action, fr.pattern AS rule_pattern
+        FROM filter_event fe
+        LEFT JOIN filter_rule fr
+          ON fr.id = fe.rule_id
+         AND fr.tenant_id = fe.tenant_id
+        WHERE fe.cluster_id = c.id
+          AND fe.tenant_id = c.tenant_id
+        ORDER BY fe.ts DESC
+        LIMIT 1
+      ) latest_filter_event ON TRUE
       ${whereClause}
       ${orderClause}
       OFFSET $${paramIndex} LIMIT $${paramIndex + 1}
     `;
     params.push(offset, limit + 1);
 
-    const { rows } = await this.pool.query(sql, params);
+    const [{ rows }, settings] = await Promise.all([
+      this.pool.query(sql, params),
+      this.getSettings(),
+    ]);
 
     const hasMore = rows.length > limit;
-    const data: ClusterCard[] = rows.slice(0, limit).map((r: Record<string, unknown>) => ({
-      id: r.id as string,
-      headline: r.headline as string,
-      heroImageUrl: (r.hero_image_url as string) ?? null,
-      primarySource: r.primary_source as string,
-      primarySourcePublishedAt: (r.primary_source_published_at as Date).toISOString(),
-      outletCount: Number(r.outlet_count),
-      folderId: r.folder_id as string,
-      folderName: r.folder_name as string,
-      topicId: (r.topic_id as string) ?? null,
-      topicName: (r.topic_name as string) ?? null,
-      summary: (r.summary as string) ?? null,
-      mutedBreakoutReason: null,
-      isRead: r.read_at != null,
-      isSaved: r.saved_at != null
-    }));
+    const data: ClusterCard[] = rows.slice(0, limit).map((r: Record<string, unknown>) => {
+      const publishedAt = (r.primary_source_published_at as Date).toISOString();
+      return {
+        id: r.id as string,
+        headline: r.headline as string,
+        heroImageUrl: (r.hero_image_url as string) ?? null,
+        primarySource: r.primary_source as string,
+        primaryFeedId: r.primary_feed_id as string,
+        primarySourcePublishedAt: publishedAt,
+        outletCount: Number(r.outlet_count),
+        folderId: r.folder_id as string,
+        folderName: r.folder_name as string,
+        topicId: (r.topic_id as string) ?? null,
+        topicName: (r.topic_name as string) ?? null,
+        summary: (r.summary as string) ?? null,
+        mutedBreakoutReason: (r.muted_breakout_reason as string) ?? null,
+        displayMode: computeDisplayMode(
+          publishedAt,
+          settings.progressiveFreshHours,
+          settings.progressiveAgingDays,
+          settings.progressiveSummarizationEnabled,
+        ),
+        rankingExplainability: {
+          finalScore: Number(r.ranking_score ?? 0),
+          recency: Number(r.recency_factor ?? 0),
+          saved: Number(r.saved_factor ?? 0),
+          clusterSize: Number(r.cluster_size_factor ?? 0),
+          sourceWeight: Number(r.source_weight_factor ?? 0),
+          engagement: Number(r.engagement_factor ?? 0),
+          topicAffinity: Number(r.topic_affinity_factor ?? 0),
+          folderAffinity: Number(r.folder_affinity_factor ?? 0),
+          diversityPenalty: Number(r.diversity_penalty_factor ?? 0),
+          explorationBoost: Number(r.exploration_boost_factor ?? 0),
+        },
+        aiFocusScore: r.ai_focus_score != null ? Number(r.ai_focus_score) : null,
+        aiRelevantLabel: (r.ai_relevant_label as string) ?? null,
+        aiSuggestedTags: (r.ai_suggested_tags as string[]) ?? null,
+        isRead: r.read_at != null,
+        isSaved: r.saved_at != null,
+      };
+    });
 
     const nextCursor = hasMore ? String(offset + limit) : null;
     return { data, nextCursor };
@@ -142,6 +325,7 @@ export class PostgresStore {
         c.id,
         COALESCE(i.title, 'Untitled') AS headline,
         i.hero_image_url,
+        COALESCE(f.id, '00000000-0000-0000-0000-000000000000') AS primary_feed_id,
         COALESCE(f.title, 'Unknown') AS primary_source,
         COALESCE(i.published_at, c.created_at) AS primary_source_published_at,
         c.size AS outlet_count,
@@ -151,6 +335,13 @@ export class PostgresStore {
         t.name AS topic_name,
         i.summary,
         i.extracted_text,
+        i.extracted_at,
+        f.default_reader_mode AS primary_feed_default_reader_mode,
+        CASE
+          WHEN latest_filter_event.action = 'breakout_shown'
+          THEN COALESCE(latest_filter_event.rule_pattern, 'breakout_shown')
+          ELSE NULL
+        END AS muted_breakout_reason,
         rs.read_at,
         rs.saved_at
       FROM cluster c
@@ -159,10 +350,24 @@ export class PostgresStore {
       LEFT JOIN folder fo ON c.folder_id = fo.id
       LEFT JOIN topic t ON c.topic_id = t.id
       LEFT JOIN read_state rs ON rs.cluster_id = c.id AND rs.tenant_id = c.tenant_id
+      LEFT JOIN LATERAL (
+        SELECT fe.action, fr.pattern AS rule_pattern
+        FROM filter_event fe
+        LEFT JOIN filter_rule fr
+          ON fr.id = fe.rule_id
+         AND fr.tenant_id = fe.tenant_id
+        WHERE fe.cluster_id = c.id
+          AND fe.tenant_id = c.tenant_id
+        ORDER BY fe.ts DESC
+        LIMIT 1
+      ) latest_filter_event ON TRUE
       WHERE c.id = $1
         AND c.tenant_id = $2
     `;
-    const { rows: clusterRows } = await this.pool.query(clusterSql, [clusterId, this.tenantId]);
+    const [{ rows: clusterRows }, settings] = await Promise.all([
+      this.pool.query(clusterSql, [clusterId, this.accountId]),
+      this.getSettings(),
+    ]);
     if (clusterRows.length === 0) {
       return null;
     }
@@ -183,13 +388,14 @@ export class PostgresStore {
         AND cm.tenant_id = $2
       ORDER BY i.published_at DESC
     `;
-    const { rows: memberRows } = await this.pool.query(membersSql, [clusterId, this.tenantId]);
+    const { rows: memberRows } = await this.pool.query(membersSql, [clusterId, this.accountId]);
 
     const card: ClusterCard = {
       id: r.id as string,
       headline: r.headline as string,
       heroImageUrl: (r.hero_image_url as string) ?? null,
       primarySource: r.primary_source as string,
+      primaryFeedId: r.primary_feed_id as string,
       primarySourcePublishedAt: (r.primary_source_published_at as Date).toISOString(),
       outletCount: Number(r.outlet_count),
       folderId: r.folder_id as string,
@@ -197,9 +403,16 @@ export class PostgresStore {
       topicId: (r.topic_id as string) ?? null,
       topicName: (r.topic_name as string) ?? null,
       summary: (r.summary as string) ?? null,
-      mutedBreakoutReason: null,
+      mutedBreakoutReason: (r.muted_breakout_reason as string) ?? null,
+      displayMode: computeDisplayMode(
+        (r.primary_source_published_at as Date).toISOString(),
+        settings.progressiveFreshHours,
+        settings.progressiveAgingDays,
+        settings.progressiveSummarizationEnabled,
+      ),
+      rankingExplainability: null,
       isRead: r.read_at != null,
-      isSaved: r.saved_at != null
+      isSaved: r.saved_at != null,
     };
 
     const members: ClusterDetailMember[] = memberRows.map((m: Record<string, unknown>) => ({
@@ -207,19 +420,44 @@ export class PostgresStore {
       title: m.title as string,
       sourceName: m.source_name as string,
       url: m.url as string,
-      publishedAt: (m.published_at as Date).toISOString()
+      publishedAt: (m.published_at as Date).toISOString(),
     }));
 
-    const storySoFar = (r.extracted_text as string) ?? null;
+    const extractedTextRaw = typeof r.extracted_text === "string" ? r.extracted_text.trim() : "";
+    const summaryRaw = typeof r.summary === "string" ? r.summary.trim() : "";
+    const extractedAt = r.extracted_at ? (r.extracted_at as Date).toISOString() : null;
 
-    return { cluster: card, storySoFar, members };
+    let storySoFar: string | null = null;
+    let storyTextSource: ClusterDetail["storyTextSource"] = "unavailable";
+    let storyExtractedAt: string | null = null;
+
+    if (extractedTextRaw.length > 0) {
+      storySoFar = extractedTextRaw;
+      storyTextSource = "extracted_full_text";
+      storyExtractedAt = extractedAt;
+    } else if (summaryRaw.length > 0) {
+      storySoFar = summaryRaw;
+      storyTextSource = "summary_fallback";
+    }
+
+    const primaryFeedDefaultReaderMode =
+      (r.primary_feed_default_reader_mode as ClusterDetail["primaryFeedDefaultReaderMode"]) ?? null;
+
+    return {
+      cluster: card,
+      storySoFar,
+      storyTextSource,
+      storyExtractedAt,
+      members,
+      primaryFeedDefaultReaderMode,
+    };
   }
 
   async markRead(clusterId: string): Promise<boolean> {
-    const check = await this.pool.query(
-      "SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2",
-      [clusterId, this.tenantId]
-    );
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
     if (check.rows.length === 0) {
       return false;
     }
@@ -228,16 +466,67 @@ export class PostgresStore {
       `INSERT INTO read_state (tenant_id, cluster_id, read_at)
        VALUES ($1, $2, NOW())
        ON CONFLICT (cluster_id) DO UPDATE SET read_at = NOW(), tenant_id = EXCLUDED.tenant_id`,
-      [this.tenantId, clusterId]
+      [this.accountId, clusterId],
     );
     return true;
   }
 
-  async saveCluster(clusterId: string): Promise<boolean> {
-    const check = await this.pool.query(
-      "SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2",
-      [clusterId, this.tenantId]
+  async markAllRead(payload: MarkAllReadRequest): Promise<{ count: number; clusterIds: string[] }> {
+    const olderThanTs =
+      typeof payload.olderThanHours === "number"
+        ? new Date(Date.now() - payload.olderThanHours * 60 * 60 * 1000).toISOString()
+        : null;
+
+    const { rows } = await this.pool.query<{ cluster_id: string }>(
+      `WITH targets AS (
+         SELECT c.id
+         FROM cluster c
+         LEFT JOIN item rep_i
+           ON rep_i.id = c.rep_item_id
+          AND rep_i.tenant_id = c.tenant_id
+         LEFT JOIN read_state rs
+           ON rs.cluster_id = c.id
+          AND rs.tenant_id = c.tenant_id
+         WHERE c.tenant_id = $1
+           AND rs.read_at IS NULL
+           AND ($2::uuid IS NULL OR c.folder_id = $2::uuid)
+           AND ($3::uuid IS NULL OR c.topic_id = $3::uuid)
+           AND ($4::timestamptz IS NULL OR COALESCE(rep_i.published_at, c.created_at) <= $4::timestamptz)
+       )
+       INSERT INTO read_state (tenant_id, cluster_id, read_at)
+       SELECT $1, targets.id, NOW()
+       FROM targets
+       ON CONFLICT (cluster_id) DO UPDATE
+       SET read_at = EXCLUDED.read_at,
+           tenant_id = EXCLUDED.tenant_id
+       RETURNING cluster_id`,
+      [this.accountId, payload.folderId ?? null, payload.topicId ?? null, olderThanTs],
     );
+
+    return { count: rows.length, clusterIds: rows.map((r) => r.cluster_id) };
+  }
+
+  async markUnread(clusterId: string): Promise<boolean> {
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
+    if (check.rows.length === 0) {
+      return false;
+    }
+
+    await this.pool.query("DELETE FROM read_state WHERE cluster_id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
+    return true;
+  }
+
+  async saveCluster(clusterId: string): Promise<boolean> {
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
     if (check.rows.length === 0) {
       return false;
     }
@@ -246,24 +535,24 @@ export class PostgresStore {
       `INSERT INTO read_state (tenant_id, cluster_id, saved_at)
        VALUES ($1, $2, NOW())
        ON CONFLICT (cluster_id) DO UPDATE SET saved_at = NOW(), tenant_id = EXCLUDED.tenant_id`,
-      [this.tenantId, clusterId]
+      [this.accountId, clusterId],
     );
     return true;
   }
 
   async splitCluster(clusterId: string): Promise<boolean> {
-    const check = await this.pool.query(
-      "SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2",
-      [clusterId, this.tenantId]
-    );
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
     return check.rows.length > 0;
   }
 
   async submitFeedback(clusterId: string, _feedback: ClusterFeedbackRequest): Promise<boolean> {
-    const check = await this.pool.query(
-      "SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2",
-      [clusterId, this.tenantId]
-    );
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
     if (check.rows.length === 0) {
       return false;
     }
@@ -273,7 +562,7 @@ export class PostgresStore {
         `INSERT INTO read_state (tenant_id, cluster_id, not_interested_at)
          VALUES ($1, $2, NOW())
          ON CONFLICT (cluster_id) DO UPDATE SET not_interested_at = NOW(), tenant_id = EXCLUDED.tenant_id`,
-        [this.tenantId, clusterId]
+        [this.accountId, clusterId],
       );
     }
 
@@ -284,32 +573,63 @@ export class PostgresStore {
     const { rows } = await this.pool.query("SELECT id, name FROM folder ORDER BY name");
     return rows.map((r: Record<string, unknown>) => ({
       id: r.id as string,
-      name: r.name as string
+      name: r.name as string,
     }));
   }
 
   async listFeeds(): Promise<Feed[]> {
-    const { rows } = await this.pool.query(`
-      SELECT id, url, title, site_url, folder_id, folder_confidence,
-             weight, muted, trial, classification_status, created_at, last_polled_at
-      FROM feed
-      WHERE tenant_id = $1
-      ORDER BY created_at DESC
-    `, [this.tenantId]);
-    return rows.map((r: Record<string, unknown>) => ({
-      id: r.id as string,
-      url: r.url as string,
-      title: r.title as string,
-      siteUrl: (r.site_url as string) ?? null,
-      folderId: r.folder_id as string,
-      folderConfidence: Number(r.folder_confidence),
-      weight: r.weight as Feed["weight"],
-      muted: r.muted as boolean,
-      trial: r.trial as boolean,
-      classificationStatus: (r.classification_status as Feed["classificationStatus"]),
-      createdAt: (r.created_at as Date).toISOString(),
-      lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
-    }));
+    const { rows } = await this.pool.query(
+      `
+      WITH last_success AS (
+        SELECT
+          payload_json->>'feedId' AS feed_id,
+          MAX(ts) AS last_parse_success_at
+        FROM event
+        WHERE tenant_id = $1
+          AND type = 'feed_parse_success'
+          AND payload_json ? 'feedId'
+        GROUP BY payload_json->>'feedId'
+      ),
+      last_failure AS (
+        SELECT DISTINCT ON (payload_json->>'feedId')
+          payload_json->>'feedId' AS feed_id,
+          ts AS last_parse_failure_at,
+          NULLIF(payload_json->>'failureStage', '') AS last_parse_failure_stage,
+          NULLIF(payload_json->>'error', '') AS last_parse_failure_error
+        FROM event
+        WHERE tenant_id = $1
+          AND type = 'feed_parse_failure'
+          AND payload_json ? 'feedId'
+        ORDER BY payload_json->>'feedId', ts DESC
+      )
+      SELECT
+        f.id,
+        f.url,
+        f.title,
+        f.site_url,
+        f.folder_id,
+        f.folder_confidence,
+        f.weight,
+        f.muted,
+        f.trial,
+        f.classification_status,
+        f.created_at,
+        f.last_polled_at,
+        f.default_reader_mode,
+        ls.last_parse_success_at,
+        lf.last_parse_failure_at,
+        lf.last_parse_failure_stage,
+        lf.last_parse_failure_error
+      FROM feed f
+      LEFT JOIN last_success ls ON ls.feed_id = f.id::text
+      LEFT JOIN last_failure lf ON lf.feed_id = f.id::text
+      WHERE f.tenant_id = $1
+      ORDER BY f.created_at DESC
+    `,
+      [this.accountId],
+    );
+
+    return rows.map((r: Record<string, unknown>) => this.mapFeedRow(r));
   }
 
   async addFeed(payload: AddFeedRequest): Promise<Feed> {
@@ -317,30 +637,27 @@ export class PostgresStore {
 
     // Assign to "Other" folder by default
     const otherFolder = await this.pool.query("SELECT id FROM folder WHERE name = 'Other' LIMIT 1");
-    const folderId = otherFolder.rows.length > 0 ? (otherFolder.rows[0] as Record<string, unknown>).id as string : "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    const folderId =
+      otherFolder.rows.length > 0
+        ? ((otherFolder.rows[0] as Record<string, unknown>).id as string)
+        : "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
-    const { rows } = await this.pool.query(
-      `INSERT INTO feed (tenant_id, url, url_normalized, title, folder_id, folder_confidence, weight, muted, trial, classification_status)
-       VALUES ($1, $2, $3, $2, $4, 0.4, 'neutral', false, false, 'pending_classification')
-       RETURNING id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, classification_status, created_at, last_polled_at`,
-      [this.tenantId, payload.url, urlNormalized, folderId]
+    const { rows } = await this.pool.query<{ id: string }>(
+      `INSERT INTO feed (tenant_id, url, url_normalized, title, folder_id, folder_confidence, weight, muted, trial, classification_status, default_reader_mode)
+       VALUES ($1, $2, $3, $2, $4, 0.4, 'neutral', false, false, 'pending_classification', NULL)
+       RETURNING id`,
+      [this.accountId, payload.url, urlNormalized, folderId],
     );
 
-    const r = rows[0] as Record<string, unknown>;
-    return {
-      id: r.id as string,
-      url: r.url as string,
-      title: r.title as string,
-      siteUrl: (r.site_url as string) ?? null,
-      folderId: r.folder_id as string,
-      folderConfidence: Number(r.folder_confidence),
-      weight: r.weight as Feed["weight"],
-      muted: r.muted as boolean,
-      trial: r.trial as boolean,
-      classificationStatus: r.classification_status as Feed["classificationStatus"],
-      createdAt: (r.created_at as Date).toISOString(),
-      lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
-    };
+    const createdFeedId = rows[0]?.id;
+    if (!createdFeedId) {
+      throw new Error("failed to create feed");
+    }
+    const createdFeed = await this.getFeedByIdWithParseTelemetry(createdFeedId);
+    if (!createdFeed) {
+      throw new Error("created feed could not be loaded");
+    }
+    return createdFeed;
   }
 
   async updateFeed(feedId: string, patch: UpdateFeedRequest): Promise<Feed | null> {
@@ -368,66 +685,98 @@ export class PostgresStore {
       params.push(patch.trial);
       paramIndex++;
     }
+    if (patch.defaultReaderMode !== undefined) {
+      setClauses.push(`default_reader_mode = $${paramIndex}`);
+      params.push(patch.defaultReaderMode);
+      paramIndex++;
+    }
 
     if (setClauses.length === 0) {
       // Nothing to update; return current feed
-      const { rows } = await this.pool.query(
-        `SELECT id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, classification_status, created_at, last_polled_at
-         FROM feed WHERE id = $1 AND tenant_id = $2`,
-        [feedId, this.tenantId]
-      );
-      if (rows.length === 0) return null;
-      return this.mapFeedRow(rows[0] as Record<string, unknown>);
+      return this.getFeedByIdWithParseTelemetry(feedId);
     }
 
-    params.push(feedId, this.tenantId);
+    params.push(feedId, this.accountId);
     const sql = `
       UPDATE feed SET ${setClauses.join(", ")}
       WHERE id = $${paramIndex}
         AND tenant_id = $${paramIndex + 1}
-      RETURNING id, url, title, site_url, folder_id, folder_confidence, weight, muted, trial, classification_status, created_at, last_polled_at
+      RETURNING id
     `;
 
-    const { rows } = await this.pool.query(sql, params);
-    if (rows.length === 0) return null;
-    return this.mapFeedRow(rows[0] as Record<string, unknown>);
+    const { rows } = await this.pool.query<{ id: string }>(sql, params);
+    const updatedFeedId = rows[0]?.id;
+    if (!updatedFeedId) return null;
+    return this.getFeedByIdWithParseTelemetry(updatedFeedId);
+  }
+
+  private mapFilterRow(r: Record<string, unknown>): FilterRule {
+    return {
+      id: r.id as string,
+      pattern: r.pattern as string,
+      target: (r.target as FilterRule["target"]) ?? "keyword",
+      type: r.type as FilterRule["type"],
+      mode: r.mode as FilterRule["mode"],
+      breakoutEnabled: r.breakout_enabled as boolean,
+      feedId: (r.feed_id as string) ?? null,
+      folderId: (r.folder_id as string) ?? null,
+      createdAt: (r.created_at as Date).toISOString(),
+    };
   }
 
   async listFilters(): Promise<FilterRule[]> {
     const { rows } = await this.pool.query(
-      "SELECT id, pattern, type, mode, breakout_enabled, created_at FROM filter_rule WHERE tenant_id = $1 ORDER BY created_at DESC",
-      [this.tenantId]
+      "SELECT id, pattern, target, type, mode, breakout_enabled, feed_id, folder_id, created_at FROM filter_rule WHERE tenant_id = $1 ORDER BY created_at DESC",
+      [this.accountId],
     );
-    return rows.map((r: Record<string, unknown>) => ({
-      id: r.id as string,
-      pattern: r.pattern as string,
-      type: r.type as FilterRule["type"],
-      mode: r.mode as FilterRule["mode"],
-      breakoutEnabled: r.breakout_enabled as boolean,
-      createdAt: (r.created_at as Date).toISOString()
-    }));
+    return rows.map((r: Record<string, unknown>) => this.mapFilterRow(r));
   }
 
   async createFilter(payload: CreateFilterRuleRequest): Promise<FilterRule> {
+    // Validate regex patterns on creation
+    if (payload.type === "regex") {
+      try {
+        new RegExp(payload.pattern);
+      } catch (err) {
+        throw Object.assign(
+          new Error(`Invalid regex pattern: ${err instanceof Error ? err.message : String(err)}`),
+          { statusCode: 400 },
+        );
+      }
+    }
+
     const { rows } = await this.pool.query(
-      `INSERT INTO filter_rule (tenant_id, pattern, type, mode, breakout_enabled)
-       VALUES ($1, $2, $3, $4, $5)
-       RETURNING id, pattern, type, mode, breakout_enabled, created_at`,
-      [this.tenantId, payload.pattern, payload.type, payload.mode, payload.breakoutEnabled]
+      `INSERT INTO filter_rule (tenant_id, pattern, target, type, mode, breakout_enabled, feed_id, folder_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING id, pattern, target, type, mode, breakout_enabled, feed_id, folder_id, created_at`,
+      [
+        this.accountId,
+        payload.pattern,
+        payload.target,
+        payload.type,
+        payload.mode,
+        payload.breakoutEnabled,
+        payload.feedId,
+        payload.folderId,
+      ],
     );
 
-    const r = rows[0] as Record<string, unknown>;
-    return {
-      id: r.id as string,
-      pattern: r.pattern as string,
-      type: r.type as FilterRule["type"],
-      mode: r.mode as FilterRule["mode"],
-      breakoutEnabled: r.breakout_enabled as boolean,
-      createdAt: (r.created_at as Date).toISOString()
-    };
+    return this.mapFilterRow(rows[0] as Record<string, unknown>);
   }
 
   async updateFilter(filterId: string, patch: UpdateFilterRuleRequest): Promise<FilterRule | null> {
+    // Validate regex patterns on update
+    if (patch.type === "regex" && patch.pattern) {
+      try {
+        new RegExp(patch.pattern);
+      } catch (err) {
+        throw Object.assign(
+          new Error(`Invalid regex pattern: ${err instanceof Error ? err.message : String(err)}`),
+          { statusCode: 400 },
+        );
+      }
+    }
+
     const setClauses: string[] = [];
     const params: unknown[] = [];
     let paramIndex = 1;
@@ -435,6 +784,11 @@ export class PostgresStore {
     if (patch.pattern) {
       setClauses.push(`pattern = $${paramIndex}`);
       params.push(patch.pattern);
+      paramIndex++;
+    }
+    if (patch.target) {
+      setClauses.push(`target = $${paramIndex}`);
+      params.push(patch.target);
       paramIndex++;
     }
     if (patch.type) {
@@ -452,49 +806,43 @@ export class PostgresStore {
       params.push(patch.breakoutEnabled);
       paramIndex++;
     }
+    if (patch.feedId !== undefined) {
+      setClauses.push(`feed_id = $${paramIndex}`);
+      params.push(patch.feedId);
+      paramIndex++;
+    }
+    if (patch.folderId !== undefined) {
+      setClauses.push(`folder_id = $${paramIndex}`);
+      params.push(patch.folderId);
+      paramIndex++;
+    }
 
     if (setClauses.length === 0) {
       const { rows } = await this.pool.query(
-        "SELECT id, pattern, type, mode, breakout_enabled, created_at FROM filter_rule WHERE id = $1 AND tenant_id = $2",
-        [filterId, this.tenantId]
+        "SELECT id, pattern, target, type, mode, breakout_enabled, feed_id, folder_id, created_at FROM filter_rule WHERE id = $1 AND tenant_id = $2",
+        [filterId, this.accountId],
       );
       if (rows.length === 0) return null;
-      const r = rows[0] as Record<string, unknown>;
-      return {
-        id: r.id as string,
-        pattern: r.pattern as string,
-        type: r.type as FilterRule["type"],
-        mode: r.mode as FilterRule["mode"],
-        breakoutEnabled: r.breakout_enabled as boolean,
-        createdAt: (r.created_at as Date).toISOString()
-      };
+      return this.mapFilterRow(rows[0] as Record<string, unknown>);
     }
 
-    params.push(filterId, this.tenantId);
+    params.push(filterId, this.accountId);
     const sql = `
       UPDATE filter_rule SET ${setClauses.join(", ")}
       WHERE id = $${paramIndex}
         AND tenant_id = $${paramIndex + 1}
-      RETURNING id, pattern, type, mode, breakout_enabled, created_at
+      RETURNING id, pattern, target, type, mode, breakout_enabled, feed_id, folder_id, created_at
     `;
 
     const { rows } = await this.pool.query(sql, params);
     if (rows.length === 0) return null;
-    const r = rows[0] as Record<string, unknown>;
-    return {
-      id: r.id as string,
-      pattern: r.pattern as string,
-      type: r.type as FilterRule["type"],
-      mode: r.mode as FilterRule["mode"],
-      breakoutEnabled: r.breakout_enabled as boolean,
-      createdAt: (r.created_at as Date).toISOString()
-    };
+    return this.mapFilterRow(rows[0] as Record<string, unknown>);
   }
 
   async deleteFilter(filterId: string): Promise<boolean> {
     const result = await this.pool.query(
       "DELETE FROM filter_rule WHERE id = $1 AND tenant_id = $2",
-      [filterId, this.tenantId]
+      [filterId, this.accountId],
     );
     return (result.rowCount ?? 0) > 0;
   }
@@ -502,7 +850,7 @@ export class PostgresStore {
   async listDigests(): Promise<Digest[]> {
     const { rows } = await this.pool.query(
       "SELECT id, created_at, start_ts, end_ts, title, body, entries_json FROM digest WHERE tenant_id = $1 ORDER BY created_at DESC",
-      [this.tenantId]
+      [this.accountId],
     );
     return rows.map((r: Record<string, unknown>) => ({
       id: r.id as string,
@@ -511,7 +859,7 @@ export class PostgresStore {
       endTs: (r.end_ts as Date).toISOString(),
       title: r.title as string,
       body: r.body as string,
-      entries: r.entries_json as Digest["entries"]
+      entries: r.entries_json as Digest["entries"],
     }));
   }
 
@@ -524,7 +872,13 @@ export class PostgresStore {
         await this.pool.query(
           `INSERT INTO event (tenant_id, idempotency_key, ts, type, payload_json)
            VALUES ($1, $2, $3, $4, $5)`,
-          [this.tenantId, event.idempotencyKey, event.ts, event.type, JSON.stringify(event.payload)]
+          [
+            this.accountId,
+            event.idempotencyKey,
+            event.ts,
+            event.type,
+            JSON.stringify(event.payload),
+          ],
         );
         accepted++;
       } catch (err: unknown) {
@@ -544,7 +898,7 @@ export class PostgresStore {
   async getSettings(): Promise<Settings> {
     const { rows } = await this.pool.query(
       "SELECT data FROM app_settings WHERE tenant_id = $1 AND key = 'main' LIMIT 1",
-      [this.tenantId]
+      [this.accountId],
     );
     if (rows.length === 0) {
       return DEFAULT_SETTINGS;
@@ -558,12 +912,14 @@ export class PostgresStore {
     await this.pool.query(
       `INSERT INTO app_settings (tenant_id, key, data) VALUES ($1, 'main', $2)
        ON CONFLICT (tenant_id, key) DO UPDATE SET data = $2`,
-      [this.tenantId, JSON.stringify(updated)]
+      [this.accountId, JSON.stringify(updated)],
     );
     return updated;
   }
 
-  async importOpml(feeds: { xmlUrl: string; title: string; htmlUrl: string | null; category: string | null }[]): Promise<{ imported: number; skipped: number }> {
+  async importOpml(
+    feeds: { xmlUrl: string; title: string; htmlUrl: string | null; category: string | null }[],
+  ): Promise<{ imported: number; skipped: number }> {
     const client = this.pool;
     try {
       await client.query("BEGIN");
@@ -594,10 +950,10 @@ export class PostgresStore {
         }
 
         const result = await client.query(
-          `INSERT INTO feed (tenant_id, url, url_normalized, title, site_url, folder_id, folder_confidence, weight, muted, trial)
-           VALUES ($1, $2, $3, $4, $5, $6, 0.5, 'neutral', false, false)
+          `INSERT INTO feed (tenant_id, url, url_normalized, title, site_url, folder_id, folder_confidence, weight, muted, trial, default_reader_mode)
+           VALUES ($1, $2, $3, $4, $5, $6, 0.5, 'neutral', false, false, NULL)
            ON CONFLICT (tenant_id, url_normalized) DO NOTHING`,
-          [this.tenantId, feed.xmlUrl, urlNormalized, feed.title, feed.htmlUrl, folderId]
+          [this.accountId, feed.xmlUrl, urlNormalized, feed.title, feed.htmlUrl, folderId],
         );
 
         if ((result.rowCount ?? 0) > 0) {
@@ -615,15 +971,38 @@ export class PostgresStore {
     }
   }
 
-  async searchClusters(query: SearchQuery): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
+  async searchClusters(
+    query: SearchQuery,
+  ): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
     const offset = query.cursor ? parseInt(query.cursor, 10) || 0 : 0;
     const limit = query.limit;
+    const whereConditions: string[] = [
+      "c.tenant_id = $2",
+      "i.tenant_id = $2",
+      "cm.tenant_id = $2",
+      "(rep_i.id IS NULL OR rep_i.tenant_id = $2)",
+      "i.search_vector @@ websearch_to_tsquery('english', $1)",
+    ];
+    const params: unknown[] = [query.q, this.accountId];
+    let nextParam = 3;
+
+    if (query.folderId) {
+      whereConditions.push(`c.folder_id = $${nextParam}`);
+      params.push(query.folderId);
+      nextParam++;
+    }
+    if (query.feedId) {
+      whereConditions.push(`i.feed_id = $${nextParam}`);
+      params.push(query.feedId);
+      nextParam++;
+    }
 
     const sql = `
       SELECT DISTINCT ON (c.id)
         c.id,
         COALESCE(rep_i.title, 'Untitled') AS headline,
         rep_i.hero_image_url,
+        COALESCE(f.id, '00000000-0000-0000-0000-000000000000') AS primary_feed_id,
         COALESCE(f.title, 'Unknown') AS primary_source,
         COALESCE(rep_i.published_at, c.created_at) AS primary_source_published_at,
         c.size AS outlet_count,
@@ -632,9 +1011,14 @@ export class PostgresStore {
         c.topic_id,
         t.name AS topic_name,
         rep_i.summary,
+        CASE
+          WHEN latest_filter_event.action = 'breakout_shown'
+          THEN COALESCE(latest_filter_event.rule_pattern, 'breakout_shown')
+          ELSE NULL
+        END AS muted_breakout_reason,
         rs.read_at,
         rs.saved_at,
-        ts_rank(i.search_vector, plainto_tsquery('english', $1)) AS rank
+        ts_rank(i.search_vector, websearch_to_tsquery('english', $1)) AS rank
       FROM item i
       JOIN cluster_member cm ON cm.item_id = i.id
       JOIN cluster c ON c.id = cm.cluster_id
@@ -643,11 +1027,18 @@ export class PostgresStore {
       LEFT JOIN folder fo ON c.folder_id = fo.id
       LEFT JOIN topic t ON c.topic_id = t.id
       LEFT JOIN read_state rs ON rs.cluster_id = c.id AND rs.tenant_id = c.tenant_id
-      WHERE c.tenant_id = $2
-        AND i.tenant_id = $2
-        AND cm.tenant_id = $2
-        AND (rep_i.id IS NULL OR rep_i.tenant_id = $2)
-        AND i.search_vector @@ plainto_tsquery('english', $1)
+      LEFT JOIN LATERAL (
+        SELECT fe.action, fr.pattern AS rule_pattern
+        FROM filter_event fe
+        LEFT JOIN filter_rule fr
+          ON fr.id = fe.rule_id
+         AND fr.tenant_id = fe.tenant_id
+        WHERE fe.cluster_id = c.id
+          AND fe.tenant_id = c.tenant_id
+        ORDER BY fe.ts DESC
+        LIMIT 1
+      ) latest_filter_event ON TRUE
+      WHERE ${whereConditions.join("\n        AND ")}
       ORDER BY c.id, rank DESC
     `;
 
@@ -655,57 +1046,80 @@ export class PostgresStore {
     const wrappedSql = `
       SELECT * FROM (${sql}) sub
       ORDER BY sub.rank DESC
-      OFFSET $3 LIMIT $4
+      OFFSET $${nextParam} LIMIT $${nextParam + 1}
     `;
 
-    const { rows } = await this.pool.query(wrappedSql, [query.q, this.tenantId, offset, limit + 1]);
+    params.push(offset, limit + 1);
+    const [{ rows }, settings] = await Promise.all([
+      this.pool.query(wrappedSql, params),
+      this.getSettings(),
+    ]);
 
     const hasMore = rows.length > limit;
-    const data: ClusterCard[] = rows.slice(0, limit).map((r: Record<string, unknown>) => ({
-      id: r.id as string,
-      headline: r.headline as string,
-      heroImageUrl: (r.hero_image_url as string) ?? null,
-      primarySource: r.primary_source as string,
-      primarySourcePublishedAt: (r.primary_source_published_at as Date).toISOString(),
-      outletCount: Number(r.outlet_count),
-      folderId: r.folder_id as string,
-      folderName: r.folder_name as string,
-      topicId: (r.topic_id as string) ?? null,
-      topicName: (r.topic_name as string) ?? null,
-      summary: (r.summary as string) ?? null,
-      mutedBreakoutReason: null,
-      isRead: r.read_at != null,
-      isSaved: r.saved_at != null
-    }));
+    const data: ClusterCard[] = rows.slice(0, limit).map((r: Record<string, unknown>) => {
+      const publishedAt = (r.primary_source_published_at as Date).toISOString();
+      return {
+        id: r.id as string,
+        headline: r.headline as string,
+        heroImageUrl: (r.hero_image_url as string) ?? null,
+        primarySource: r.primary_source as string,
+        primaryFeedId: r.primary_feed_id as string,
+        primarySourcePublishedAt: publishedAt,
+        outletCount: Number(r.outlet_count),
+        folderId: r.folder_id as string,
+        folderName: r.folder_name as string,
+        topicId: (r.topic_id as string) ?? null,
+        topicName: (r.topic_name as string) ?? null,
+        summary: (r.summary as string) ?? null,
+        mutedBreakoutReason: (r.muted_breakout_reason as string) ?? null,
+        displayMode: computeDisplayMode(
+          publishedAt,
+          settings.progressiveFreshHours,
+          settings.progressiveAgingDays,
+          settings.progressiveSummarizationEnabled,
+        ),
+        rankingExplainability: null,
+        isRead: r.read_at != null,
+        isSaved: r.saved_at != null,
+      };
+    });
 
     const nextCursor = hasMore ? String(offset + limit) : null;
     return { data, nextCursor };
   }
 
-  async exportOpml(): Promise<{ feeds: { xmlUrl: string; title: string; htmlUrl: string | null; folderName: string }[] }> {
-    const { rows } = await this.pool.query(`
+  async exportOpml(): Promise<{
+    feeds: { xmlUrl: string; title: string; htmlUrl: string | null; folderName: string }[];
+  }> {
+    const { rows } = await this.pool.query(
+      `
       SELECT f.url AS xml_url, f.title, f.site_url AS html_url, COALESCE(fo.name, 'Other') AS folder_name
       FROM feed f
       LEFT JOIN folder fo ON fo.id = f.folder_id
       WHERE f.tenant_id = $1
       ORDER BY fo.name, f.title
-    `, [this.tenantId]);
+    `,
+      [this.accountId],
+    );
 
     return {
       feeds: rows.map((r: Record<string, unknown>) => ({
         xmlUrl: r.xml_url as string,
         title: r.title as string,
         htmlUrl: (r.html_url as string) ?? null,
-        folderName: r.folder_name as string
-      }))
+        folderName: r.folder_name as string,
+      })),
     };
   }
 
-  async createAnnotation(clusterId: string, payload: CreateAnnotationRequest): Promise<Annotation | null> {
-    const check = await this.pool.query(
-      "SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2",
-      [clusterId, this.tenantId]
-    );
+  async createAnnotation(
+    clusterId: string,
+    payload: CreateAnnotationRequest,
+  ): Promise<Annotation | null> {
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
     if (check.rows.length === 0) {
       return null;
     }
@@ -714,7 +1128,7 @@ export class PostgresStore {
       `INSERT INTO annotation (tenant_id, cluster_id, highlighted_text, note, color)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, cluster_id, highlighted_text, note, color, created_at`,
-      [this.tenantId, clusterId, payload.highlightedText, payload.note ?? null, payload.color]
+      [this.accountId, clusterId, payload.highlightedText, payload.note ?? null, payload.color],
     );
 
     const r = rows[0] as Record<string, unknown>;
@@ -724,7 +1138,7 @@ export class PostgresStore {
       highlightedText: r.highlighted_text as string,
       note: (r.note as string) ?? null,
       color: r.color as Annotation["color"],
-      createdAt: (r.created_at as Date).toISOString()
+      createdAt: (r.created_at as Date).toISOString(),
     };
   }
 
@@ -735,7 +1149,7 @@ export class PostgresStore {
        WHERE cluster_id = $1
          AND tenant_id = $2
        ORDER BY created_at DESC`,
-      [clusterId, this.tenantId]
+      [clusterId, this.accountId],
     );
     return rows.map((r: Record<string, unknown>) => ({
       id: r.id as string,
@@ -743,14 +1157,14 @@ export class PostgresStore {
       highlightedText: r.highlighted_text as string,
       note: (r.note as string) ?? null,
       color: r.color as Annotation["color"],
-      createdAt: (r.created_at as Date).toISOString()
+      createdAt: (r.created_at as Date).toISOString(),
     }));
   }
 
   async deleteAnnotation(annotationId: string): Promise<boolean> {
     const result = await this.pool.query(
       "DELETE FROM annotation WHERE id = $1 AND tenant_id = $2",
-      [annotationId, this.tenantId]
+      [annotationId, this.accountId],
     );
     return (result.rowCount ?? 0) > 0;
   }
@@ -762,14 +1176,14 @@ export class PostgresStore {
       `INSERT INTO push_subscription (tenant_id, endpoint, p256dh, auth)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (tenant_id, endpoint) DO UPDATE SET p256dh = $3, auth = $4`,
-      [this.tenantId, endpoint, p256dh, auth]
+      [this.accountId, endpoint, p256dh, auth],
     );
   }
 
   async deletePushSubscription(endpoint: string): Promise<boolean> {
     const result = await this.pool.query(
       "DELETE FROM push_subscription WHERE endpoint = $1 AND tenant_id = $2",
-      [endpoint, this.tenantId]
+      [endpoint, this.accountId],
     );
     return (result.rowCount ?? 0) > 0;
   }
@@ -777,22 +1191,22 @@ export class PostgresStore {
   async getAllPushSubscriptions(): Promise<{ endpoint: string; p256dh: string; auth: string }[]> {
     const { rows } = await this.pool.query(
       "SELECT endpoint, p256dh, auth FROM push_subscription WHERE tenant_id = $1",
-      [this.tenantId]
+      [this.accountId],
     );
     return rows.map((r: Record<string, unknown>) => ({
       endpoint: r.endpoint as string,
       p256dh: r.p256dh as string,
-      auth: r.auth as string
+      auth: r.auth as string,
     }));
   }
 
   // ---------- Dwell tracking ----------
 
   async recordDwell(clusterId: string, seconds: number): Promise<boolean> {
-    const check = await this.pool.query(
-      "SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2",
-      [clusterId, this.tenantId]
-    );
+    const check = await this.pool.query("SELECT id FROM cluster WHERE id = $1 AND tenant_id = $2", [
+      clusterId,
+      this.accountId,
+    ]);
     if (check.rows.length === 0) {
       return false;
     }
@@ -804,7 +1218,7 @@ export class PostgresStore {
          tenant_id = EXCLUDED.tenant_id,
          dwell_seconds = read_state.dwell_seconds + $3,
          clicked_at = NOW()`,
-      [this.tenantId, clusterId, seconds]
+      [this.accountId, clusterId, seconds],
     );
     return true;
   }
@@ -812,11 +1226,18 @@ export class PostgresStore {
   // ---------- Reading stats ----------
 
   async getReadingStats(period: StatsPeriod): Promise<ReadingStats> {
-    const periodCondition = period === "all"
-      ? ""
-      : period === "30d"
-        ? "AND rs.read_at >= NOW() - INTERVAL '30 days'"
-        : "AND rs.read_at >= NOW() - INTERVAL '7 days'";
+    const periodCondition =
+      period === "all"
+        ? ""
+        : period === "30d"
+          ? "AND rs.read_at >= NOW() - INTERVAL '30 days'"
+          : "AND rs.read_at >= NOW() - INTERVAL '7 days'";
+    const eventPeriodCondition =
+      period === "all"
+        ? ""
+        : period === "30d"
+          ? "AND e.ts >= NOW() - INTERVAL '30 days'"
+          : "AND e.ts >= NOW() - INTERVAL '7 days'";
 
     // Articles read today / week / month
     const countsSql = `
@@ -828,8 +1249,52 @@ export class PostgresStore {
       WHERE rs.read_at IS NOT NULL
         AND rs.tenant_id = $1
     `;
-    const countsResult = await this.pool.query(countsSql, [this.tenantId]);
+    const countsResult = await this.pool.query(countsSql, [this.accountId]);
     const counts = countsResult.rows[0] as Record<string, unknown>;
+
+    const autoReadSql = `
+      SELECT
+        COUNT(*) FILTER (WHERE e.type = 'auto_read_on_scroll') AS on_scroll,
+        COUNT(*) FILTER (WHERE e.type = 'auto_read_on_open') AS on_open
+      FROM event e
+      WHERE e.tenant_id = $1
+        AND e.type IN ('auto_read_on_scroll', 'auto_read_on_open')
+        ${eventPeriodCondition}
+    `;
+    const autoReadResult = await this.pool.query(autoReadSql, [this.accountId]);
+    const autoReadCounts = autoReadResult.rows[0] as Record<string, unknown>;
+    const autoReadOnScrollCount = Number(autoReadCounts.on_scroll ?? 0);
+    const autoReadOnOpenCount = Number(autoReadCounts.on_open ?? 0);
+
+    const parseTelemetrySql = `
+      SELECT
+        COUNT(*) FILTER (WHERE e.type = 'feed_parse_success') AS parse_success,
+        COUNT(*) FILTER (WHERE e.type = 'feed_parse_failure') AS parse_failure,
+        COUNT(*) FILTER (
+          WHERE e.type = 'feed_parse_success'
+            AND COALESCE(e.payload_json->>'format', '') = 'rss'
+        ) AS format_rss,
+        COUNT(*) FILTER (
+          WHERE e.type = 'feed_parse_success'
+            AND COALESCE(e.payload_json->>'format', '') = 'atom'
+        ) AS format_atom,
+        COUNT(*) FILTER (
+          WHERE e.type = 'feed_parse_success'
+            AND COALESCE(e.payload_json->>'format', '') = 'rdf'
+        ) AS format_rdf,
+        COUNT(*) FILTER (
+          WHERE e.type = 'feed_parse_success'
+            AND COALESCE(e.payload_json->>'format', '') = 'json'
+        ) AS format_json
+      FROM event e
+      WHERE e.tenant_id = $1
+        AND e.type IN ('feed_parse_success', 'feed_parse_failure')
+        ${eventPeriodCondition}
+    `;
+    const parseTelemetryResult = await this.pool.query(parseTelemetrySql, [this.accountId]);
+    const parseTelemetry = parseTelemetryResult.rows[0] as Record<string, unknown>;
+    const feedParseSuccessCount = Number(parseTelemetry.parse_success ?? 0);
+    const feedParseFailureCount = Number(parseTelemetry.parse_failure ?? 0);
 
     // Average dwell time
     const avgDwellSql = `
@@ -839,7 +1304,7 @@ export class PostgresStore {
         AND rs.tenant_id = $1
       ${periodCondition}
     `;
-    const avgDwellResult = await this.pool.query(avgDwellSql, [this.tenantId]);
+    const avgDwellResult = await this.pool.query(avgDwellSql, [this.accountId]);
     const avgDwell = Number((avgDwellResult.rows[0] as Record<string, unknown>).avg_dwell);
 
     // Folder breakdown
@@ -855,10 +1320,10 @@ export class PostgresStore {
       GROUP BY fo.name
       ORDER BY cnt DESC
     `;
-    const folderResult = await this.pool.query(folderSql, [this.tenantId]);
+    const folderResult = await this.pool.query(folderSql, [this.accountId]);
     const folderBreakdown = folderResult.rows.map((r: Record<string, unknown>) => ({
       folderName: r.folder_name as string,
-      count: Number(r.cnt)
+      count: Number(r.cnt),
     }));
 
     // Top sources
@@ -876,10 +1341,10 @@ export class PostgresStore {
       ORDER BY cnt DESC
       LIMIT 5
     `;
-    const sourcesResult = await this.pool.query(sourcesSql, [this.tenantId]);
+    const sourcesResult = await this.pool.query(sourcesSql, [this.accountId]);
     const topSources = sourcesResult.rows.map((r: Record<string, unknown>) => ({
       feedTitle: r.feed_title as string,
-      count: Number(r.cnt)
+      count: Number(r.cnt),
     }));
 
     // Reading streak (consecutive days with at least 1 read)
@@ -904,7 +1369,7 @@ export class PostgresStore {
         0
       ) AS streak
     `;
-    const streakResult = await this.pool.query(streakSql, [this.tenantId]);
+    const streakResult = await this.pool.query(streakSql, [this.accountId]);
     const readingStreak = Number((streakResult.rows[0] as Record<string, unknown>).streak);
 
     // Peak reading hours
@@ -917,10 +1382,10 @@ export class PostgresStore {
       GROUP BY hour
       ORDER BY hour
     `;
-    const hoursResult = await this.pool.query(hoursSql, [this.tenantId]);
+    const hoursResult = await this.pool.query(hoursSql, [this.accountId]);
     const peakHours = hoursResult.rows.map((r: Record<string, unknown>) => ({
       hour: Number(r.hour),
-      count: Number(r.cnt)
+      count: Number(r.cnt),
     }));
 
     // Daily reads
@@ -933,41 +1398,57 @@ export class PostgresStore {
       GROUP BY read_date
       ORDER BY read_date
     `;
-    const dailyResult = await this.pool.query(dailySql, [this.tenantId]);
+    const dailyResult = await this.pool.query(dailySql, [this.accountId]);
     const dailyReads = dailyResult.rows.map((r: Record<string, unknown>) => ({
-      date: (r.read_date as Date).toISOString().split("T")[0]!,
-      count: Number(r.cnt)
+      date: (r.read_date as Date).toISOString().split("T")[0] ?? "",
+      count: Number(r.cnt),
     }));
 
     return {
       articlesReadToday: Number(counts.today),
       articlesReadWeek: Number(counts.week),
       articlesReadMonth: Number(counts.month),
+      autoReadOnScrollCount,
+      autoReadOnOpenCount,
+      autoReadTotalCount: autoReadOnScrollCount + autoReadOnOpenCount,
+      feedParseSuccessCount,
+      feedParseFailureCount,
+      feedParseByFormat: {
+        rss: Number(parseTelemetry.format_rss ?? 0),
+        atom: Number(parseTelemetry.format_atom ?? 0),
+        rdf: Number(parseTelemetry.format_rdf ?? 0),
+        json: Number(parseTelemetry.format_json ?? 0),
+      },
       avgDwellSeconds: Math.round(avgDwell),
       folderBreakdown,
       topSources,
       readingStreak,
       peakHours,
-      dailyReads
+      dailyReads,
     };
   }
 
   // ---------- Topic management ----------
 
-  async listTopics(): Promise<Array<{ id: string; name: string; clusterCount: number; createdAt: string }>> {
-    const { rows } = await this.pool.query(`
+  async listTopics(): Promise<
+    Array<{ id: string; name: string; clusterCount: number; createdAt: string }>
+  > {
+    const { rows } = await this.pool.query(
+      `
       SELECT t.id, t.name, t.created_at, COUNT(c.id)::int AS cluster_count
       FROM topic t
       LEFT JOIN cluster c ON c.topic_id = t.id AND c.tenant_id = t.tenant_id
       WHERE t.tenant_id = $1
       GROUP BY t.id
       ORDER BY cluster_count DESC, t.name
-    `, [this.tenantId]);
+    `,
+      [this.accountId],
+    );
     return rows.map((r: Record<string, unknown>) => ({
       id: r.id as string,
       name: r.name as string,
       clusterCount: Number(r.cluster_count),
-      createdAt: (r.created_at as Date).toISOString()
+      createdAt: (r.created_at as Date).toISOString(),
     }));
   }
 
@@ -975,7 +1456,7 @@ export class PostgresStore {
     // Prevent renaming the "Uncategorized" sentinel topic
     const result = await this.pool.query(
       "UPDATE topic SET name = $2 WHERE id = $1 AND tenant_id = $3 AND name != 'Uncategorized'",
-      [topicId, name, this.tenantId]
+      [topicId, name, this.accountId],
     );
     return (result.rowCount ?? 0) > 0;
   }
@@ -987,19 +1468,21 @@ export class PostgresStore {
        SET topic_id = (SELECT id FROM topic WHERE name = 'Uncategorized' AND tenant_id = $2 LIMIT 1)
        WHERE topic_id = $1
          AND tenant_id = $2`,
-      [topicId, this.tenantId]
+      [topicId, this.accountId],
     );
     const result = await this.pool.query(
       "DELETE FROM topic WHERE id = $1 AND tenant_id = $2 AND name != 'Uncategorized'",
-      [topicId, this.tenantId]
+      [topicId, this.accountId],
     );
     return (result.rowCount ?? 0) > 0;
   }
 
   async listPendingClassifications(): Promise<Array<{ feed: Feed; proposedTopics: FeedTopic[] }>> {
-    const { rows } = await this.pool.query(`
+    const { rows } = await this.pool.query(
+      `
       SELECT f.id, f.url, f.title, f.site_url, f.folder_id, f.folder_confidence,
              f.weight, f.muted, f.trial, f.classification_status, f.created_at, f.last_polled_at,
+             f.default_reader_mode,
              ft.topic_id, ft.status AS ft_status, ft.confidence, ft.proposed_at, ft.resolved_at,
              t.name AS topic_name
       FROM feed f
@@ -1011,7 +1494,9 @@ export class PostgresStore {
         AND f.classification_status = 'classified'
         AND ft.status = 'pending'
       ORDER BY f.created_at DESC, ft.confidence DESC
-    `, [this.tenantId]);
+    `,
+      [this.accountId],
+    );
 
     // Group by feed
     const feedMap = new Map<string, { feed: Feed; proposedTopics: FeedTopic[] }>();
@@ -1019,31 +1504,18 @@ export class PostgresStore {
       const feedId = r.id as string;
       if (!feedMap.has(feedId)) {
         feedMap.set(feedId, {
-          feed: {
-            id: feedId,
-            url: r.url as string,
-            title: r.title as string,
-            siteUrl: (r.site_url as string) ?? null,
-            folderId: r.folder_id as string,
-            folderConfidence: Number(r.folder_confidence),
-            weight: r.weight as Feed["weight"],
-            muted: r.muted as boolean,
-            trial: r.trial as boolean,
-            classificationStatus: r.classification_status as Feed["classificationStatus"],
-            createdAt: (r.created_at as Date).toISOString(),
-            lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
-          },
-          proposedTopics: []
+          feed: this.mapFeedRow(r),
+          proposedTopics: [],
         });
       }
-      feedMap.get(feedId)!.proposedTopics.push({
+      feedMap.get(feedId)?.proposedTopics.push({
         feedId,
         topicId: r.topic_id as string,
         topicName: r.topic_name as string,
         status: r.ft_status as FeedTopic["status"],
         confidence: Number(r.confidence),
         proposedAt: (r.proposed_at as Date).toISOString(),
-        resolvedAt: r.resolved_at ? (r.resolved_at as Date).toISOString() : null
+        resolvedAt: r.resolved_at ? (r.resolved_at as Date).toISOString() : null,
       });
     }
 
@@ -1051,7 +1523,8 @@ export class PostgresStore {
   }
 
   async getFeedTopics(feedId: string): Promise<FeedTopic[]> {
-    const { rows } = await this.pool.query(`
+    const { rows } = await this.pool.query(
+      `
       SELECT ft.feed_id, ft.topic_id, ft.status, ft.confidence, ft.proposed_at, ft.resolved_at,
              t.name AS topic_name
       FROM feed_topic ft
@@ -1060,7 +1533,9 @@ export class PostgresStore {
         AND ft.tenant_id = $2
         AND t.tenant_id = $2
       ORDER BY ft.confidence DESC
-    `, [feedId, this.tenantId]);
+    `,
+      [feedId, this.accountId],
+    );
 
     return rows.map((r: Record<string, unknown>) => ({
       feedId: r.feed_id as string,
@@ -1069,11 +1544,15 @@ export class PostgresStore {
       status: r.status as FeedTopic["status"],
       confidence: Number(r.confidence),
       proposedAt: (r.proposed_at as Date).toISOString(),
-      resolvedAt: r.resolved_at ? (r.resolved_at as Date).toISOString() : null
+      resolvedAt: r.resolved_at ? (r.resolved_at as Date).toISOString() : null,
     }));
   }
 
-  async resolveFeedTopic(feedId: string, topicId: string, action: "approve" | "reject"): Promise<boolean> {
+  async resolveFeedTopic(
+    feedId: string,
+    topicId: string,
+    action: "approve" | "reject",
+  ): Promise<boolean> {
     const status = action === "approve" ? "approved" : "rejected";
     const result = await this.pool.query(
       `UPDATE feed_topic
@@ -1081,7 +1560,7 @@ export class PostgresStore {
        WHERE feed_id = $1
          AND topic_id = $2
          AND tenant_id = $4`,
-      [feedId, topicId, status, this.tenantId]
+      [feedId, topicId, status, this.accountId],
     );
     if ((result.rowCount ?? 0) === 0) return false;
 
@@ -1091,13 +1570,13 @@ export class PostgresStore {
        FROM feed_topic
        WHERE feed_id = $1
          AND tenant_id = $2`,
-      [feedId, this.tenantId]
+      [feedId, this.accountId],
     );
     const pending = Number((rows[0] as Record<string, unknown>).pending);
     if (pending === 0) {
       await this.pool.query(
         "UPDATE feed SET classification_status = 'approved' WHERE id = $1 AND tenant_id = $2",
-        [feedId, this.tenantId]
+        [feedId, this.accountId],
       );
     }
 
@@ -1111,49 +1590,64 @@ export class PostgresStore {
        WHERE feed_id = $1
          AND status = 'pending'
          AND tenant_id = $2`,
-      [feedId, this.tenantId]
+      [feedId, this.accountId],
     );
     if ((result.rowCount ?? 0) === 0) return false;
 
     await this.pool.query(
       "UPDATE feed SET classification_status = 'approved' WHERE id = $1 AND tenant_id = $2",
-      [feedId, this.tenantId]
+      [feedId, this.accountId],
     );
 
     return true;
   }
 
   async getTopicDistribution(): Promise<{ topicName: string; count: number }[]> {
-    const { rows } = await this.pool.query(`
+    const { rows } = await this.pool.query(
+      `
       SELECT COALESCE(t.name, 'Uncategorized') AS topic_name, COUNT(*)::int AS cnt
       FROM cluster c
       LEFT JOIN topic t ON t.id = c.topic_id AND t.tenant_id = c.tenant_id
       WHERE c.tenant_id = $1
       GROUP BY t.name
       ORDER BY cnt DESC
-    `, [this.tenantId]);
+    `,
+      [this.accountId],
+    );
     return rows.map((r: Record<string, unknown>) => ({
       topicName: r.topic_name as string,
-      count: Number(r.cnt)
+      count: Number(r.cnt),
     }));
   }
 
   async getFolderDistribution(): Promise<{ folderName: string; count: number }[]> {
-    const { rows } = await this.pool.query(`
+    const { rows } = await this.pool.query(
+      `
       SELECT COALESCE(fo.name, 'Other') AS folder_name, COUNT(*)::int AS cnt
       FROM cluster c
       LEFT JOIN folder fo ON fo.id = c.folder_id
       WHERE c.tenant_id = $1
       GROUP BY fo.name
       ORDER BY cnt DESC
-    `, [this.tenantId]);
+    `,
+      [this.accountId],
+    );
     return rows.map((r: Record<string, unknown>) => ({
       folderName: r.folder_name as string,
-      count: Number(r.cnt)
+      count: Number(r.cnt),
     }));
   }
 
   private mapFeedRow(r: Record<string, unknown>): Feed {
+    const failureStageRaw = r.last_parse_failure_stage;
+    const lastParseFailureStage: Feed["lastParseFailureStage"] =
+      failureStageRaw === "url_validation" ||
+      failureStageRaw === "parse" ||
+      failureStageRaw === "http" ||
+      failureStageRaw === "network_or_unknown"
+        ? failureStageRaw
+        : null;
+
     return {
       id: r.id as string,
       url: r.url as string,
@@ -1166,8 +1660,74 @@ export class PostgresStore {
       trial: r.trial as boolean,
       classificationStatus: r.classification_status as Feed["classificationStatus"],
       createdAt: (r.created_at as Date).toISOString(),
-      lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null
+      lastPolledAt: r.last_polled_at ? (r.last_polled_at as Date).toISOString() : null,
+      lastParseSuccessAt: r.last_parse_success_at
+        ? (r.last_parse_success_at as Date).toISOString()
+        : null,
+      lastParseFailureAt: r.last_parse_failure_at
+        ? (r.last_parse_failure_at as Date).toISOString()
+        : null,
+      lastParseFailureStage,
+      lastParseFailureError: (r.last_parse_failure_error as string) ?? null,
+      defaultReaderMode: (r.default_reader_mode as Feed["defaultReaderMode"]) ?? null,
     };
+  }
+
+  private async getFeedByIdWithParseTelemetry(feedId: string): Promise<Feed | null> {
+    const { rows } = await this.pool.query(
+      `
+      WITH last_success AS (
+        SELECT
+          payload_json->>'feedId' AS feed_id,
+          MAX(ts) AS last_parse_success_at
+        FROM event
+        WHERE tenant_id = $1
+          AND type = 'feed_parse_success'
+          AND payload_json ? 'feedId'
+        GROUP BY payload_json->>'feedId'
+      ),
+      last_failure AS (
+        SELECT DISTINCT ON (payload_json->>'feedId')
+          payload_json->>'feedId' AS feed_id,
+          ts AS last_parse_failure_at,
+          NULLIF(payload_json->>'failureStage', '') AS last_parse_failure_stage,
+          NULLIF(payload_json->>'error', '') AS last_parse_failure_error
+        FROM event
+        WHERE tenant_id = $1
+          AND type = 'feed_parse_failure'
+          AND payload_json ? 'feedId'
+        ORDER BY payload_json->>'feedId', ts DESC
+      )
+      SELECT
+        f.id,
+        f.url,
+        f.title,
+        f.site_url,
+        f.folder_id,
+        f.folder_confidence,
+        f.weight,
+        f.muted,
+        f.trial,
+        f.classification_status,
+        f.created_at,
+        f.last_polled_at,
+        f.default_reader_mode,
+        ls.last_parse_success_at,
+        lf.last_parse_failure_at,
+        lf.last_parse_failure_stage,
+        lf.last_parse_failure_error
+      FROM feed f
+      LEFT JOIN last_success ls ON ls.feed_id = f.id::text
+      LEFT JOIN last_failure lf ON lf.feed_id = f.id::text
+      WHERE f.tenant_id = $1
+        AND f.id = $2
+      LIMIT 1
+    `,
+      [this.accountId, feedId],
+    );
+
+    if (rows.length === 0) return null;
+    return this.mapFeedRow(rows[0] as Record<string, unknown>);
   }
 }
 
