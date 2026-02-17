@@ -1,11 +1,12 @@
-import { type Job, type PgBoss } from "pg-boss";
-import type { Pool } from "pg";
 import { createAiRegistry } from "@rss-wrangler/contracts";
+import type { Pool } from "pg";
+import { type Job, type PgBoss } from "pg-boss";
 import type { WorkerEnv } from "../config/env";
 import { withAccountDbClient } from "../db-context";
 import { runFeedPipeline } from "../pipeline/run-feed-pipeline";
 import { backfillMissingFullText } from "../pipeline/stages/extract-fulltext";
 import { generateDigest } from "../pipeline/stages/generate-digest";
+import { detectTopicDrift } from "../pipeline/stages/detect-topic-drift";
 import { FeedService } from "../services/feed-service";
 import {
   ACCOUNT_DELETION_BATCH_SIZE,
@@ -13,6 +14,7 @@ import {
   processDueAccountDeletions
 } from "./account-deletion-automation";
 import { JOBS } from "./job-names";
+import { runProgressiveSummary } from "./progressive-summary";
 import { runRetentionCleanup } from "./retention-cleanup";
 
 interface Dependencies {
@@ -39,6 +41,8 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   await boss.createQueue(JOBS.generateDigestForAccount);
   await boss.createQueue(JOBS.processAccountDeletions);
   await boss.createQueue(JOBS.retentionCleanup);
+  await boss.createQueue(JOBS.progressiveSummary);
+  await boss.createQueue(JOBS.detectTopicDrift);
 
   await boss.schedule(JOBS.pollFeeds, toCron(env.WORKER_POLL_MINUTES), {}, {
     tz: "UTC"
@@ -293,6 +297,89 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
       };
     } catch (err) {
       console.error("[worker] retention cleanup failed", { error: err });
+      throw err;
+    }
+  });
+
+  // Progressive summarization: generate AI summaries for aging items every 2 hours
+  await boss.schedule(JOBS.progressiveSummary, "0 */2 * * *", {}, {
+    tz: "UTC"
+  });
+
+  await boss.work(JOBS.progressiveSummary, async () => {
+    try {
+      const accountIds = await feedService.listAccountIds();
+      let totalCandidates = 0;
+      let totalSummarized = 0;
+
+      for (const accountId of accountIds) {
+        const result = await withAccountDbClient(pool, accountId, async (client) => {
+          return runProgressiveSummary(client as unknown as Pool, accountId, aiProvider);
+        });
+        totalCandidates += result.candidates;
+        totalSummarized += result.summarized;
+      }
+
+      if (totalCandidates > 0 || totalSummarized > 0) {
+        console.info("[worker] progressive summary processed", {
+          totalCandidates,
+          totalSummarized
+        });
+      }
+
+      return { totalCandidates, totalSummarized };
+    } catch (err) {
+      console.error("[worker] progressive summary failed", { error: err });
+      throw err;
+    }
+  });
+
+  // Weekly topic drift detection: every Sunday at 3:00 AM UTC
+  await boss.schedule(JOBS.detectTopicDrift, "0 3 * * 0", {}, {
+    tz: "UTC"
+  });
+
+  await boss.work(JOBS.detectTopicDrift, async () => {
+    try {
+      const accountIds = await feedService.listAccountIds();
+      let totalFeeds = 0;
+      let totalDrifted = 0;
+
+      for (const accountId of accountIds) {
+        await withAccountDbClient(pool, accountId, async (client) => {
+          const accountPool = client as unknown as Pool;
+
+          // Find classified/approved feeds that haven't been checked recently (7+ days)
+          const feedsResult = await accountPool.query<{ id: string }>(
+            `SELECT id FROM feed
+             WHERE tenant_id = $1
+               AND classification_status IN ('classified', 'approved')
+               AND (classified_at IS NULL OR classified_at < NOW() - INTERVAL '7 days')
+             ORDER BY classified_at ASC NULLS FIRST
+             LIMIT 50`,
+            [accountId]
+          );
+
+          for (const row of feedsResult.rows) {
+            totalFeeds++;
+            const result = await detectTopicDrift(accountPool, accountId, row.id, aiProvider);
+            if (result?.driftDetected) {
+              totalDrifted++;
+            }
+          }
+        });
+      }
+
+      if (totalFeeds > 0) {
+        console.info("[worker] topic drift detection processed", {
+          totalFeeds,
+          totalDrifted
+        });
+      }
+
+      return { totalFeeds, totalDrifted };
+    } catch (err) {
+      console.error("[worker] topic drift detection failed", { error: err });
       throw err;
     }
   });
