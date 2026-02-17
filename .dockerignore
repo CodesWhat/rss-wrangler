@@ -1,0 +1,17 @@
+node_modules
+.next
+dist
+*.tgz
+.git
+.github
+.claude
+.playwright-mcp
+playwright-report
+e2e
+*.png
+*.md
+!db/README.md
+biome.json
+lefthook.yml
+vitest.config.ts
+playwright.config.ts
