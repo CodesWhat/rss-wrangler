@@ -3204,7 +3204,7 @@ body[data-home-active="true"] .main {
 .h3-header {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: var(--h3-sidebar-w, 240px) 1fr var(--h3-reader-w, 0px);
+  grid-template-columns: var(--h3-sidebar-w, 200px) 1fr var(--h3-reader-w, 0px);
   border-bottom: 2px solid var(--border-black);
   background: var(--bg-surface);
   min-height: 42px;
@@ -3261,7 +3261,7 @@ body[data-home-active="true"] .main {
 .h3-content {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: var(--h3-sidebar-w, 240px) 1fr var(--h3-reader-w, 0px);
+  grid-template-columns: var(--h3-sidebar-w, 200px) 1fr var(--h3-reader-w, 0px);
   min-height: 0;
   overflow: hidden;
 }
@@ -3269,7 +3269,6 @@ body[data-home-active="true"] .main {
 /* ── Sidebar ── */
 .feed-sidebar {
   background: var(--bg-sidebar);
-  border-right: 2px solid var(--border-black);
   display: flex;
   flex-direction: column;
   overflow: hidden;

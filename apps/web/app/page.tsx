@@ -574,7 +574,7 @@ function HomeFeed() {
         <div
           className="h3-hdr-sidebar"
           style={{
-            width: sidebarCollapsed ? 0 : 240,
+            width: sidebarCollapsed ? 0 : 200,
             overflow: "hidden",
             flexShrink: 0,
             display: "flex",
@@ -780,7 +780,7 @@ function HomeFeed() {
       <div
         className="h3-sidebar"
         style={{
-          width: sidebarCollapsed ? 0 : 240,
+          width: sidebarCollapsed ? 0 : 200,
           overflow: sidebarCollapsed ? "hidden" : undefined,
           flexShrink: 0,
         }}
