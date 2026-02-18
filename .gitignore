@@ -11,9 +11,17 @@ coverage
 .env.*
 !.env.example
 .DS_Store
+
+# Test artifacts
 tests/e2e/test-results/
 tests/e2e/playwright-report/
+
+# MCP / tooling
 .playwright-mcp/
-qa-*.png
+.planning/config.json
 .planning/agent-pass-cards/
+.planning/phases/
+
+# QA artifacts
+qa-*.png
 starthere.md

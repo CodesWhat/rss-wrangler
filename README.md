@@ -1,63 +1,74 @@
-# RSS Wrangler
+<div align="center">
 
-Open-source RSS reader with AI-powered story clustering, topic classification, smart digests, and feed discovery. Self-host for free with all features unlocked, or use the hosted service.
+<h1>RSS Wrangler</h1>
 
-## Tech Stack
+**Open-source RSS reader with AI-powered clustering, full-text extraction, and smart digests. Self-host on any machine for free.**
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Next.js 14, React 18, custom CSS (Brutalist Mono design system) |
-| API | Fastify 5, PostgreSQL 16, JWT auth (Better Auth for hosted) |
-| Worker | pg-boss (Postgres-backed job queue) |
-| AI | OpenAI (multi-provider abstraction planned) |
-| Search | Postgres FTS (tsvector/tsquery) |
-| Shared | TypeScript, Zod schemas (`packages/contracts`) |
+</div>
 
-## Project Structure
+<p align="center">
+  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler/commits/main"><img src="https://img.shields.io/github/last-commit/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Last commit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
+  <br>
+  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler/stargazers"><img src="https://img.shields.io/github/stars/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Stars"></a>
+  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler/issues"><img src="https://img.shields.io/github/issues/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Issues"></a>
+  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler"><img src="https://img.shields.io/github/repo-size/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Repo size"></a>
+</p>
 
-```
-apps/
-  web/        Next.js 14 PWA (port 3000)
-  api/        Fastify 5 REST API (port 4000)
-  worker/     Background jobs (feed polling, clustering, AI enrichment, digests)
-packages/
-  contracts/  Shared TypeScript types and Zod schemas
-db/
-  migrations/ PostgreSQL migrations (applied in order on startup)
-infra/
-  docker-compose.yml
-  .env.example
-```
+<h2 align="center">Screenshots</h2>
 
-## Quick Start (Docker Compose)
+---
+
+<table>
+<tr>
+<th align="center">3-Pane Reader</th>
+<th align="center">Article View</th>
+</tr>
+<tr>
+<td><img src="docs/assets/home-feed.png" alt="Home feed" width="400"></td>
+<td><img src="docs/assets/reader-pane.png" alt="Reader pane" width="400"></td>
+</tr>
+<tr>
+<th align="center">Source Management</th>
+<th align="center">Mobile</th>
+</tr>
+<tr>
+<td><img src="docs/assets/sources.png" alt="Sources" width="400"></td>
+<td align="center"><img src="docs/assets/mobile.png" alt="Mobile" width="200"></td>
+</tr>
+</table>
+
+<h2 align="center">Quick Start</h2>
+
+---
 
 ```bash
-git clone <repo-url> && cd rss-wrangler
+git clone https://github.com/s-b-e-n-s-o-n/rss-wrangler.git && cd rss-wrangler
 cp infra/.env.example infra/.env
 
-# Edit infra/.env — you MUST set:
-#   AUTH_JWT_SECRET  (random string, 32+ chars)
-#   AUTH_PASSWORD    (strong password for admin account)
-# Optional hosted auth hardening:
-#   REQUIRE_EMAIL_VERIFICATION=true
-#   RESEND_API_KEY=...
-#   EMAIL_FROM=RSS Wrangler <no-reply@your-domain.com>
-
+# Edit infra/.env — set AUTH_JWT_SECRET and AUTH_PASSWORD at minimum
 docker compose -f infra/docker-compose.yml up --build -d
 ```
 
-Services started:
-- **postgres** — PostgreSQL 16
-- **migrate** — one-shot SQL migration runner (exits after success)
-- **api** — Fastify API (container port 4000, host default `:4001`)
-- **worker** — feed polling, clustering, AI enrichment, digests
-- **web** — Next.js frontend (container port 3000, host default `:3001`)
+Open `http://localhost:3001` and log in.
 
-Access the web UI at `http://localhost:3001` (or your configured `HOST_WEB_PORT`). Login with the username/password from your `.env`, or create a workspace account via `/signup`.
+<details>
+<summary><strong>What gets started</strong></summary>
 
-## Local Development
+| Service | Description | Default Port |
+|---------|-------------|-------------|
+| **postgres** | PostgreSQL 16 | 5433 |
+| **migrate** | One-shot SQL migration runner (exits after success) | — |
+| **api** | Fastify REST API | 4001 |
+| **worker** | Feed polling, clustering, AI enrichment, digests | — |
+| **web** | Next.js frontend | 3001 |
 
-Requires Node.js >= 22 and a local PostgreSQL instance.
+</details>
+
+<details>
+<summary><strong>Local development (no Docker)</strong></summary>
+
+Requires Node.js >= 22 and PostgreSQL.
 
 ```bash
 npm install
@@ -71,91 +82,166 @@ npm run dev:worker   # Background jobs
 npm run dev:web      # Next.js on :3000
 ```
 
-## OrbStack Docker smoke test (recommended)
+</details>
 
-For self-host/free-user validation, run:
+<h2 align="center">Features</h2>
 
-```bash
-npm run orbstack:smoke
-```
+---
 
-This builds and boots the Compose stack, verifies API/web health, checks login, and confirms required services are running.
-Health checks run from inside containers, so they are not affected by local processes already using your host ports (defaults: `3001/4001`).
+<table>
+<tr>
+<td align="center" width="33%">
+<h3>3-Pane Reader</h3>
+Sidebar + article list + reader pane. Keyboard shortcuts (j/k/s/o/Esc). Smart feeds: All, Unread, Starred.
+</td>
+<td align="center" width="33%">
+<h3>Story Clustering</h3>
+Deduplication via simhash + Jaccard similarity. Multiple outlets covering the same story get grouped into one cluster.
+</td>
+<td align="center" width="33%">
+<h3>Full-Text Extraction</h3>
+Automatic full-text fetch from article URLs. Read complete articles without leaving the app.
+</td>
+</tr>
+<tr>
+<td align="center">
+<h3>AI Enrichment</h3>
+Topic classification, story summaries, and smart digests. Multi-provider: OpenAI, Anthropic, or local Ollama.
+</td>
+<td align="center">
+<h3>Feed Discovery</h3>
+500+ curated feeds in a browsable directory. Category-based suggestions based on your subscriptions.
+</td>
+<td align="center">
+<h3>Smart Filters</h3>
+Mute-with-breakout filter system. Auto-suppress noise, surface important stories that break through.
+</td>
+</tr>
+<tr>
+<td align="center">
+<h3>OPML Import/Export</h3>
+Bring your feeds from any reader. Export anytime. No lock-in.
+</td>
+<td align="center">
+<h3>Full-Text Search</h3>
+Postgres FTS with tsvector/tsquery. Search across titles, sources, and article content.
+</td>
+<td align="center">
+<h3>Daily Digests</h3>
+Auto-generated digest of top stories when you've been away. Optional AI narrative summaries.
+</td>
+</tr>
+<tr>
+<td align="center">
+<h3>Mobile Responsive</h3>
+Hamburger sidebar overlay, stacked layout on small screens. PWA installable.
+</td>
+<td align="center">
+<h3>Multi-Tenant</h3>
+Row-level security with Postgres RLS. Invite members to shared workspaces.
+</td>
+<td align="center">
+<h3>Privacy Controls</h3>
+GDPR-ready consent manager. Data export and account deletion built in.
+</td>
+</tr>
+</table>
 
-## Scripts
+<h2 align="center">Self-Hosting</h2>
 
-| Command | Description |
-|---------|-------------|
-| `npm run dev:web` | Start Next.js dev server |
-| `npm run dev:api` | Start Fastify dev server (tsx watch) |
-| `npm run dev:worker` | Start worker (tsx watch) |
-| `npm run build` | Build all packages |
-| `npm test` | Run tests (Vitest) |
-| `npm run test:coverage` | Generate coverage report |
-| `npm run test:coverage:baseline` | Refresh ratcheted coverage baseline |
-| `npm run test:coverage:policy` | Check coverage policy gates |
-| `npm run typecheck` | Type-check all packages |
-| `npm run lint` | Lint all packages |
-| `npm run hosted:smoke -- --base-url <api-url>` | Hosted smoke checks (health/auth/settings) |
+---
 
-## Environment Variables
+All features are unlocked when self-hosted. No license keys, no feature gates, no phone-home.
 
-See `infra/.env.example` for the full list. Key variables:
+Docker Compose on any Linux server, NAS (Synology, QNAP, etc.), or cloud VM. Runs on ARM64 and AMD64.
+
+<details>
+<summary><strong>Environment variables</strong></summary>
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `AUTH_JWT_SECRET` | Yes | JWT signing secret (min 32 chars) |
 | `AUTH_USERNAME` | Yes | Admin username |
 | `AUTH_PASSWORD` | Yes | Admin password |
-| `APP_BASE_URL` | No | Base URL used in verification/reset email links (default: `http://localhost:3001`) |
-| `REQUIRE_EMAIL_VERIFICATION` | No | Require verified email before login (`true`/`false`, default: `false`) |
-| `RESEND_API_KEY` | No | Resend API key for transactional emails |
-| `EMAIL_FROM` | No | Sender for verification/reset emails |
-| `LEMON_SQUEEZY_API_KEY` | Hosted only | Lemon Squeezy API key for checkout + portal API calls |
-| `LEMON_SQUEEZY_STORE_ID` | Hosted only | Lemon Squeezy store ID used when creating checkouts |
-| `LEMON_SQUEEZY_WEBHOOK_SECRET` | Hosted only | Shared secret used to verify Lemon webhook signatures |
-| `LEMON_SQUEEZY_VARIANT_PRO` | Hosted only | Variant ID mapped to hosted `pro` plan |
-| `LEMON_SQUEEZY_VARIANT_PRO_AI` | Hosted only | Variant ID mapped to hosted `pro_ai` plan |
-| `LEMON_SQUEEZY_VARIANT_PRO_ANNUAL` | Hosted only | Variant ID mapped to hosted `pro` annual plan |
-| `LEMON_SQUEEZY_VARIANT_PRO_AI_ANNUAL` | Hosted only | Variant ID mapped to hosted `pro_ai` annual plan |
-| `BILLING_ALERT_WEBHOOK_URL` | Hosted only | Optional alert sink URL for billing webhook failures |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `WORKER_POLL_MINUTES` | No | Feed poll interval in minutes (default: 60) |
-| `WORKER_RETENTION_MINUTES` | No | Retention cleanup interval in minutes (default: 1440) |
-| `OPENAI_API_KEY` | No | Required for AI features (summaries, topic classification) |
+| `APP_BASE_URL` | No | Base URL for email links (default: `http://localhost:3001`) |
+| `REQUIRE_EMAIL_VERIFICATION` | No | Require verified email before login (default: `false`) |
+| `RESEND_API_KEY` | No | Resend API key for transactional emails |
+| `WORKER_POLL_MINUTES` | No | Feed poll interval (default: `60`) |
+| `OPENAI_API_KEY` | No | OpenAI key for AI features |
+| `ANTHROPIC_API_KEY` | No | Anthropic key for AI features |
+| `AI_PROVIDER` | No | `openai`, `anthropic`, or `ollama` |
+| `OLLAMA_BASE_URL` | No | Ollama server URL for local AI |
 
-## Features
+</details>
 
-- Feed polling with conditional GET (ETag + Last-Modified)
-- Story clustering and deduplication (simhash + Jaccard similarity)
-- Feed-level LLM topic classification with approval workflow
-- AI-generated daily digests
-- Full-text search (Postgres FTS)
-- Mute-with-breakout filter system
-- Keyboard shortcuts
-- Multiple view layouts (compact, card, list)
-- OPML import and export
-- Push notifications
-- Annotations and highlights
-- Privacy consent controls (necessary-only default, hosted non-essential opt-in)
-- Feed discovery directory (500+ curated feeds)
-- PWA installable
-- Reading stats dashboard
+<details>
+<summary><strong>Reverse proxy (Caddy, nginx, Traefik)</strong></summary>
 
-## Self-Hosting
+Set `NEXT_PUBLIC_API_BASE_URL` to your public API URL and rebuild the web container:
 
-All features are unlocked when self-hosted. No license keys, no feature gates, no phone-home.
+```bash
+# In infra/.env
+NEXT_PUBLIC_API_BASE_URL=https://api.your-domain.com
+APP_BASE_URL=https://your-domain.com
 
-Docker Compose on any Linux server, NAS (Synology, etc.), or cloud VM. See [Quick Start](#quick-start-docker-compose) above.
+docker compose -f infra/docker-compose.yml up --build -d
+```
 
-## Render Blueprints
+`NEXT_PUBLIC_*` vars are inlined at build time by Next.js, so a rebuild is required when changing them.
 
-- `render.free.yaml` - free-tier smoke profile (API + web + Postgres, no worker)
-- `render.yaml` - hosted dogfood baseline (API + worker + web + Postgres on starter plans)
+</details>
 
-Both profiles are documented in `infra/README.md`.
+<h2 align="center">Architecture</h2>
 
-## Hosted Service (Planned)
+---
+
+```
+apps/
+  web/        Next.js 14 frontend (React 18, custom CSS)
+  api/        Fastify 5 REST API (JWT auth, Postgres RLS)
+  worker/     pg-boss background jobs (polling, clustering, AI, digests)
+packages/
+  contracts/  Shared TypeScript types and Zod schemas
+db/
+  migrations/ Sequential SQL migrations (applied on startup)
+infra/
+  docker-compose.yml
+```
+
+<details>
+<summary><strong>Tech stack</strong></summary>
+
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 14, React 18, custom CSS (Brutalist Mono design system) |
+| API | Fastify 5, PostgreSQL 16, JWT auth (Better Auth) |
+| Worker | pg-boss (Postgres-backed job queue) |
+| AI | Multi-provider: OpenAI, Anthropic, Ollama |
+| Search | Postgres FTS (tsvector/tsquery) |
+| Email | Resend (transactional) |
+| Shared | TypeScript, Zod schemas, Biome linter |
+
+</details>
+
+<details>
+<summary><strong>Scripts</strong></summary>
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev:web` | Next.js dev server |
+| `npm run dev:api` | Fastify dev server (tsx watch) |
+| `npm run dev:worker` | Worker dev server (tsx watch) |
+| `npm run build` | Build all packages |
+| `npm test` | Run tests (Vitest) |
+| `npm run typecheck` | Type-check all packages |
+| `npm run lint` | Lint with Biome |
+
+</details>
+
+<h2 align="center">Hosted Service (Planned)</h2>
+
+---
 
 | Tier | Price | Highlights |
 |------|-------|-----------|
@@ -163,27 +249,43 @@ Both profiles are documented in `infra/README.md`.
 | Pro | $7/mo ($70/yr) | Unlimited feeds, 1yr retention, 10min refresh, full-text search |
 | Pro + AI | $14/mo ($140/yr) | AI summaries, topic classification, smart digests |
 
-## Architecture Decisions
+Self-hosted users get all Pro + AI features for free.
 
-Technical decisions are documented in `.planning/`:
+<h2 align="center">Roadmap</h2>
 
-- [`MONETIZATION.md`](.planning/MONETIZATION.md) — pricing tiers, locked decisions table, feature gate map
-- [`COMPETITIVE_ROADMAP.md`](.planning/COMPETITIVE_ROADMAP.md) — 10-phase implementation roadmap (84 features)
-- [`FEATURE_AUDIT.md`](.planning/FEATURE_AUDIT.md) — current implementation status
-- [`DISCOVERY.md`](.planning/DISCOVERY.md) — feed discovery engine architecture
-- [`PHASED_IMPLEMENTATION_PLAYBOOK.md`](.planning/PHASED_IMPLEMENTATION_PLAYBOOK.md) — provider stack, quality gates
+---
 
-## Testing
+| Phase | Theme | Status |
+|-------|-------|--------|
+| 0 | Platform hardening, Docker Compose, CI/CD | Done |
+| 1 | 3-pane reader, full-text extraction, reader mode | Done |
+| 2 | Ranking personalization, mark-read tuning | Next |
+| 3 | AI enrichment pipeline (multi-provider) | Done |
+| 4 | Feed discovery engine | Partial |
+| 5 | Notifications (push, email digest) | Partial |
+| 6 | Billing integration (Lemon Squeezy) | Wired |
+| 7 | Mobile PWA polish | Planned |
+| 8 | Annotations and highlights | Done |
+| 9 | Privacy, GDPR, data export | Done |
 
-Coverage thresholds and CI rules are documented in `.planning/TEST_COVERAGE_POLICY.md`.
+---
 
-```bash
-npm test                    # Run all tests
-npm run test:coverage       # Generate coverage report
-npm run test:coverage:baseline  # Refresh coverage baseline (intentional ratchet)
-npm run test:coverage:policy  # Check against policy gates
-```
+<div align="center">
 
-## License
+### Built With
 
-AGPL-3.0-only — see `LICENSE`.
+[![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=fff)](https://www.typescriptlang.org/)
+[![Next.js](https://img.shields.io/badge/Next.js_14-000?logo=nextdotjs&logoColor=fff)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React_18-61DAFB?logo=react&logoColor=000)](https://react.dev/)
+[![Fastify](https://img.shields.io/badge/Fastify_5-000?logo=fastify&logoColor=fff)](https://fastify.dev/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL_16-4169E1?logo=postgresql&logoColor=fff)](https://www.postgresql.org/)
+[![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=fff)](https://vitest.dev/)
+[![Biome](https://img.shields.io/badge/Biome-60a5fa?logo=biome&logoColor=fff)](https://biomejs.dev/)
+[![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://www.docker.com/)
+[![Built with AI](https://img.shields.io/badge/Built_with_AI-000000?style=flat&logo=anthropic&logoColor=white)](https://claude.ai/)
+
+---
+
+**[AGPL-3.0 License](LICENSE)**
+
+</div>
