@@ -535,7 +535,7 @@ function HomeFeed() {
   // -------------------------------------------------------------------------
   // Grid column computation
   // -------------------------------------------------------------------------
-  const sidebarW = sidebarCollapsed ? 0 : 240;
+  const sidebarW = sidebarCollapsed ? 0 : 200;
   const readerFraction = selectedClusterId
     ? readerSize === "S"
       ? 0.35
@@ -575,6 +575,8 @@ function HomeFeed() {
           className="h3-hdr-sidebar"
           style={{
             width: sidebarCollapsed ? 0 : 200,
+            padding: sidebarCollapsed ? 0 : undefined,
+            borderRight: sidebarCollapsed ? "none" : undefined,
             overflow: "hidden",
             flexShrink: 0,
             display: "flex",
@@ -782,6 +784,7 @@ function HomeFeed() {
         style={{
           width: sidebarCollapsed ? 0 : 200,
           overflow: sidebarCollapsed ? "hidden" : undefined,
+          borderRight: sidebarCollapsed ? "none" : undefined,
           flexShrink: 0,
         }}
       >
