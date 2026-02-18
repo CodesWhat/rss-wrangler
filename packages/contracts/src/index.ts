@@ -396,6 +396,7 @@ export const signupRequestSchema = z.object({
   accountName: z.string().trim().min(2).max(100).optional(),
   /** Preferred field name -- falls back to tenantSlug */
   accountSlug: accountSlugSchema.optional(),
+  inviteCode: z.string().trim().min(1).max(256).optional(),
 });
 export type SignupRequest = z.infer<typeof signupRequestSchema>;
 

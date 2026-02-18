@@ -96,7 +96,7 @@ export default function SignupPage() {
             value={inviteCode}
             onChange={(e) => setInviteCode(e.target.value)}
             className="input"
-            placeholder="Required to join an existing account"
+            placeholder="Enter invite code"
           />
           {error ? <p className="error-text">{error}</p> : null}
           <button type="submit" className="button button-primary" disabled={submitting}>

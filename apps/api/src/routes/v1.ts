@@ -279,6 +279,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
   app.post("/v1/auth/signup", async (request, reply) => {
     const payload = signupRequestSchema.parse(request.body);
+
+    if (env.INVITE_CODE && payload.inviteCode !== env.INVITE_CODE) {
+      return reply.forbidden("valid invite code required to sign up");
+    }
+
     const result = await auth.signup(payload);
 
     if (result === "account_slug_taken") {
@@ -299,6 +304,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
   app.post("/v1/auth/join", async (request, reply) => {
     const payload = joinAccountRequestSchema.parse(request.body);
+
+    if (env.INVITE_CODE && payload.inviteCode !== env.INVITE_CODE) {
+      return reply.forbidden("valid invite code required to sign up");
+    }
+
     const result = await auth.joinAccount(payload);
 
     if (result === "account_not_found") {

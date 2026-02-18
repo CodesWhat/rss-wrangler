@@ -37,6 +37,7 @@ const envSchema = z
     AI_PROVIDER: z.string().optional(),
     OLLAMA_BASE_URL: z.string().optional(),
     RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
+    INVITE_CODE: z.string().optional(),
   })
   .refine((env) => env.AUTH_JWT_SECRET !== "change-me-change-me", {
     message: "AUTH_JWT_SECRET must not use the placeholder value",
