@@ -1810,6 +1810,30 @@ select {
   padding-bottom: 0;
 }
 
+/* Auth pages: hide sidebar, full-width main */
+.app-shell:has(.login-container) {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell:has(.login-container) .sidebar {
+  display: none;
+}
+
+.app-shell:has(.login-container) .topbar {
+  display: none;
+}
+
+.app-shell:has(.login-container) .bottom-bar {
+  display: none;
+}
+
+.app-shell:has(.login-container) .main {
+  padding-left: 0;
+  padding-right: 0;
+  grid-column: unset;
+}
+
 /* ========================================
    SOURCES / FEED TABLE
    ======================================== */

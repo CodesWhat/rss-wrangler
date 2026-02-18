@@ -1,10 +1,10 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-COPY package.json tsconfig.base.json ./
+COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY apps/api/package.json apps/api/package.json
-RUN npm install --ignore-scripts
+RUN npm ci --ignore-scripts
 
 COPY packages/contracts packages/contracts
 COPY apps/api apps/api
