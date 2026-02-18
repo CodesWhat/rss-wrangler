@@ -771,7 +771,31 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       const store = storeFor(request);
-      return store.addFeed(payload);
+      const feed = await store.addFeed(payload);
+
+      // Queue immediate poll so the user sees stories right away
+      const authContext = request.authContext;
+      if (authContext) {
+        jobs
+          .send(PROCESS_FEED_JOB, {
+            id: feed.id,
+            accountId: authContext.accountId,
+            tenantId: authContext.accountId,
+            url: feed.url,
+            title: feed.title,
+            siteUrl: feed.siteUrl,
+            folderId: feed.folderId,
+            weight: feed.weight,
+            etag: null,
+            lastModified: null,
+            lastPolledAt: null,
+            classificationStatus: feed.classificationStatus ?? "pending_classification",
+            backfillSince: null,
+          })
+          .catch((err: unknown) => request.log.warn({ err, feedId: feed.id }, "initial poll queue failed"));
+      }
+
+      return feed;
     });
 
     protectedRoutes.patch("/v1/feeds/:id", async (request, reply) => {
