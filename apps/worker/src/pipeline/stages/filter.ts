@@ -179,7 +179,7 @@ export async function preFilterSoftGate(
         // Item does not match any keep filter in its scope -- hide it
         results.set(item.itemId, {
           action: "hidden",
-          ruleId: scopedKeepRules[0]?.id,
+          ruleId: scopedKeepRules[0]?.id ?? null,
           breakoutReason: null,
         });
         continue;

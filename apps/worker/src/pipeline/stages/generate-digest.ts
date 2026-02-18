@@ -338,7 +338,7 @@ function buildDigestBody(entries: DigestEntry[]): string {
 
   const lines: string[] = [];
 
-  if (sections.top_picks?.length > 0) {
+  if ((sections.top_picks?.length ?? 0) > 0) {
     lines.push("## Top Picks");
     for (const e of sections.top_picks!) {
       lines.push(`- ${e.headline}`);
@@ -346,7 +346,7 @@ function buildDigestBody(entries: DigestEntry[]): string {
     lines.push("");
   }
 
-  if (sections.big_stories?.length > 0) {
+  if ((sections.big_stories?.length ?? 0) > 0) {
     lines.push("## Big Stories");
     for (const e of sections.big_stories!) {
       lines.push(`- ${e.headline}`);
@@ -354,7 +354,7 @@ function buildDigestBody(entries: DigestEntry[]): string {
     lines.push("");
   }
 
-  if (sections.quick_scan?.length > 0) {
+  if ((sections.quick_scan?.length ?? 0) > 0) {
     lines.push("## Quick Scan");
     for (const e of sections.quick_scan!) {
       const suffix = e.oneLiner ? ` — ${e.oneLiner}` : "";
