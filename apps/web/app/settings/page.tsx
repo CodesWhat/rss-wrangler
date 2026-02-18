@@ -4,7 +4,6 @@ import type {
   AccountDeletionStatus,
   AccountEntitlements,
   AiMode,
-  AiProvider,
   AiUsageSummary,
   BillingInterval,
   BillingOverview,
@@ -768,12 +767,6 @@ function BillingSection() {
   );
 }
 
-function maskKey(key: string): string {
-  if (!key) return "";
-  if (key.length <= 8) return "\u2022".repeat(key.length);
-  return key.slice(0, 3) + "\u2022".repeat(Math.min(key.length - 7, 20)) + key.slice(-4);
-}
-
 function SettingsContent() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [savedSettings, setSavedSettings] = useState<Settings | null>(null);
@@ -783,9 +776,8 @@ function SettingsContent() {
   const [savingFields, setSavingFields] = useState<Set<string>>(new Set());
   const [savedFields, setSavedFields] = useState<Set<string>>(new Set());
 
-  // API key editing state
-  const [editingKey, setEditingKey] = useState(false);
-  const [keyDraft, setKeyDraft] = useState("");
+  // API key editing state (retained for backward compat with self-hosted settings API)
+  // UI fields hidden -- hosted mode uses server-side keys exclusively
 
   // Feeds and folders for scope selector
   const [feeds, setFeeds] = useState<Feed[]>([]);
@@ -895,24 +887,6 @@ function SettingsContent() {
         )}
       </>
     );
-  }
-
-  async function handleSaveApiKey() {
-    if (!settings || !keyDraft.trim()) return;
-    const next = { ...settings, openaiApiKey: keyDraft.trim() };
-    setSettings(next);
-    setEditingKey(false);
-    await doSave(next, "openaiApiKey");
-    setKeyDraft("");
-  }
-
-  async function handleClearApiKey() {
-    if (!settings) return;
-    const next = { ...settings, openaiApiKey: "" };
-    setSettings(next);
-    setEditingKey(false);
-    setKeyDraft("");
-    await doSave(next, "openaiApiKey");
   }
 
   async function handleManualSave(e: FormEvent) {
@@ -1051,10 +1025,8 @@ function SettingsContent() {
     return <p className="muted">Loading settings...</p>;
   }
 
-  const hasKey = !!(settings.openaiApiKey && settings.openaiApiKey.length > 0);
-
   const sections = [
-    { id: "ai-provider", label: "AI Provider" },
+    { id: "ai-settings", label: "AI Settings" },
     { id: "general", label: "General" },
     { id: "billing", label: "Billing" },
     { id: "ai-usage", label: "AI Usage" },
@@ -1089,15 +1061,13 @@ function SettingsContent() {
       </div>
 
       <div className="settings-layout">
-        {/* AI Provider section */}
-        <section className="section-card" id="ai-provider">
-          <h2>
-            AI Provider
-            {savedFields.has("openaiApiKey") && (
-              <span className="key-status key-status-active saved-indicator-lg">SAVED</span>
-            )}
-          </h2>
-          <p className="muted">Configure the AI backend for summaries and digests.</p>
+        {/* AI Settings section */}
+        <section className="section-card" id="ai-settings">
+          <h2>AI Settings</h2>
+          <p className="muted">
+            Control AI-powered features like summaries and digests. AI runs on
+            server-managed keys -- no configuration needed.
+          </p>
 
           <div className="settings-form">
             <label>
@@ -1113,88 +1083,7 @@ function SettingsContent() {
             </label>
 
             <label>
-              {fieldLabel("aiProvider", "Provider")}
-              <select
-                value={settings.aiProvider}
-                onChange={(e) => updateField("aiProvider", e.target.value as AiProvider)}
-              >
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="local">Local</option>
-              </select>
-            </label>
-
-            <div className="key-section">
-              <span className="key-label">API key</span>
-              {editingKey ? (
-                <div className="key-edit-row">
-                  <input
-                    type="password"
-                    placeholder="sk-..."
-                    value={keyDraft}
-                    onChange={(e) => setKeyDraft(e.target.value)}
-                    className="input"
-                    autoComplete="off"
-                    aria-label="API key"
-                  />
-                  <button
-                    type="button"
-                    className="button button-primary button-small"
-                    onClick={handleSaveApiKey}
-                    disabled={!keyDraft.trim()}
-                  >
-                    Save key
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-small"
-                    onClick={() => {
-                      setEditingKey(false);
-                      setKeyDraft("");
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <div className="key-display-row">
-                  {hasKey ? (
-                    <>
-                      <code className="key-masked">{maskKey(settings.openaiApiKey!)}</code>
-                      <span className="key-status key-status-active">Active</span>
-                      <button
-                        type="button"
-                        className="button button-small"
-                        onClick={() => setEditingKey(true)}
-                      >
-                        Change
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-small button-danger"
-                        onClick={handleClearApiKey}
-                      >
-                        Remove
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="muted">No key set</span>
-                      <button
-                        type="button"
-                        className="button button-small button-primary"
-                        onClick={() => setEditingKey(true)}
-                      >
-                        Add key
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <label>
-              {fieldLabel("monthlyAiCapUsd", "Monthly AI cap ($)")}
+              {fieldLabel("monthlyAiCapUsd", "Monthly AI cost cap ($)")}
               <input
                 type="number"
                 min={0}
@@ -1203,15 +1092,6 @@ function SettingsContent() {
                 onChange={(e) => updateField("monthlyAiCapUsd", Number(e.target.value))}
                 className="input"
               />
-            </label>
-
-            <label className="checkbox-label">
-              <input
-                type="checkbox"
-                checked={settings.aiFallbackToLocal}
-                onChange={(e) => updateField("aiFallbackToLocal", e.target.checked)}
-              />
-              {fieldLabel("aiFallbackToLocal", "Fallback to local on cap hit")}
             </label>
           </div>
         </section>
