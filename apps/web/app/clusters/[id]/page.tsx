@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { getClusterAiSummary, getClusterDetail } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { stripHtml } from "@/lib/strip-html";
 
 function isSafeUrl(url: string): boolean {
   try {
@@ -160,8 +161,13 @@ function ClusterDetailView() {
     );
   }
 
-  const storyLabel = (detail.cluster.topicName ?? detail.cluster.folderName).toUpperCase();
-  const storyText = detail.storySoFar ?? "No story summary is available yet.";
+  const rawTopic = (detail.cluster.topicName ?? "").trim().toLowerCase();
+  const isPlaceholderTopic =
+    !rawTopic || rawTopic === "other" || rawTopic === "uncategorized" || rawTopic === "general";
+  const storyLabel = (
+    isPlaceholderTopic ? detail.cluster.folderName : detail.cluster.topicName!
+  ).toUpperCase();
+  const storyText = stripHtml(detail.storySoFar ?? "No story summary is available yet.");
   const storyStateLabel = storyTextStateLabel(detail);
   const heroImage =
     detail.cluster.heroImageUrl && isSafeUrl(detail.cluster.heroImageUrl)
@@ -206,7 +212,7 @@ function ClusterDetailView() {
         )}
 
         {detail.cluster.summary && (
-          <p className="cluster-detail-summary">{detail.cluster.summary}</p>
+          <p className="cluster-detail-summary">{stripHtml(detail.cluster.summary)}</p>
         )}
 
         {primaryMember && (
@@ -296,9 +302,11 @@ function ClusterDetailView() {
             aria-labelledby="reader-tab-feed"
           >
             <p className="cluster-story-text">
-              {detail.cluster.summary ??
-                detail.storySoFar ??
-                "No feed preview is available for this story."}
+              {stripHtml(
+                detail.cluster.summary ??
+                  detail.storySoFar ??
+                  "No feed preview is available for this story.",
+              )}
             </p>
           </div>
         )}
@@ -352,7 +360,7 @@ function ClusterDetailView() {
           >
             <p className="muted cluster-story-state">{storyStateLabel}</p>
             <p className="cluster-story-text">
-              {detail.storySoFar ?? "No extracted text is available yet."}
+              {stripHtml(detail.storySoFar ?? "No extracted text is available yet.")}
             </p>
           </div>
         )}

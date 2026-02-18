@@ -95,7 +95,9 @@ export function FeedSidebar({
         </div>
 
         <div className="fs-section-title">{"// folders"}</div>
-        {folders.map((folder) => {
+        {folders
+          .filter((folder) => (feedsByFolder.get(folder.id) ?? []).length > 0)
+          .map((folder) => {
           const folderFeeds = feedsByFolder.get(folder.id) ?? [];
           const isCollapsed = collapsedFolders.has(folder.id);
           const feedCount = folderFeeds.length;

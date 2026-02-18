@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { XIcon } from "@/components/icons";
 import { getClusterDetail } from "@/lib/api";
 import { cn } from "@/lib/cn";
+import { stripHtml } from "@/lib/strip-html";
 
 function isSafeUrl(url: string): boolean {
   try {
@@ -164,7 +165,12 @@ export function ReaderPanel({ clusterId, onClose }: ReaderPanelProps) {
     );
   }
 
-  const storyLabel = (detail.cluster.topicName ?? detail.cluster.folderName).toUpperCase();
+  const rawTopic = (detail.cluster.topicName ?? "").trim().toLowerCase();
+  const isPlaceholderTopic =
+    !rawTopic || rawTopic === "other" || rawTopic === "uncategorized" || rawTopic === "general";
+  const storyLabel = (
+    isPlaceholderTopic ? detail.cluster.folderName : detail.cluster.topicName!
+  ).toUpperCase();
   const storyStateLabel = storyTextStateLabel(detail);
   const heroImage =
     detail.cluster.heroImageUrl && isSafeUrl(detail.cluster.heroImageUrl)
@@ -271,9 +277,11 @@ export function ReaderPanel({ clusterId, onClose }: ReaderPanelProps) {
         {readerMode === "feed" && (
           <div className="reader-panel-tab-content">
             <p className="cluster-story-text">
-              {detail.cluster.summary ??
-                detail.storySoFar ??
-                "No feed preview is available for this story."}
+              {stripHtml(
+                detail.cluster.summary ??
+                  detail.storySoFar ??
+                  "No feed preview is available for this story.",
+              )}
             </p>
           </div>
         )}
@@ -316,7 +324,7 @@ export function ReaderPanel({ clusterId, onClose }: ReaderPanelProps) {
           <div className="reader-panel-tab-content">
             <p className="muted cluster-story-state">{storyStateLabel}</p>
             <p className="cluster-story-text">
-              {detail.storySoFar ?? "No extracted text is available yet."}
+              {stripHtml(detail.storySoFar ?? "No extracted text is available yet.")}
             </p>
           </div>
         )}

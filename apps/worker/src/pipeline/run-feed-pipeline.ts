@@ -108,6 +108,21 @@ async function runFeedPipelineInner({
     pollResult.lastModified,
   );
 
+  // Update feed title from XML if current title is just the URL
+  if (
+    pollResult.feedTitle &&
+    (feed.title === feed.url ||
+      feed.title.startsWith("http://") ||
+      feed.title.startsWith("https://"))
+  ) {
+    await feedService.updateFeedTitle(feed.accountId, feed.id, pollResult.feedTitle);
+    console.info("[pipeline] updated feed title from XML", {
+      feedId: feed.id,
+      oldTitle: feed.title,
+      newTitle: pollResult.feedTitle,
+    });
+  }
+
   if (pollResult.notModified) {
     console.info("[pipeline] feed not modified, skipping", { feedId: feed.id });
     return;

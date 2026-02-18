@@ -1,6 +1,7 @@
 "use client";
 
 import type { ClusterCard } from "@rss-wrangler/contracts";
+import { stripHtml } from "@/lib/strip-html";
 
 const TOPIC_COLORS: Record<string, string> = {
   tech: "#0066FF",
@@ -39,12 +40,15 @@ export function ClusterListRow({
   onToggleStar,
   density,
 }: ClusterListRowProps) {
-  const topicKey = (cluster.topicName ?? "").toLowerCase().replace(/\s+/g, "");
+  const rawTopic = (cluster.topicName ?? "").trim();
+  const topicKey = rawTopic.toLowerCase().replace(/\s+/g, "");
+  const isPlaceholderTopic =
+    !rawTopic || topicKey === "other" || topicKey === "uncategorized" || topicKey === "general";
   const topicColor = TOPIC_COLORS[topicKey] ?? "#888";
-  const topicLabel = cluster.topicName
-    ? cluster.topicName.length > 6
-      ? cluster.topicName.slice(0, 6).toUpperCase()
-      : cluster.topicName.toUpperCase()
+  const topicLabel = !isPlaceholderTopic
+    ? rawTopic.length > 6
+      ? rawTopic.slice(0, 6).toUpperCase()
+      : rawTopic.toUpperCase()
     : null;
 
   const rowPadding =
@@ -95,7 +99,7 @@ export function ClusterListRow({
         </div>
         <div className="clr-title">{cluster.headline}</div>
         {density !== "compact" && cluster.summary && (
-          <div className="clr-excerpt">{cluster.summary}</div>
+          <div className="clr-excerpt">{stripHtml(cluster.summary)}</div>
         )}
       </div>
     </div>

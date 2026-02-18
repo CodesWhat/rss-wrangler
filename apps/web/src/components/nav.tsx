@@ -48,10 +48,12 @@ export function AppNav() {
   const { authenticated, logoutUser } = useAuth();
   const pathname = usePathname();
   const [isOwner, setIsOwner] = useState(false);
+  const [username, setUsername] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authenticated) {
       setIsOwner(false);
+      setUsername(null);
       return;
     }
     let cancelled = false;
@@ -61,6 +63,7 @@ export function AppNav() {
       const currentMember = members.find((member) => member.id === currentUserId);
       if (!cancelled) {
         setIsOwner(currentMember?.role === "owner");
+        setUsername(currentMember?.username ?? null);
       }
     }
     void loadRole();
@@ -125,10 +128,10 @@ export function AppNav() {
 
         <div className="sidebar-user" role="region" aria-label="User account">
           <div className="sidebar-user-avatar" aria-hidden="true">
-            U
+            {(username ?? "U").charAt(0).toUpperCase()}
           </div>
           <div className="sidebar-user-info">
-            <div className="sidebar-user-name">user</div>
+            <div className="sidebar-user-name">{username ?? "user"}</div>
           </div>
           <button
             type="button"

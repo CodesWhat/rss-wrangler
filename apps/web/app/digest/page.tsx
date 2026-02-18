@@ -4,6 +4,7 @@ import type { Digest, DigestEntry } from "@rss-wrangler/contracts";
 import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { listDigests } from "@/lib/api";
+import { stripHtml } from "@/lib/strip-html";
 
 function simpleMarkdownToHtml(md: string): string {
   // Pre-process: merge continuation lines into their parent list items.
@@ -98,7 +99,7 @@ function DigestContent() {
           {entries.map((entry) => (
             <li key={entry.clusterId}>
               <strong>{entry.headline}</strong>
-              {entry.oneLiner ? <span className="muted"> - {entry.oneLiner}</span> : null}
+              {entry.oneLiner ? <span className="muted"> - {stripHtml(entry.oneLiner)}</span> : null}
             </li>
           ))}
         </ul>

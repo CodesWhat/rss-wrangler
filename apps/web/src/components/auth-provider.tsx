@@ -1,14 +1,16 @@
 "use client";
 
 import type { LoginRequest } from "@rss-wrangler/contracts";
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   logout as apiLogout,
   clearLoggedInFlag,
+  getTokenExpiresAt,
   hasAccessToken,
   isLoggedIn,
   isLoggedInFlag,
   login,
+  onAuthDeath,
   tryRestoreSession,
 } from "@/lib/api";
 
@@ -79,6 +81,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const markAuthenticated = useCallback(() => {
     setAuthenticated(true);
   }, []);
+
+  // Listen for auth-death events from the API layer (failed refresh)
+  // and redirect to login exactly once.
+  useEffect(() => {
+    return onAuthDeath(() => {
+      setAuthenticated(false);
+    });
+  }, []);
+
+  // Proactive background token refresh: schedule a refresh ~60s before the
+  // access token expires so the user never hits a 401 during normal browsing.
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    function scheduleRefresh() {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+
+      if (!authenticated) return;
+
+      const expiresAt = getTokenExpiresAt();
+      if (!expiresAt) return;
+
+      // Refresh 60 seconds before expiry, minimum 5 seconds from now
+      const refreshIn = Math.max(expiresAt - Date.now() - 60_000, 5_000);
+
+      refreshTimerRef.current = setTimeout(async () => {
+        refreshTimerRef.current = null;
+        const ok = await tryRestoreSession();
+        if (ok) {
+          scheduleRefresh();
+        }
+        // If refresh failed, onAuthDeath will fire and setAuthenticated(false)
+      }, refreshIn);
+    }
+
+    scheduleRefresh();
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, [authenticated]);
 
   // Register service worker for push notifications
   useEffect(() => {

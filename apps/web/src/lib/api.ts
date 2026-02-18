@@ -89,6 +89,30 @@ const API_BASE_URL =
 const LOGGED_IN_KEY = "rss_logged_in";
 const REFRESH_TOKEN_KEY = "rss_refresh_token";
 
+// ---------- Auth-death event bus ----------
+// When a token refresh fails irrecoverably, listeners are notified so the
+// auth provider can redirect to /login exactly once.
+
+type AuthDeathListener = () => void;
+const authDeathListeners = new Set<AuthDeathListener>();
+
+export function onAuthDeath(fn: AuthDeathListener): () => void {
+  authDeathListeners.add(fn);
+  return () => {
+    authDeathListeners.delete(fn);
+  };
+}
+
+function emitAuthDeath(): void {
+  for (const fn of authDeathListeners) {
+    try {
+      fn();
+    } catch {
+      // listener errors are non-fatal
+    }
+  }
+}
+
 // ---------- In-memory token store ----------
 
 let accessToken: string | null = null;
@@ -109,7 +133,7 @@ function getRefreshToken(): string | null {
   return null;
 }
 
-function getTokenExpiresAt(): number {
+export function getTokenExpiresAt(): number {
   return tokenExpiresAt;
 }
 
@@ -123,13 +147,16 @@ function storeTokens(tokens: AuthTokens): void {
   }
 }
 
-function clearTokens(): void {
+function clearTokens(reason: "logout" | "refresh_failed" = "logout"): void {
   accessToken = null;
   refreshTokenValue = null;
   tokenExpiresAt = 0;
   if (typeof window !== "undefined") {
     localStorage.removeItem(LOGGED_IN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+  }
+  if (reason === "refresh_failed") {
+    emitAuthDeath();
   }
 }
 
@@ -190,7 +217,7 @@ async function refreshAccessToken(): Promise<boolean> {
   refreshPromise = (async () => {
     const rt = getRefreshToken();
     if (!rt) {
-      clearTokens();
+      clearTokens("refresh_failed");
       return false;
     }
     try {
@@ -200,14 +227,14 @@ async function refreshAccessToken(): Promise<boolean> {
         body: JSON.stringify({ refreshToken: rt }),
       });
       if (!res.ok) {
-        clearTokens();
+        clearTokens("refresh_failed");
         return false;
       }
       const data = authTokensSchema.parse(await res.json());
       storeTokens(data);
       return true;
     } catch {
-      clearTokens();
+      clearTokens("refresh_failed");
       return false;
     } finally {
       refreshPromise = null;
@@ -296,7 +323,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T | nul
         const text = await retry.text();
         return text ? (JSON.parse(text) as T) : (null as T);
       }
-      clearTokens();
+      // refreshAccessToken already called clearTokens("refresh_failed")
       return null;
     }
 

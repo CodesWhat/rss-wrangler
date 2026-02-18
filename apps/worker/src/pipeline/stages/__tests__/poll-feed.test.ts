@@ -50,6 +50,7 @@ describe("pollFeed", () => {
 
     expect(result).toEqual({
       items: [],
+      feedTitle: null,
       format: null,
       etag: 'W/"123"',
       lastModified: "Mon, 10 Feb 2025 12:00:00 GMT",

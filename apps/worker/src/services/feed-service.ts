@@ -58,6 +58,14 @@ export class FeedService {
     }));
   }
 
+  async updateFeedTitle(accountId: string, feedId: string, title: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE feed SET title = $3
+       WHERE id = $1 AND tenant_id = $2`,
+      [feedId, accountId, title],
+    );
+  }
+
   async updateLastPolled(
     accountId: string,
     feedId: string,

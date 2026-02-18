@@ -1010,7 +1010,12 @@ export const StoryCard = memo(
     const headlineUrl = parsed.articleUrl;
     const slug = topicSlug(cluster.topicName);
     const timeAgo = relativeTime(cluster.primarySourcePublishedAt);
-    const cardLabel = (cluster.topicName ?? cluster.folderName).toUpperCase();
+    const rawTopicLc = (cluster.topicName ?? "").trim().toLowerCase();
+    const isPlaceholderTopic =
+      !rawTopicLc || rawTopicLc === "other" || rawTopicLc === "uncategorized" || rawTopicLc === "general";
+    const cardLabel = (
+      isPlaceholderTopic ? cluster.folderName : cluster.topicName!
+    ).toUpperCase();
     const cardLabelClass = slug ? `tag-${slug}` : "tag-folder";
     const heroImageUrl = isSafeUrl(cluster.heroImageUrl) ? cluster.heroImageUrl : null;
     const outletsLabel = outletBadgeLabel(cluster.outletCount);

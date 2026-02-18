@@ -16,6 +16,7 @@ export interface ParsedItem {
 
 export interface PollResult {
   items: ParsedItem[];
+  feedTitle: string | null;
   format: ParsedFeedFormat | null;
   etag: string | null;
   lastModified: string | null;
@@ -137,6 +138,7 @@ export async function pollFeed(feed: DueFeed): Promise<PollResult> {
     console.info("[poll-feed] not modified", { feedId: feed.id });
     return {
       items: [],
+      feedTitle: null,
       format: null,
       etag: feed.etag,
       lastModified: feed.lastModified,
@@ -151,10 +153,12 @@ export async function pollFeed(feed: DueFeed): Promise<PollResult> {
   const payload = await response.text();
   let format: ParsedFeedFormat;
   let items: ParsedItem[];
+  let feedTitle: string | null;
   try {
     const parsed = parseFeed(payload);
     format = parsed.format;
     items = normalizeParsedItems(parsed);
+    feedTitle = extractFeedTitle(parsed);
   } catch (err) {
     throw new Error(
       `[poll-feed] failed to parse feed ${feed.id}: ${
@@ -165,6 +169,7 @@ export async function pollFeed(feed: DueFeed): Promise<PollResult> {
 
   return {
     items,
+    feedTitle,
     format,
     etag: response.headers.get("etag"),
     lastModified: response.headers.get("last-modified"),
@@ -182,6 +187,20 @@ type JsonItem = DeepPartial<Json.Item<string>>;
 interface MediaLike {
   thumbnails?: Array<{ url?: string }>;
   contents?: Array<{ url?: string; type?: string; medium?: string }>;
+}
+
+function extractFeedTitle(parsed: ParsedFeedsmith): string | null {
+  if (parsed.format === "rss") {
+    return firstNonEmpty(parsed.feed.title);
+  }
+  if (parsed.format === "atom") {
+    return firstNonEmpty(parsed.feed.title);
+  }
+  if (parsed.format === "rdf") {
+    return firstNonEmpty(parsed.feed.title);
+  }
+  // JSON Feed
+  return firstNonEmpty(parsed.feed.title);
 }
 
 function normalizeParsedItems(parsed: ParsedFeedsmith): ParsedItem[] {
