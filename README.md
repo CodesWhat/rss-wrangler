@@ -7,12 +7,12 @@
 </div>
 
 <p align="center">
-  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler/commits/main"><img src="https://img.shields.io/github/last-commit/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Last commit"></a>
+  <a href="https://github.com/CodesWhat/rss-wrangler/commits/main"><img src="https://img.shields.io/github/last-commit/CodesWhat/rss-wrangler?style=flat" alt="Last commit"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-C9A227" alt="License AGPL-3.0"></a>
   <br>
-  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler/stargazers"><img src="https://img.shields.io/github/stars/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Stars"></a>
-  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler/issues"><img src="https://img.shields.io/github/issues/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Issues"></a>
-  <a href="https://github.com/s-b-e-n-s-o-n/rss-wrangler"><img src="https://img.shields.io/github/repo-size/s-b-e-n-s-o-n/rss-wrangler?style=flat" alt="Repo size"></a>
+  <a href="https://github.com/CodesWhat/rss-wrangler/stargazers"><img src="https://img.shields.io/github/stars/CodesWhat/rss-wrangler?style=flat" alt="Stars"></a>
+  <a href="https://github.com/CodesWhat/rss-wrangler/issues"><img src="https://img.shields.io/github/issues/CodesWhat/rss-wrangler?style=flat" alt="Issues"></a>
+  <a href="https://github.com/CodesWhat/rss-wrangler"><img src="https://img.shields.io/github/repo-size/CodesWhat/rss-wrangler?style=flat" alt="Repo size"></a>
 </p>
 
 <h2 align="center">Screenshots</h2>
@@ -43,7 +43,7 @@
 ---
 
 ```bash
-git clone https://github.com/s-b-e-n-s-o-n/rss-wrangler.git && cd rss-wrangler
+git clone https://github.com/CodesWhat/rss-wrangler.git && cd rss-wrangler
 cp infra/.env.example infra/.env
 
 # Edit infra/.env — set AUTH_JWT_SECRET and AUTH_PASSWORD at minimum
@@ -282,7 +282,7 @@ Self-hosted users get all Pro + AI features for free.
 [![Vitest](https://img.shields.io/badge/Vitest-6E9F18?logo=vitest&logoColor=fff)](https://vitest.dev/)
 [![Biome](https://img.shields.io/badge/Biome-60a5fa?logo=biome&logoColor=fff)](https://biomejs.dev/)
 [![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=fff)](https://www.docker.com/)
-[![Built with AI](https://img.shields.io/badge/Built_with_AI-000000?style=flat&logo=anthropic&logoColor=white)](https://claude.ai/)
+[![Anthropic](https://img.shields.io/badge/Anthropic-000000?style=flat&logo=anthropic&logoColor=white)](https://claude.ai/)
 
 ---
 
