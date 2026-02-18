@@ -54,6 +54,9 @@ jobs:
 
       - run: npm ci
 
+      - name: Build contracts
+        run: npm run build -w packages/contracts
+
       - name: Run tests with coverage
         run: npx vitest run --coverage
 
@@ -84,6 +87,9 @@ jobs:
             ${{ runner.os }}-node-modules-
 
       - run: npm ci
+
+      - name: Build contracts
+        run: npm run build -w packages/contracts
 
       - name: Typecheck all packages
         run: npm run typecheck
