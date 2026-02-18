@@ -159,22 +159,20 @@ export function FeedSidebar({
             </div>
           );
         })}
-      </nav>
-
-      <div className="fs-footer">
-        <Link href="/settings" className="fs-footer-link">
-          Settings
-        </Link>
-        <Link href="/sources" className="fs-footer-link">
+        <div className="fs-section-title">{"// more"}</div>
+        <Link href="/sources" className="fs-nav-link">
           Sources
         </Link>
-        <Link href="/discover" className="fs-footer-link">
+        <Link href="/discover" className="fs-nav-link">
           Discover
         </Link>
-        <Link href="/digest" className="fs-footer-link">
+        <Link href="/digest" className="fs-nav-link">
           Digest
         </Link>
-      </div>
+        <Link href="/settings" className="fs-nav-link">
+          Settings
+        </Link>
+      </nav>
     </aside>
   );
 }

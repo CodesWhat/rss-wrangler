@@ -3436,27 +3436,22 @@ body[data-home-active="true"] .main {
   white-space: nowrap;
 }
 
-.fs-footer {
-  padding: 8px 12px;
-  border-top: 2px solid var(--border-black);
-  flex-shrink: 0;
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.fs-footer-link {
-  font-family: var(--font-mono);
-  font-size: 0.62rem;
+.fs-nav-link {
+  display: block;
+  padding: 5px 12px;
+  font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
   text-decoration: none;
+  font-family: var(--font-mono);
+  border-left: 3px solid transparent;
 }
-.fs-footer-link:hover {
-  color: var(--accent);
-  text-decoration: none;
+
+.fs-nav-link:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 /* ── Article list ── */
@@ -5561,24 +5556,22 @@ body[data-home-active="true"] .main {
   white-space: nowrap;
 }
 
-.fs-footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-3);
-  border-top: 1px solid var(--border-hairline);
-}
-
-.fs-footer-link {
-  font-size: 0.65rem;
+.fs-nav-link {
+  display: block;
+  padding: 5px 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--text-secondary);
   text-decoration: none;
   font-family: var(--font-mono);
+  border-left: 3px solid transparent;
 }
 
-.fs-footer-link:hover {
+.fs-nav-link:hover {
+  background: var(--bg-elevated);
   color: var(--text-primary);
-  text-decoration: underline;
 }
 
 /* ========================================
