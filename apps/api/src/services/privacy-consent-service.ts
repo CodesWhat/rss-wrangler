@@ -32,7 +32,7 @@ const EXPLICIT_CONSENT_COUNTRIES = new Set<string>([
   "LI",
   "NO",
   "GB",
-  "CH"
+  "CH",
 ]);
 
 function pickHeaderValue(value: string | string[] | undefined): string | null {
@@ -58,7 +58,7 @@ export function resolveCountryCode(headers: IncomingHttpHeaders): string | null 
     pickHeaderValue(headers["x-vercel-ip-country"]),
     pickHeaderValue(headers["cf-ipcountry"]),
     pickHeaderValue(headers["cloudfront-viewer-country"]),
-    pickHeaderValue(headers["x-country-code"])
+    pickHeaderValue(headers["x-country-code"]),
   ];
 
   for (const candidate of headerCandidates) {

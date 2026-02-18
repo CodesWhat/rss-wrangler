@@ -1,6 +1,6 @@
 # RSS Wrangler Feature Audit
 
-Audited: 2026-02-08
+Audited: 2026-02-09
 
 ## Legend
 - ✅ IMPLEMENTED - Working as specced
@@ -17,29 +17,31 @@ Audited: 2026-02-08
 | Infinite scroll | ✅ | IntersectionObserver + cursor pagination |
 | Sort: For You / Latest | ✅ | Toggle works, API supports both |
 | Card: Headline | ✅ | All layouts |
-| Card: Hero image | ❌ | Data exists in DB, never rendered in UI |
+| Card: Hero image | ✅ | Hero image now renders in card + compact layouts when image URL is available |
 | Card: Source + time | ✅ | All layouts |
-| Card: "+N outlets" | ❌ | Data returned by API, not displayed |
-| Card: Folder/topic label | ❌ | Data returned by API, not displayed |
+| Card: "+N outlets" | ✅ | Outlet-count badge now renders in list/compact/card layouts (`+N outlets`) |
+| Card: Folder/topic label | ✅ | Folder/topic label now renders on card metadata surfaces across layouts |
 | Card: AI summary | ✅ | Compact & card layouts |
-| Card: Muted breakout badge | 🔲 | UI exists but `mutedBreakoutReason` always null |
-| Action: Open cluster detail | ❌ | No cluster detail page — links to external article |
+| Card: Muted breakout badge | ✅ | API now populates `mutedBreakoutReason` from latest cluster `filter_event` breakout record |
+| Action: Open cluster detail | ✅ | Story cards now include inline `Story` route to `/clusters/:id` |
 | Action: Save | ✅ | Full flow |
 | Action: Mark read | ✅ | Full flow |
+| Action: Mark as read on scroll | ✅ | Configurable auto-read: on scroll or on open; per-layout delay/threshold tuning plus per-feed overrides and bulk folder/topic/weight/muted/trial/classification actions. Auto-read trigger telemetry (scroll/open/total) now surfaces on Stats for the selected period. |
+| Action: Mark all read (with time filter) | ✅ | Home feed bulk action shipped with window selector (all unread / older than 24h / older than 7d) |
 | Action: Not interested | ✅ | Full flow |
-| Action: Mute keyword | ❌ | No inline UI |
-| Action: Prefer source | ❌ | No inline UI |
-| Action: Mute source | ❌ | No inline UI |
+| Action: Mute keyword | ✅ | Inline mute-keyword with smart autocomplete from headline (2-word phrases + significant words, ≤8 candidates, custom input) |
+| Action: Prefer source | ✅ | Inline prefer-source action with immediate visual feedback |
+| Action: Mute source | ✅ | Inline mute-source action with dropdown menu + keyboard nav |
 
 ## 2. CLUSTER DETAIL & ARTICLE VIEW
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Cluster detail page | ❌ | API ready (`/v1/clusters/:id`), no frontend page |
+| Cluster detail page | ✅ | Frontend route shipped at `/clusters/:id` with cluster overview + metadata |
 | AI "Story so far" | ⚠️ | Returns `extracted_text` not AI summary |
-| Outlets list | ❌ | API returns members, no UI |
+| Outlets list | ✅ | Cluster detail renders outlet/member list with source links + timestamps |
 | Split cluster action | ❌ | No endpoint or UI |
-| Article reader mode (embedded preview + text/original views) | ❌ | External links only; no in-app reader pane or mode switching |
+| Article reader mode (embedded preview + text/original views) | ✅ | Full reader mode: Feed/Original/Text toggle on cluster detail, per-feed default reader mode (Sources page dropdown), priority chain (per-feed > localStorage > smart fallback), 19-test suite |
 | Engagement: scroll depth | ❌ | Not tracked |
 | Engagement: bounce detection | ❌ | Not tracked |
 | Engagement: dwell time | ✅ | IntersectionObserver tracks viewport time |
@@ -49,11 +51,11 @@ Audited: 2026-02-08
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Recency decay | ✅ | Inverse hour decay |
-| Folder/topic affinity | ❌ | Not tracked or used |
-| Source weight in ranking | ❌ | DB has `feed.weight` but not in ranking SQL |
-| Engagement history | 🔲 | Only "saved" flag used; dwell/click/not-interested ignored |
-| Diversity penalty | ⚠️ | Cluster size bonus exists (not true diversity) |
-| Exploration quota | ❌ | No low-ranked story surfacing |
+| Folder/topic affinity | ✅ | Personal ranking now applies tenant-scoped topic + folder affinity derived from read/save/dwell/not-interested history |
+| Source weight in ranking | ✅ | `feed.weight` now contributes to personal ranking score (`prefer` boost, `deprioritize` penalty) |
+| Engagement history | ⚠️ | Personal ranking now includes saved, dwell seconds, clicked-at, and not-interested penalty; still missing scroll-depth/bounce history |
+| Diversity penalty | ⚠️ | Personal ranking now applies topic-saturation penalty baseline; still lacks richer cross-topic sequencing controls |
+| Exploration quota | ⚠️ | Personal ranking now applies a deterministic exploration boost for a small low-signal neutral subset (~8% target); still lacks explicit quota controls |
 
 ## 4. FILTERING (MUTE-WITH-BREAKOUT)
 
@@ -67,7 +69,7 @@ Audited: 2026-02-08
 | Breakout: high rep source | ✅ | Checks feed.weight=prefer |
 | Breakout: cluster size >= 4 | ✅ | Hardcoded threshold |
 | Record filter events | ✅ | Both hidden and breakout logged |
-| Badge with breakout reason | 🔲 | UI present but always null from API |
+| Badge with breakout reason | ✅ | API now JOINs latest cluster `filter_event` and returns breakout reason when `action='breakout_shown'` |
 | Filter CRUD UI | ✅ | Full management in Settings |
 | AI rule/filter copilot (wand actions: prioritize/tag/block/etc.) | ❌ | No AI-assisted rule suggestions, no impact-preview UX, and no one-click apply flow from filter rows |
 
@@ -88,9 +90,9 @@ Audited: 2026-02-08
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Provider abstraction | ❌ | Hardcoded to OpenAI only |
-| Anthropic provider | ❌ | Not implemented |
-| Local/Ollama provider | ❌ | Not implemented |
+| Provider abstraction | ✅ | AiProviderAdapter interface + AiRegistry with preference-aware selection and silent fallback |
+| Anthropic provider | ✅ | Full adapter with env-based config (ANTHROPIC_API_KEY) |
+| Local/Ollama provider | ✅ | Full adapter with env-based config (OLLAMA_BASE_URL) |
 | AI-assisted classification before summarization | ❌ | Pipeline generates summaries directly; no classifier-first routing stage yet |
 | Local Llama focus scoring + "likely relevant" labels + auto-tag suggestions | ❌ | No local-Llama/Ollama relevance scorer, no likely-relevant UI label, and no explainable opt-in scoring controls |
 | Card summaries (1-2 sentence) | ⚠️ | AI enrichment exists but only when AI mode enabled |
@@ -123,11 +125,11 @@ Audited: 2026-02-08
 | Feature | Status | Notes |
 |---------|--------|-------|
 | AI mode (off/summaries/full) | ✅ | Select dropdown |
-| AI provider selection | ⚠️ | UI dropdown exists but only OpenAI works |
-| AI budget cap | ⚠️ | Setting exists, no usage tracking |
+| AI provider selection | ✅ | Dropdown (OpenAI/Anthropic/Local) with API key management (masked display, add/change/remove) and fallback-to-local toggle |
+| AI budget cap | ⚠️ | Setting exists with monthly cap USD, per-provider token tracking wired but no UI usage dashboard yet |
 | Digest trigger config | ✅ | Hours and threshold configurable |
 | Feed poll interval | ✅ | Configurable |
-| Retention settings | ❌ | No retention config |
+| Retention settings | ✅ | Unread max-age + read purge controls in Settings > General, worker cleanup job runs per-account |
 | Filter management | ✅ | Full CRUD |
 | Push notifications | ✅ | Working toggle |
 
@@ -177,7 +179,7 @@ Audited: 2026-02-08
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| First-party API (Wrangler-native advanced endpoints) | ⚠️ | Core `/v1/*` routes exist (clusters, feedback, events, dwell), but no stable documented contract for explainability payloads and rules/filter audit logs |
+| First-party API (Wrangler-native advanced endpoints) | ⚠️ | Core `/v1/*` routes exist (clusters, feedback, events, dwell) and cluster list payloads now include `rankingExplainability`; remaining gap is a fully documented/stable contract for why-hidden/why-deduped explainability and rules/filter audit logs |
 | API compatibility layer (Google Reader/Fever-style) | ❌ | Internal `/v1/*` API exists, but no compatibility endpoints or protocol adapters for third-party clients |
 
 ## 14. INTEGRATIONS & SEND-TO HOOKS
@@ -192,8 +194,8 @@ Audited: 2026-02-08
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| Isolation model (`tenant_id` internals + v1 single-product UX) | ⚠️ | `tenant_id` remains the internal isolation key across auth/content tables with tenant-scoped queries, RLS policies, and request/job DB context propagation (`app.tenant_id`). Workspace fields were removed from auth UX and default scope is now implicit (`default`). Remaining work is deeper internal simplification/cleanup of workspace-first naming in non-auth account-management surfaces. |
-| Hosted auth + onboarding flow | ⚠️ | Better Auth flows and onboarding are shipped with workspace-free login/signup/recovery UX, invite-token controls, email verification, role model (`user_account.role`), member status gates (`pending_approval`/`active`/`suspended`), membership policy (`tenant.membership_policy`), member management endpoints, `member_event` audit trail, and Settings Members tab. Remaining gap: richer account bootstrap/onboarding completion logic beyond baseline wizard. |
+| Isolation model (`tenant_id` internals + v1 single-product UX) | ✅ | `tenant_id` remains the DB column name for RLS. All TypeScript-level naming migrated to `account*`/`member*` across contracts, API (auth-service, postgres-store, auth plugin, routes), and worker (db-context, pipeline, jobs). JWT auth accepts both `accountId` and legacy `tenantId` claims. |
+| Hosted auth + onboarding flow | ⚠️ | Better Auth flows and onboarding are shipped with account-facing login/signup/recovery UX (no workspace fields), invite-token controls, email verification, fixed single-owner + invite-only membership behavior, owner-only member/invite management endpoints, `member_event` audit trail, and Settings Members tab. Remaining gap: richer account bootstrap/onboarding completion logic. |
 | Hosted account settings: password change/reset | ✅ | Self-serve password change shipped (`/v1/account/password` + Settings UI account section). Password reset flow shipped (forgot/reset endpoints + web forms + email token lifecycle). |
 | Hosted account deletion workflow | ⚠️ | Self-serve request/cancel flow plus lifecycle automation shipped: worker job (`process-account-deletions`) enforces a 7-day grace window, marks requests completed, hard-purges due accounts, writes audit events, and prunes empty tenants. Remaining gap: user-facing completion notification channel (email/in-app). |
 | Hosted self-serve data download request (GDPR-style) | ⚠️ | Baseline shipped: account data export request/status/download endpoints (`/v1/account/data-export*`), tenant-scoped export-request persistence, and protected frontend export page. Remaining gaps: move processing to durable worker queue, add completion notifications, and enforce retention/purge for generated bundles. |
@@ -222,30 +224,26 @@ Audited: 2026-02-08
 
 ## SUMMARY COUNTS
 
-- ✅ IMPLEMENTED: 38
-- ⚠️ PARTIAL: 18
-- 🔲 STUB: 6
-- ❌ MISSING: 49
+- ✅ IMPLEMENTED: 49
+- ⚠️ PARTIAL: 21
+- 🔲 STUB: 4
+- ❌ MISSING: 38
 
 ## TOP PRIORITY GAPS (from spec)
 
-1. **Hero images not displayed** - data exists, just needs rendering
-2. **No cluster detail page** - API ready, frontend missing
-3. **No article reader mode** - external links only
-4. **Breakout badge always null** - API needs to JOIN filter_event
-5. **Ranking ignores most signals** - only uses recency + saved + cluster size
-6. **AI provider locked to OpenAI** - Anthropic/Local not wired
-7. **No real digest trigger logic** - banner is static
-8. **Pipeline has no resilience** - no circuit breaker, dead-letter, or explicit retries
-9. **+N outlets and folder labels not shown on cards**
-10. **Missing card actions** - mute keyword, prefer/mute source
-11. **Hosted onboarding nearly complete** - member approval/roles shipped; richer bootstrap logic still desired before hosted public launch
-12. **Hosted dogfood telemetry run pending** - billing stack is now launch-ready, but first live hosted cost/usage telemetry pass is still required
-13. **Entitlements are partial** - core feed/search/worker gates plus billing sync landed, but broader route coverage + richer usage/limit UX remain
-14. **Feed discovery + directory seeding missing** - need one-time DB seed from feed-directory.json + discovery engine for URL → candidates
-15. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail
-16. **Accessibility baseline missing** - no explicit WCAG 2.2 AA coverage for semantics, keyboard/focus, contrast, and screen-reader validation
-17. **Data portability bundle missing** - no export beyond OPML for saved items, annotations, training signals, and filters/rules
-18. **Hosted account management/compliance still incomplete** - account-deletion user-facing completion notifications and account-data-export worker/notification/retention hardening are still missing
-19. **Guided onboarding is baseline-only** - wizard exists, but deeper topic/bootstrap automation is still missing
-20. **Consent/CMP is baseline-only** - consent persistence + controls are shipped, but CMP adapter and automated script-gating verification are still pending
+1. **Reader mode is baseline-only** - cluster-detail mode toggle exists, but per-feed defaults and richer extraction controls are still pending
+2. **Ranking remains incomplete** - source/topic/folder weighting plus saved/dwell/click/not-interested and baseline diversity/exploration now contribute, and card-level "Why shown" explainability is live, but richer engagement signals and full why-hidden/why-deduped explainability are still missing
+3. **AI provider locked to OpenAI** - Anthropic/Local not wired
+4. **No real digest trigger logic** - banner is static
+5. **Pipeline has no resilience** - no circuit breaker, dead-letter, or explicit retries
+6. **Missing card actions** - mute keyword, prefer/mute source
+7. **Hosted onboarding nearly complete** - member approval/roles shipped; richer bootstrap logic still desired before hosted public launch
+8. **Hosted dogfood telemetry run pending** - billing stack is now launch-ready, but first live hosted cost/usage telemetry pass is still required
+9. **Entitlements are partial** - core feed/search/worker gates plus billing sync landed, but broader route coverage + richer usage/limit UX remain
+10. **Feed discovery + directory seeding missing** - need one-time DB seed from feed-directory.json + discovery engine for URL → candidates
+11. **Feed revive logic missing** - no automatic rediscovery/canonical swap when feeds repeatedly fail
+12. **Accessibility baseline missing** - no explicit WCAG 2.2 AA coverage for semantics, keyboard/focus, contrast, and screen-reader validation
+13. **Data portability bundle missing** - no export beyond OPML for saved items, annotations, training signals, and filters/rules
+14. **Hosted account management/compliance still incomplete** - account-deletion user-facing completion notifications and account-data-export worker/notification/retention hardening are still missing
+15. **Guided onboarding is baseline-only** - wizard exists, but deeper topic/bootstrap automation is still missing
+16. **Consent/CMP is baseline-only** - consent persistence + controls are shipped, but CMP adapter and automated script-gating verification are still pending

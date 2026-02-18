@@ -4,7 +4,7 @@ export const ACCOUNT_DELETION_GRACE_WINDOW_DAYS = 7;
 export const ACCOUNT_DELETION_BATCH_SIZE = 50;
 
 interface ProcessAccountDeletionOptions {
-  tenantId: string;
+  accountId: string;
   batchSize?: number;
   graceWindowDays?: number;
 }
@@ -18,7 +18,7 @@ export interface ProcessAccountDeletionResult {
 
 export async function processDueAccountDeletions(
   client: PoolClient,
-  options: ProcessAccountDeletionOptions
+  options: ProcessAccountDeletionOptions,
 ): Promise<ProcessAccountDeletionResult> {
   const batchSize = options.batchSize ?? ACCOUNT_DELETION_BATCH_SIZE;
   const graceWindowDays = options.graceWindowDays ?? ACCOUNT_DELETION_GRACE_WINDOW_DAYS;
@@ -82,7 +82,7 @@ export async function processDueAccountDeletions(
            WHERE deleted_users.id = completed.user_id
          ) AS user_deleted
        FROM completed`,
-      [options.tenantId, batchSize, graceInterval, graceWindowDays]
+      [options.accountId, batchSize, graceInterval, graceWindowDays],
     );
 
     let tenantPurged = false;
@@ -96,7 +96,7 @@ export async function processDueAccountDeletions(
              WHERE user_account.tenant_id = $1
            )
          RETURNING id`,
-        [options.tenantId]
+        [options.accountId],
       );
       tenantPurged = tenantDelete.rows.length > 0;
     }
@@ -106,7 +106,7 @@ export async function processDueAccountDeletions(
       processed: completed.rows.length,
       deletedUsers: completed.rows.filter((row) => row.user_deleted).length,
       tenantPurged,
-      requestIds: completed.rows.map((row) => row.request_id)
+      requestIds: completed.rows.map((row) => row.request_id),
     };
   } catch (error) {
     await client.query("ROLLBACK");

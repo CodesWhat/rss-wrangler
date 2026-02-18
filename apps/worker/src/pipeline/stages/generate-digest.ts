@@ -1,5 +1,6 @@
-import type { Pool } from "pg";
 import type { AiProviderAdapter } from "@rss-wrangler/contracts";
+import type { Pool } from "pg";
+import { isBudgetExceeded, logAiUsage } from "../../services/ai-usage";
 
 interface DigestEntry {
   clusterId: string;
@@ -39,7 +40,7 @@ const AWAY_HOURS_THRESHOLD = 24;
 export async function maybeGenerateDigest(
   pool: Pool,
   accountId: string,
-  aiProvider?: AiProviderAdapter | null
+  aiProvider?: AiProviderAdapter | null,
 ): Promise<void> {
   const shouldGenerate = await checkDigestTriggers(pool, accountId);
   if (!shouldGenerate) return;
@@ -58,7 +59,7 @@ export async function maybeGenerateDigest(
 export async function generateDigest(
   pool: Pool,
   accountId: string,
-  aiProvider?: AiProviderAdapter | null
+  aiProvider?: AiProviderAdapter | null,
 ): Promise<void> {
   const windowEnd = new Date();
   const windowStart = new Date(windowEnd.getTime() - DIGEST_WINDOW_HOURS * 60 * 60 * 1000);
@@ -71,7 +72,7 @@ export async function generateDigest(
        AND start_ts >= $2
        AND end_ts <= $3
      LIMIT 1`,
-    [accountId, windowStart.toISOString(), windowEnd.toISOString()]
+    [accountId, windowStart.toISOString(), windowEnd.toISOString()],
   );
   if (existing.rows.length > 0) {
     console.info("[digest] digest already exists for this window, skipping");
@@ -103,7 +104,7 @@ export async function generateDigest(
        c.size DESC,
        i.published_at DESC
      LIMIT $3`,
-    [windowStart.toISOString(), accountId, TOP_PICKS_COUNT + BIG_STORIES_COUNT + QUICK_SCAN_COUNT]
+    [windowStart.toISOString(), accountId, TOP_PICKS_COUNT + BIG_STORIES_COUNT + QUICK_SCAN_COUNT],
   );
 
   if (clusters.rows.length === 0) {
@@ -140,8 +141,26 @@ export async function generateDigest(
 
   let body: string;
   if (aiProvider) {
-    const narrative = await generateNarrativeBody(aiProvider, entries);
-    body = narrative ?? buildDigestBody(entries);
+    // Check budget before making AI calls
+    let skipAi = false;
+    try {
+      const overBudget = await isBudgetExceeded(pool, accountId);
+      if (overBudget) {
+        console.warn("[digest] AI budget exceeded, falling back to bullet list", { accountId });
+        skipAi = true;
+      }
+    } catch (err) {
+      console.warn("[digest] budget check failed, proceeding with caution", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
+    if (skipAi) {
+      body = buildDigestBody(entries);
+    } else {
+      const narrative = await generateNarrativeBody(pool, accountId, aiProvider, entries);
+      body = narrative ?? buildDigestBody(entries);
+    }
   } else {
     body = buildDigestBody(entries);
   }
@@ -156,19 +175,21 @@ export async function generateDigest(
       title,
       body,
       JSON.stringify(entries),
-    ]
+    ],
   );
 
   console.info("[digest] generated", {
     entries: entries.length,
     aiNarrative: !!aiProvider,
-    window: `${windowStart.toISOString()} - ${windowEnd.toISOString()}`
+    window: `${windowStart.toISOString()} - ${windowEnd.toISOString()}`,
   });
 }
 
 async function generateNarrativeBody(
+  pool: Pool,
+  accountId: string,
   provider: AiProviderAdapter,
-  entries: DigestEntry[]
+  entries: DigestEntry[],
 ): Promise<string | null> {
   const sectionLabels: Record<DigestEntry["section"], string> = {
     top_picks: "Top Picks",
@@ -228,6 +249,12 @@ async function generateNarrativeBody(
       return null;
     }
 
+    logAiUsage(pool, accountId, response, "digest").catch((err) => {
+      console.warn("[digest] failed to log AI usage", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
     console.info("[digest] AI narrative generated", {
       provider: response.provider,
       model: response.model,
@@ -252,7 +279,7 @@ async function checkDigestTriggers(pool: Pool, accountId: string): Promise<boole
      LEFT JOIN read_state rs ON rs.cluster_id = c.id AND rs.tenant_id = c.tenant_id
      WHERE c.tenant_id = $1
        AND rs.read_at IS NULL`,
-    [accountId]
+    [accountId],
   );
   const backlog = parseInt(backlogResult.rows[0]?.cnt || "0", 10);
   if (backlog >= BACKLOG_THRESHOLD) {
@@ -267,7 +294,7 @@ async function checkDigestTriggers(pool: Pool, accountId: string): Promise<boole
      WHERE tenant_id = $1
        AND created_at >= NOW() - INTERVAL '24 hours'
      LIMIT 1`,
-    [accountId]
+    [accountId],
   );
   if (recentDigest.rows.length === 0 && backlog > 0) {
     console.info("[digest] time trigger (no digest in 24h)");
@@ -278,7 +305,7 @@ async function checkDigestTriggers(pool: Pool, accountId: string): Promise<boole
   if (backlog > 0) {
     const awayResult = await pool.query<{ last_active_at: Date | null }>(
       `SELECT last_active_at FROM tenant WHERE id = $1`,
-      [accountId]
+      [accountId],
     );
     const lastActiveAt = awayResult.rows[0]?.last_active_at;
     if (lastActiveAt) {
@@ -295,7 +322,7 @@ async function checkDigestTriggers(pool: Pool, accountId: string): Promise<boole
 
 function truncate(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text;
-  return text.slice(0, maxLen - 3) + "...";
+  return `${text.slice(0, maxLen - 3)}...`;
 }
 
 function buildDigestBody(entries: DigestEntry[]): string {
@@ -311,7 +338,7 @@ function buildDigestBody(entries: DigestEntry[]): string {
 
   const lines: string[] = [];
 
-  if (sections.top_picks!.length > 0) {
+  if (sections.top_picks?.length > 0) {
     lines.push("## Top Picks");
     for (const e of sections.top_picks!) {
       lines.push(`- ${e.headline}`);
@@ -319,7 +346,7 @@ function buildDigestBody(entries: DigestEntry[]): string {
     lines.push("");
   }
 
-  if (sections.big_stories!.length > 0) {
+  if (sections.big_stories?.length > 0) {
     lines.push("## Big Stories");
     for (const e of sections.big_stories!) {
       lines.push(`- ${e.headline}`);
@@ -327,7 +354,7 @@ function buildDigestBody(entries: DigestEntry[]): string {
     lines.push("");
   }
 
-  if (sections.quick_scan!.length > 0) {
+  if (sections.quick_scan?.length > 0) {
     lines.push("## Quick Scan");
     for (const e of sections.quick_scan!) {
       const suffix = e.oneLiner ? ` — ${e.oneLiner}` : "";

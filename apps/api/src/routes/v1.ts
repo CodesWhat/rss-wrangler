@@ -11,14 +11,18 @@ import {
   billingSubscriptionActionResponseSchema,
   type ClusterCard,
   changePasswordRequestSchema,
+  clusterAiSummaryResponseSchema,
   clusterFeedbackRequestSchema,
+  createAiRegistry,
   createAnnotationRequestSchema,
   createFilterRuleRequestSchema,
   createMemberInviteRequestSchema,
   directoryEntrySchema,
   directoryListResponseSchema,
   directoryQuerySchema,
+  estimateCostUsd,
   eventsBatchRequestSchema,
+  feedRecommendationsResponseSchema,
   forgotPasswordRequestSchema,
   joinAccountRequestSchema,
   listClustersQuerySchema,
@@ -37,7 +41,8 @@ import {
   resendVerificationRequestSchema,
   resetPasswordRequestSchema,
   resolveTopicRequestSchema,
-  type SearchQuery, 
+  type SearchQuery,
+  sanitizeForPrompt,
   searchQuerySchema,
   signupRequestSchema,
   statsQuerySchema,
@@ -46,20 +51,24 @@ import {
   updateMemberRequestSchema,
   updatePrivacyConsentRequestSchema,
   updateSettingsRequestSchema,
-  clusterAiSummaryResponseSchema
 } from "@rss-wrangler/contracts";
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
 import { PgBoss } from "pg-boss";
 import { z } from "zod";
 import type { ApiEnv } from "../config/env";
 import { getAccountEntitlements } from "../plugins/entitlements";
-import { createAiRegistry } from "@rss-wrangler/contracts";
-import { checkBudget, ensureAiUsageTable, estimateCostUsd, getMonthlyUsage, recordAiUsage } from "../services/ai-usage-service";
+import {
+  checkBudget,
+  ensureAiUsageTable,
+  getMonthlyUsage,
+  recordAiUsage,
+} from "../services/ai-usage-service";
 import { createAuthService } from "../services/auth-service";
 import { createBillingService } from "../services/billing-service";
 import { parseOpml } from "../services/opml-parser";
-import { PostgresStore } from "../services/postgres-store";
+import { computeDisplayMode, PostgresStore } from "../services/postgres-store";
 import { requiresExplicitConsent, resolveCountryCode } from "../services/privacy-consent-service";
+import { dismissRecommendation, getRecommendations } from "../services/recommendation-service";
 import { validateFeedUrl } from "../services/url-validator";
 
 const DEFAULT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000001";
@@ -73,15 +82,15 @@ const inviteIdParams = z.object({ id: z.string().uuid() });
 const memberIdParams = z.object({ id: z.string().uuid() });
 
 const authRefreshSchema = z.object({
-  refreshToken: z.string().min(1)
+  refreshToken: z.string().min(1),
 });
 
 const authLogoutSchema = z.object({
-  refreshToken: z.string().optional()
+  refreshToken: z.string().optional(),
 });
 
 const verifyEmailQuerySchema = z.object({
-  token: z.string().min(12).max(512)
+  token: z.string().min(12).max(512),
 });
 
 const PROCESS_FEED_JOB = "process-feed";
@@ -92,7 +101,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
   const billing = createBillingService(env, app.pg, app.log);
   const jobs = new PgBoss({
     connectionString: env.DATABASE_URL,
-    application_name: "rss-wrangler-api"
+    application_name: "rss-wrangler-api",
   });
 
   await jobs.start();
@@ -104,7 +113,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     await jobs.stop();
   });
 
-  async function releaseAccountClient(request: { dbClient?: { query: (sql: string, params?: unknown[]) => Promise<unknown>; release: () => void } }) {
+  async function releaseAccountClient(request: {
+    dbClient?: {
+      query: (sql: string, params?: unknown[]) => Promise<unknown>;
+      release: () => void;
+    };
+  }) {
     if (!request.dbClient) {
       return;
     }
@@ -153,7 +167,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
     const countResult = await app.pg.query<{ count: string }>(
       `SELECT COUNT(*)::TEXT AS count FROM feed_directory ${whereClause}`,
-      params
+      params,
     );
     const total = Number.parseInt(countResult.rows[0]?.count ?? "0", 10);
 
@@ -174,7 +188,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
        ${whereClause}
        ORDER BY popularity_rank DESC NULLS LAST, title ASC
        LIMIT $${nextParam} OFFSET $${nextParam + 1}`,
-      dataParams
+      dataParams,
     );
 
     const items = dataResult.rows.map((row) =>
@@ -188,72 +202,80 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         language: row.language,
         popularityRank: row.popularity_rank,
         createdAt: row.created_at.toISOString(),
-      })
+      }),
     );
 
     return directoryListResponseSchema.parse({ items, total });
   });
 
-  app.post("/v1/billing/webhooks/lemon-squeezy", {
-    config: {
-      rawBody: true,
-      rateLimit: {
-        max: 300,
-        timeWindow: "1 minute"
+  app.post(
+    "/v1/billing/webhooks/lemon-squeezy",
+    {
+      config: {
+        rawBody: true,
+        rateLimit: {
+          max: 300,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
+      const signatureHeader = Array.isArray(request.headers["x-signature"])
+        ? request.headers["x-signature"][0]
+        : request.headers["x-signature"];
+
+      if (typeof request.rawBody !== "string" || request.rawBody.length === 0) {
+        return reply.badRequest("missing raw webhook body");
       }
-    }
-  }, async (request, reply) => {
-    const signatureHeader = Array.isArray(request.headers["x-signature"])
-      ? request.headers["x-signature"][0]
-      : request.headers["x-signature"];
 
-    if (typeof request.rawBody !== "string" || request.rawBody.length === 0) {
-      return reply.badRequest("missing raw webhook body");
-    }
-
-    const result = await billing.processWebhook(request.rawBody, signatureHeader);
-    if (!result.ok) {
-      if (result.error === "invalid_signature") {
-        return reply.unauthorized(result.message);
+      const result = await billing.processWebhook(request.rawBody, signatureHeader);
+      if (!result.ok) {
+        if (result.error === "invalid_signature") {
+          return reply.unauthorized(result.message);
+        }
+        if (result.error === "invalid_payload") {
+          return reply.badRequest(result.message);
+        }
+        return reply.code(503).send({ error: result.error, message: result.message });
       }
-      if (result.error === "invalid_payload") {
-        return reply.badRequest(result.message);
+
+      return {
+        ok: true,
+        duplicate: result.duplicate,
+        status: result.status,
+        eventName: result.eventName,
+      };
+    },
+  );
+
+  app.post(
+    "/v1/auth/login",
+    {
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (request, reply) => {
+      const payload = loginRequestSchema.parse(request.body);
+      const accountSlug = payload.accountSlug ?? payload.tenantSlug;
+      const tokens = await auth.login(payload.username, payload.password, accountSlug);
+
+      if (tokens === "email_not_verified") {
+        return reply.forbidden("email not verified");
       }
-      return reply.code(503).send({ error: result.error, message: result.message });
-    }
-
-    return {
-      ok: true,
-      duplicate: result.duplicate,
-      status: result.status,
-      eventName: result.eventName
-    };
-  });
-
-  app.post("/v1/auth/login", {
-    config: {
-      rateLimit: {
-        max: 5,
-        timeWindow: "1 minute"
+      if (tokens === "suspended") {
+        return reply.forbidden("account is suspended");
       }
-    }
-  }, async (request, reply) => {
-    const payload = loginRequestSchema.parse(request.body);
-    const accountSlug = payload.accountSlug ?? payload.tenantSlug;
-    const tokens = await auth.login(payload.username, payload.password, accountSlug);
+      if (!tokens) {
+        return reply.unauthorized("invalid credentials");
+      }
 
-    if (tokens === "email_not_verified") {
-      return reply.forbidden("email not verified");
-    }
-    if (tokens === "suspended") {
-      return reply.forbidden("account is suspended");
-    }
-    if (!tokens) {
-      return reply.unauthorized("invalid credentials");
-    }
-
-    return tokens;
-  });
+      return tokens;
+    },
+  );
 
   app.post("/v1/auth/signup", async (request, reply) => {
     const payload = signupRequestSchema.parse(request.body);
@@ -356,7 +378,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         `UPDATE tenant SET last_active_at = NOW()
          WHERE id = $1
            AND (last_active_at IS NULL OR last_active_at < NOW() - INTERVAL '5 minutes')`,
-        [accountId]
+        [accountId],
       )
       .catch((err) => {
         app.log.warn({ err, accountId }, "touchLastActive failed (non-fatal)");
@@ -534,9 +556,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       // Check for cached summary
-      const cached = await dbClient.query<{ ai_summary: string | null; ai_summary_generated_at: Date | null }>(
+      const cached = await dbClient.query<{
+        ai_summary: string | null;
+        ai_summary_generated_at: Date | null;
+      }>(
         "SELECT ai_summary, ai_summary_generated_at FROM cluster WHERE id = $1 AND tenant_id = $2",
-        [id, accountId]
+        [id, accountId],
       );
       const cachedRow = cached.rows[0];
       if (!cachedRow) {
@@ -547,7 +572,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
           summary: cachedRow.ai_summary,
           generatedAt: cachedRow.ai_summary_generated_at
             ? cachedRow.ai_summary_generated_at.toISOString()
-            : null
+            : null,
         });
       }
 
@@ -574,7 +599,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
            AND cm.tenant_id = $2
          ORDER BY i.published_at DESC
          LIMIT 20`,
-        [id, accountId]
+        [id, accountId],
       );
 
       if (membersResult.rows.length === 0) {
@@ -582,7 +607,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       const itemsText = membersResult.rows
-        .map((row, i) => `[${i + 1}] ${row.title} (${row.source_name})${row.summary ? `\n${row.summary}` : ""}`)
+        .map((row, i) => {
+          const safeTitle = sanitizeForPrompt(row.title, 300);
+          const safeSummary = row.summary ? sanitizeForPrompt(row.summary, 1000) : "";
+          return `[${i + 1}] <article-title>${safeTitle}</article-title> (${row.source_name})${safeSummary ? `\n<article-content>${safeSummary}</article-content>` : ""}`;
+        })
         .join("\n\n");
 
       try {
@@ -593,16 +622,16 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
               content:
                 "You are a concise news analyst. Given multiple news articles about the same story from different outlets, " +
                 "write a 2-4 sentence narrative summary that synthesizes the key facts across all sources into a coherent " +
-                "\"Story so far\" paragraph. Focus on what happened, who is involved, and why it matters. " +
-                "Do not reference the sources by name. Do not editorialize or speculate."
+                '"Story so far" paragraph. Focus on what happened, who is involved, and why it matters. ' +
+                "Do not reference the sources by name. Do not editorialize or speculate.",
             },
             {
               role: "user",
-              content: `Summarize the following ${membersResult.rows.length} articles about the same story:\n\n${itemsText}`
-            }
+              content: `Summarize the following ${membersResult.rows.length} articles about the same story:\n\n${itemsText}`,
+            },
           ],
           maxTokens: 300,
-          temperature: 0.3
+          temperature: 0.3,
         });
 
         const summary = completion.text.trim();
@@ -610,7 +639,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         // Cache the result
         await dbClient.query(
           "UPDATE cluster SET ai_summary = $1, ai_summary_generated_at = NOW() WHERE id = $2 AND tenant_id = $3",
-          [summary, id, accountId]
+          [summary, id, accountId],
         );
 
         // Record AI usage
@@ -620,14 +649,18 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
           model: completion.model,
           inputTokens: completion.inputTokens,
           outputTokens: completion.outputTokens,
-          estimatedCostUsd: estimateCostUsd(completion.model, completion.inputTokens, completion.outputTokens),
+          estimatedCostUsd: estimateCostUsd(
+            completion.model,
+            completion.inputTokens,
+            completion.outputTokens,
+          ),
           feature: "summary",
-          durationMs: completion.durationMs
+          durationMs: completion.durationMs,
         });
 
         return clusterAiSummaryResponseSchema.parse({
           summary,
-          generatedAt: new Date().toISOString()
+          generatedAt: new Date().toISOString(),
         });
       } catch {
         // If AI call fails, return null gracefully
@@ -682,13 +715,13 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       const distribution = await store.getFolderDistribution();
       // Map folder names to feed directory categories
       const folderToCategories: Record<string, string[]> = {
-        "Tech": ["Tech", "Programming", "Design"],
-        "Security": ["Security"],
-        "Gaming": ["Gaming"],
-        "Business": ["Business"],
-        "Science": ["Science"],
+        Tech: ["Tech", "Programming", "Design"],
+        Security: ["Security"],
+        Gaming: ["Gaming"],
+        Business: ["Business"],
+        Science: ["Science"],
         "World News": ["World News"],
-        "Other": ["Tech", "Science", "World News"],
+        Other: ["Tech", "Science", "World News"],
       };
 
       // Find which categories the user is NOT heavily subscribed to
@@ -701,7 +734,16 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       // Suggest categories with low coverage
-      const allCategories = ["Tech", "Security", "Gaming", "Business", "Science", "Design", "World News", "Programming"];
+      const allCategories = [
+        "Tech",
+        "Security",
+        "Gaming",
+        "Business",
+        "Science",
+        "Design",
+        "World News",
+        "Programming",
+      ];
       const suggestions = allCategories.filter((cat) => !subscribedCategories.has(cat));
 
       // If all are covered, suggest the least-covered ones
@@ -724,7 +766,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.code(402).send({
           error: "feed_limit_reached",
           message: `Your current plan allows up to ${entitlements.feedLimit} feeds. Upgrade to add more.`,
-          limit: entitlements.feedLimit
+          limit: entitlements.feedLimit,
         });
       }
 
@@ -743,95 +785,106 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return feed;
     });
 
-    protectedRoutes.post("/v1/feeds/:id/poll-now", {
-      config: {
-        rateLimit: {
-          max: 30,
-          timeWindow: "1 minute"
+    protectedRoutes.post(
+      "/v1/feeds/:id/poll-now",
+      {
+        config: {
+          rateLimit: {
+            max: 30,
+            timeWindow: "1 minute",
+          },
+        },
+      },
+      async (request, reply) => {
+        const { id } = feedIdParams.parse(request.params);
+        const authContext = request.authContext;
+        if (!authContext) {
+          return reply.unauthorized("missing auth context");
         }
-      }
-    }, async (request, reply) => {
-      const { id } = feedIdParams.parse(request.params);
-      const authContext = request.authContext;
-      if (!authContext) {
-        return reply.unauthorized("missing auth context");
-      }
-      if (!request.dbClient) {
-        throw app.httpErrors.internalServerError("missing account db context");
-      }
-      const body = pollFeedNowRequestSchema.parse(request.body ?? {});
-      const backfillSince = typeof body.lookbackDays === "number"
-        ? new Date(Date.now() - body.lookbackDays * 24 * 60 * 60 * 1000).toISOString()
-        : null;
+        if (!request.dbClient) {
+          throw app.httpErrors.internalServerError("missing account db context");
+        }
+        const body = pollFeedNowRequestSchema.parse(request.body ?? {});
+        const backfillSince =
+          typeof body.lookbackDays === "number"
+            ? new Date(Date.now() - body.lookbackDays * 24 * 60 * 60 * 1000).toISOString()
+            : null;
 
-      const result = await request.dbClient.query<{
-        id: string;
-        tenant_id: string;
-        url: string;
-        title: string;
-        site_url: string | null;
-        folder_id: string;
-        weight: "prefer" | "neutral" | "deprioritize";
-        etag: string | null;
-        last_modified: string | null;
-        classification_status: "pending_classification" | "classified" | "approved";
-      }>(
-        `SELECT id, tenant_id, url, title, site_url, folder_id, weight, etag, last_modified, classification_status
+        const result = await request.dbClient.query<{
+          id: string;
+          tenant_id: string;
+          url: string;
+          title: string;
+          site_url: string | null;
+          folder_id: string;
+          weight: "prefer" | "neutral" | "deprioritize";
+          etag: string | null;
+          last_modified: string | null;
+          classification_status: "pending_classification" | "classified" | "approved";
+        }>(
+          `SELECT id, tenant_id, url, title, site_url, folder_id, weight, etag, last_modified, classification_status
          FROM feed
          WHERE id = $1
            AND tenant_id = $2
          LIMIT 1`,
-        [id, authContext.accountId]
-      );
+          [id, authContext.accountId],
+        );
 
-      const feed = result.rows[0];
-      if (!feed) {
-        return reply.notFound("feed not found");
-      }
-
-      try {
-        const jobId = await jobs.send(PROCESS_FEED_JOB, {
-          id: feed.id,
-          accountId: feed.tenant_id,
-          // Keep tenantId for worker backward compat
-          tenantId: feed.tenant_id,
-          url: feed.url,
-          title: feed.title,
-          siteUrl: feed.site_url,
-          folderId: feed.folder_id,
-          weight: feed.weight,
-          etag: feed.etag,
-          lastModified: feed.last_modified,
-          // Force immediate poll regardless of the stored last_polled_at.
-          lastPolledAt: null,
-          classificationStatus: feed.classification_status,
-          backfillSince
-        });
-
-        if (!jobId) {
-          request.log.warn({
-            feedId: feed.id,
-            accountId: feed.tenant_id
-          }, "poll-now queue send returned null");
-          return reply.code(503).send({
-            error: "queue_unavailable",
-            message: "could not queue feed poll job"
-          });
+        const feed = result.rows[0];
+        if (!feed) {
+          return reply.notFound("feed not found");
         }
 
-        return { ok: true, jobId };
-      } catch (error) {
-        request.log.error({
-          err: error,
-          feedId: feed.id,
-          accountId: feed.tenant_id
-        }, "poll-now queue send failed");
-        return reply.code(503).send({
-          error: "queue_unavailable",
-          message: "could not queue feed poll job"
-        });
-      }
-    });
+        try {
+          const jobId = await jobs.send(PROCESS_FEED_JOB, {
+            id: feed.id,
+            accountId: feed.tenant_id,
+            // Keep tenantId for worker backward compat
+            tenantId: feed.tenant_id,
+            url: feed.url,
+            title: feed.title,
+            siteUrl: feed.site_url,
+            folderId: feed.folder_id,
+            weight: feed.weight,
+            etag: feed.etag,
+            lastModified: feed.last_modified,
+            // Force immediate poll regardless of the stored last_polled_at.
+            lastPolledAt: null,
+            classificationStatus: feed.classification_status,
+            backfillSince,
+          });
+
+          if (!jobId) {
+            request.log.warn(
+              {
+                feedId: feed.id,
+                accountId: feed.tenant_id,
+              },
+              "poll-now queue send returned null",
+            );
+            return reply.code(503).send({
+              error: "queue_unavailable",
+              message: "could not queue feed poll job",
+            });
+          }
+
+          return { ok: true, jobId };
+        } catch (error) {
+          request.log.error(
+            {
+              err: error,
+              feedId: feed.id,
+              accountId: feed.tenant_id,
+            },
+            "poll-now queue send failed",
+          );
+          return reply.code(503).send({
+            error: "queue_unavailable",
+            message: "could not queue feed poll job",
+          });
+        }
+      },
+    );
 
     protectedRoutes.get("/v1/feeds/:id/topics", async (request) => {
       const { id } = feedIdParams.parse(request.params);
@@ -859,10 +912,13 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       let xml: string;
       if (typeof request.body === "string") {
         xml = request.body;
-      } else if (request.body && typeof (request.body as Record<string, unknown>).opml === "string") {
+      } else if (
+        request.body &&
+        typeof (request.body as Record<string, unknown>).opml === "string"
+      ) {
         xml = (request.body as Record<string, unknown>).opml as string;
       } else {
-        return reply.badRequest("request body must be an OPML XML string or { opml: \"...\" }");
+        return reply.badRequest('request body must be an OPML XML string or { opml: "..." }');
       }
 
       const feeds = parseOpml(xml);
@@ -879,7 +935,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
           return reply.code(402).send({
             error: "feed_limit_reached",
             message: `Your current plan allows up to ${entitlements.feedLimit} feeds. Upgrade to import more.`,
-            limit: entitlements.feedLimit
+            limit: entitlements.feedLimit,
           });
         }
         if (feedsToImport.length > remainingSlots) {
@@ -890,9 +946,10 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       const store = storeFor(request);
       const result = await store.importOpml(feedsToImport);
       const rejectedCount = feeds.length - feedsToImport.length;
-      const remainingSlots = entitlements.feedLimit === null
-        ? undefined
-        : Math.max(entitlements.feedLimit - (entitlements.usage.feeds + result.imported), 0);
+      const remainingSlots =
+        entitlements.feedLimit === null
+          ? undefined
+          : Math.max(entitlements.feedLimit - (entitlements.usage.feeds + result.imported), 0);
 
       return opmlImportResponseSchema.parse({
         ok: true,
@@ -900,7 +957,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         total: feeds.length,
         limitedByPlan: rejectedCount > 0 ? true : undefined,
         rejectedCount: rejectedCount > 0 ? rejectedCount : undefined,
-        remainingSlots
+        remainingSlots,
       });
     });
 
@@ -915,7 +972,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       try {
         return await store.createFilter(payload);
       } catch (err: unknown) {
-        if (err && typeof err === "object" && "statusCode" in err && (err as { statusCode: number }).statusCode === 400) {
+        if (
+          err &&
+          typeof err === "object" &&
+          "statusCode" in err &&
+          (err as { statusCode: number }).statusCode === 400
+        ) {
           return reply.badRequest((err as unknown as Error).message);
         }
         throw err;
@@ -933,7 +995,12 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         }
         return filter;
       } catch (err: unknown) {
-        if (err && typeof err === "object" && "statusCode" in err && (err as { statusCode: number }).statusCode === 400) {
+        if (
+          err &&
+          typeof err === "object" &&
+          "statusCode" in err &&
+          (err as { statusCode: number }).statusCode === 400
+        ) {
           return reply.badRequest((err as unknown as Error).message);
         }
         throw err;
@@ -954,43 +1021,50 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       return store.listDigests();
     });
 
-    protectedRoutes.post("/v1/digest/generate", {
-      config: {
-        rateLimit: {
-          max: 5,
-          timeWindow: "1 minute"
+    protectedRoutes.post(
+      "/v1/digest/generate",
+      {
+        config: {
+          rateLimit: {
+            max: 5,
+            timeWindow: "1 minute",
+          },
+        },
+      },
+      async (request, reply) => {
+        const authContext = request.authContext;
+        if (!authContext) {
+          return reply.unauthorized("missing auth context");
         }
-      }
-    }, async (request, reply) => {
-      const authContext = request.authContext;
-      if (!authContext) {
-        return reply.unauthorized("missing auth context");
-      }
 
-      try {
-        const jobId = await jobs.send(GENERATE_DIGEST_FOR_ACCOUNT_JOB, {
-          accountId: authContext.accountId,
-        });
+        try {
+          const jobId = await jobs.send(GENERATE_DIGEST_FOR_ACCOUNT_JOB, {
+            accountId: authContext.accountId,
+          });
 
-        if (!jobId) {
+          if (!jobId) {
+            return reply.code(503).send({
+              error: "queue_unavailable",
+              message: "could not queue digest generation job",
+            });
+          }
+
+          return { ok: true, jobId };
+        } catch (error) {
+          request.log.error(
+            {
+              err: error,
+              accountId: authContext.accountId,
+            },
+            "digest generate queue send failed",
+          );
           return reply.code(503).send({
             error: "queue_unavailable",
-            message: "could not queue digest generation job"
+            message: "could not queue digest generation job",
           });
         }
-
-        return { ok: true, jobId };
-      } catch (error) {
-        request.log.error({
-          err: error,
-          accountId: authContext.accountId
-        }, "digest generate queue send failed");
-        return reply.code(503).send({
-          error: "queue_unavailable",
-          message: "could not queue digest generation job"
-        });
-      }
-    });
+      },
+    );
 
     protectedRoutes.post("/v1/events", async (request) => {
       const payload = eventsBatchRequestSchema.parse(request.body);
@@ -1009,7 +1083,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         authContext.userId,
         authContext.accountId,
         payload.currentPassword,
-        payload.newPassword
+        payload.newPassword,
       );
 
       if (result === "invalid_current_password") {
@@ -1040,7 +1114,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       }
 
       const payload = requestAccountDeletionSchema.parse(request.body);
-      const result = await auth.requestAccountDeletion(authContext.userId, authContext.accountId, payload);
+      const result = await auth.requestAccountDeletion(
+        authContext.userId,
+        authContext.accountId,
+        payload,
+      );
 
       if (result === "invalid_password") {
         return reply.unauthorized("current password is incorrect");
@@ -1080,7 +1158,11 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         throw app.httpErrors.unauthorized("missing auth context");
       }
       const payload = createMemberInviteRequestSchema.parse(request.body);
-      const invite = await auth.createMemberInvite(authContext.userId, authContext.accountId, payload);
+      const invite = await auth.createMemberInvite(
+        authContext.userId,
+        authContext.accountId,
+        payload,
+      );
       if (invite === "not_owner") {
         return reply.forbidden("only account owner can perform this action");
       }
@@ -1124,9 +1206,16 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
       if (body.role) {
         if (body.role === "owner") {
-          return reply.badRequest("single-owner mode enabled: promoting users to owner is disabled");
+          return reply.badRequest(
+            "single-owner mode enabled: promoting users to owner is disabled",
+          );
         }
-        const result = await auth.updateMemberRole(authContext.userId, authContext.accountId, id, body.role);
+        const result = await auth.updateMemberRole(
+          authContext.userId,
+          authContext.accountId,
+          id,
+          body.role,
+        );
         if (result === "not_owner") {
           return reply.forbidden("only account owner can perform this action");
         }
@@ -1185,7 +1274,10 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         return reply.unauthorized("missing auth context");
       }
 
-      const download = await auth.getAccountDataExportPayload(authContext.userId, authContext.accountId);
+      const download = await auth.getAccountDataExportPayload(
+        authContext.userId,
+        authContext.accountId,
+      );
       if (!download) {
         return reply.notFound("no completed account export found");
       }
@@ -1224,7 +1316,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         accountId: authContext.accountId,
         userId: authContext.userId,
         planId: payload.planId,
-        interval: payload.interval
+        interval: payload.interval,
       });
 
       if (!result.ok) {
@@ -1279,7 +1371,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         subscriptionStatus: result.subscriptionStatus,
         cancelAtPeriodEnd: result.cancelAtPeriodEnd,
         currentPeriodEndsAt: result.currentPeriodEndsAt,
-        customerPortalUrl: result.customerPortalUrl
+        customerPortalUrl: result.customerPortalUrl,
       });
     });
 
@@ -1305,7 +1397,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
          WHERE tenant_id = $1
            AND user_id = $2
          LIMIT 1`,
-        [authContext.accountId, authContext.userId]
+        [authContext.accountId, authContext.userId],
       );
       const row = result.rows[0];
       const effectiveRegion = row?.region_code ?? countryCode;
@@ -1317,7 +1409,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         functional: row?.functional_enabled ?? false,
         consentCapturedAt: row?.updated_at?.toISOString() ?? null,
         regionCode: effectiveRegion ?? null,
-        requiresExplicitConsent: requiresExplicitConsent(effectiveRegion)
+        requiresExplicitConsent: requiresExplicitConsent(effectiveRegion),
       });
     });
 
@@ -1365,8 +1457,8 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
           payload.analytics,
           payload.advertising,
           payload.functional,
-          countryCode
-        ]
+          countryCode,
+        ],
       );
 
       const row = result.rows[0];
@@ -1382,7 +1474,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         functional: row.functional_enabled,
         consentCapturedAt: row.updated_at.toISOString(),
         regionCode: effectiveRegion ?? null,
-        requiresExplicitConsent: requiresExplicitConsent(effectiveRegion)
+        requiresExplicitConsent: requiresExplicitConsent(effectiveRegion),
       });
     });
 
@@ -1449,7 +1541,10 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
     });
 
     const aiUsageMonthQuerySchema = z.object({
-      month: z.string().regex(/^\d{4}-\d{2}$/).optional()
+      month: z
+        .string()
+        .regex(/^\d{4}-\d{2}$/)
+        .optional(),
     });
 
     protectedRoutes.get("/v1/ai/usage", async (request) => {
@@ -1491,7 +1586,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
            AND (impression_budget IS NULL OR impressions_served < impression_budget)
            AND (click_budget IS NULL OR clicks_served < click_budget)
          ORDER BY position ASC`,
-        [authContext.accountId]
+        [authContext.accountId],
       );
 
       return result.rows.map((row) => ({
@@ -1519,7 +1614,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         `UPDATE sponsored_placement
          SET impressions_served = impressions_served + 1, updated_at = NOW()
          WHERE id = $1 AND tenant_id = $2`,
-        [id, authContext.accountId]
+        [id, authContext.accountId],
       );
 
       if ((updated as { rowCount: number }).rowCount === 0) {
@@ -1529,7 +1624,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       await request.dbClient.query(
         `INSERT INTO sponsored_event (tenant_id, placement_id, event_type)
          VALUES ($1, $2, 'impression')`,
-        [authContext.accountId, id]
+        [authContext.accountId, id],
       );
 
       return { ok: true };
@@ -1549,7 +1644,7 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
         `UPDATE sponsored_placement
          SET clicks_served = clicks_served + 1, updated_at = NOW()
          WHERE id = $1 AND tenant_id = $2`,
-        [id, authContext.accountId]
+        [id, authContext.accountId],
       );
 
       if ((updated as { rowCount: number }).rowCount === 0) {
@@ -1559,9 +1654,40 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
       await request.dbClient.query(
         `INSERT INTO sponsored_event (tenant_id, placement_id, event_type)
          VALUES ($1, $2, 'click')`,
-        [authContext.accountId, id]
+        [authContext.accountId, id],
       );
 
+      return { ok: true };
+    });
+
+    // ---------- Feed Recommendations ----------
+
+    const recommendationIdParams = z.object({ id: z.string().uuid() });
+
+    protectedRoutes.get("/v1/recommendations", async (request) => {
+      const { accountId, dbClient } = accountContextFor(request);
+
+      // Gate behind pro on hosted deployments
+      const isHostedBilling = Boolean(env.LEMON_SQUEEZY_API_KEY);
+      if (isHostedBilling) {
+        const entitlements = await getAccountEntitlements(dbClient, accountId);
+        if (entitlements.planId === "free") {
+          return feedRecommendationsResponseSchema.parse({ recommendations: [] });
+        }
+      }
+
+      const recommendations = await getRecommendations(dbClient, accountId);
+      return feedRecommendationsResponseSchema.parse({ recommendations });
+    });
+
+    protectedRoutes.post("/v1/recommendations/:id/dismiss", async (request, reply) => {
+      const { id } = recommendationIdParams.parse(request.params);
+      const { accountId, dbClient } = accountContextFor(request);
+
+      const ok = await dismissRecommendation(dbClient, accountId, id);
+      if (!ok) {
+        return reply.notFound("recommendation not found");
+      }
       return { ok: true };
     });
 
@@ -1579,8 +1705,8 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
 
       let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
       xml += '<opml version="2.0">\n';
-      xml += '  <head><title>RSS Wrangler Export</title></head>\n';
-      xml += '  <body>\n';
+      xml += "  <head><title>RSS Wrangler Export</title></head>\n";
+      xml += "  <body>\n";
 
       for (const [folderName, folderFeeds] of grouped) {
         xml += `    <outline text="${escapeXml(folderName)}" title="${escapeXml(folderName)}">\n`;
@@ -1589,13 +1715,13 @@ export const v1Routes: FastifyPluginAsync<{ env: ApiEnv }> = async (app, { env }
           if (feed.htmlUrl) {
             xml += ` htmlUrl="${escapeXml(feed.htmlUrl)}"`;
           }
-          xml += ' />\n';
+          xml += " />\n";
         }
-        xml += '    </outline>\n';
+        xml += "    </outline>\n";
       }
 
-      xml += '  </body>\n';
-      xml += '</opml>\n';
+      xml += "  </body>\n";
+      xml += "</opml>\n";
 
       return reply
         .header("Content-Type", "application/xml; charset=utf-8")
@@ -1610,14 +1736,14 @@ async function searchClustersTitleAndSource(
     query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
   },
   accountId: string,
-  query: SearchQuery
+  query: SearchQuery,
 ): Promise<{ data: ClusterCard[]; nextCursor: string | null }> {
   const offset = query.cursor ? Number.parseInt(query.cursor, 10) || 0 : 0;
   const limit = query.limit;
   const whereConditions: string[] = [
     "c.tenant_id = $2",
     "i.tenant_id = $2",
-    "to_tsvector('english', COALESCE(i.title, '') || ' ' || COALESCE(source_feed.title, '')) @@ websearch_to_tsquery('english', $1)"
+    "to_tsvector('english', COALESCE(i.title, '') || ' ' || COALESCE(source_feed.title, '')) @@ websearch_to_tsquery('english', $1)",
   ];
   const params: unknown[] = [query.q, accountId];
   let nextParam = 3;
@@ -1703,47 +1829,68 @@ async function searchClustersTitleAndSource(
   `;
 
   params.push(offset, limit + 1);
-  const result = await dbClient.query<{
-    id: string;
-    headline: string;
-    hero_image_url: string | null;
-    primary_feed_id: string;
-    primary_source: string;
-    primary_source_published_at: Date;
-    outlet_count: number;
-    folder_id: string;
-    folder_name: string;
-    topic_id: string | null;
-    topic_name: string | null;
-    summary: string | null;
-    muted_breakout_reason: string | null;
-    read_at: Date | null;
-    saved_at: Date | null;
-  }>(wrappedSql, params);
+  const [result, settingsResult] = await Promise.all([
+    dbClient.query<{
+      id: string;
+      headline: string;
+      hero_image_url: string | null;
+      primary_feed_id: string;
+      primary_source: string;
+      primary_source_published_at: Date;
+      outlet_count: number;
+      folder_id: string;
+      folder_name: string;
+      topic_id: string | null;
+      topic_name: string | null;
+      summary: string | null;
+      muted_breakout_reason: string | null;
+      read_at: Date | null;
+      saved_at: Date | null;
+    }>(wrappedSql, params),
+    dbClient.query<{ data: unknown }>(
+      "SELECT data FROM app_settings WHERE tenant_id = $1 AND key = 'main' LIMIT 1",
+      [accountId],
+    ),
+  ]);
+
+  const settingsRow = settingsResult.rows[0];
+  const settingsData = (
+    settingsRow?.data && typeof settingsRow.data === "object" ? settingsRow.data : {}
+  ) as Record<string, unknown>;
+  const freshHours = (settingsData.progressiveFreshHours as number) ?? 6;
+  const agingDays = (settingsData.progressiveAgingDays as number) ?? 3;
+  const summarizationEnabled = (settingsData.progressiveSummarizationEnabled as boolean) ?? true;
 
   const hasMore = result.rows.length > limit;
-  const data: ClusterCard[] = result.rows.slice(0, limit).map((row) => ({
-    id: row.id,
-    headline: row.headline,
-    heroImageUrl: row.hero_image_url,
-    primaryFeedId: row.primary_feed_id,
-    primarySource: row.primary_source,
-    primarySourcePublishedAt: row.primary_source_published_at.toISOString(),
-    outletCount: Number(row.outlet_count),
-    folderId: row.folder_id,
-    folderName: row.folder_name,
-    topicId: row.topic_id,
-    topicName: row.topic_name,
-    summary: row.summary,
-    mutedBreakoutReason: row.muted_breakout_reason,
-    rankingExplainability: null,
-    isRead: row.read_at != null,
-    isSaved: row.saved_at != null
-  }));
+  const data: ClusterCard[] = result.rows.slice(0, limit).map((row) => {
+    const publishedAt = row.primary_source_published_at.toISOString();
+    return {
+      id: row.id,
+      headline: row.headline,
+      heroImageUrl: row.hero_image_url,
+      primaryFeedId: row.primary_feed_id,
+      primarySource: row.primary_source,
+      primarySourcePublishedAt: publishedAt,
+      outletCount: Number(row.outlet_count),
+      folderId: row.folder_id,
+      folderName: row.folder_name,
+      topicId: row.topic_id,
+      topicName: row.topic_name,
+      summary: row.summary,
+      mutedBreakoutReason: row.muted_breakout_reason,
+      displayMode: computeDisplayMode(publishedAt, freshHours, agingDays, summarizationEnabled),
+      rankingExplainability: null,
+      aiFocusScore: null,
+      aiRelevantLabel: null,
+      aiSuggestedTags: null,
+      isRead: row.read_at != null,
+      isSaved: row.saved_at != null,
+    };
+  });
 
   return {
     data,
-    nextCursor: hasMore ? String(offset + limit) : null
+    nextCursor: hasMore ? String(offset + limit) : null,
   };
 }
 

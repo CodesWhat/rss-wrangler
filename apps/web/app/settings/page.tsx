@@ -1,48 +1,48 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ProtectedRoute } from "@/components/protected-route";
-import { NotificationToggle } from "@/components/notification-toggle";
-import {
-  getAccountEntitlements,
-  createBillingCheckout,
-  cancelAccountDeletion,
-  changePassword,
-  getBillingOverview,
-  getBillingPortalUrl,
-  updateBillingSubscription,
-  getAccountDeletionStatus,
-  requestAccountDeletion,
-  getSettings,
-  updateSettings,
-  listFilters,
-  createFilter,
-  deleteFilter,
-  listMembers,
-  approveMember,
-  rejectMember,
-  removeMember,
-  updateMemberRole,
-  getWorkspacePolicy,
-  updateWorkspacePolicy,
-  getCurrentUserId,
-} from "@/lib/api";
 import type {
-  Settings,
-  FilterRule,
-  AiMode,
-  AiProvider,
   AccountDeletionStatus,
   AccountEntitlements,
-  FilterType,
-  FilterMode,
-  BillingOverview,
+  AiMode,
+  AiProvider,
+  AiUsageSummary,
   BillingInterval,
+  BillingOverview,
+  Feed,
+  FilterMode,
+  FilterRule,
+  FilterTarget,
+  FilterType,
+  Folder,
   HostedPlanId,
-  WorkspaceMember,
-  MembershipPolicy,
-  UserRole,
+  Member,
+  Settings,
 } from "@rss-wrangler/contracts";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { NotificationToggle } from "@/components/notification-toggle";
+import { ProtectedRoute } from "@/components/protected-route";
+import {
+  cancelAccountDeletion,
+  changePassword,
+  createBillingCheckout,
+  createFilter,
+  deleteFilter,
+  getAccountDeletionStatus,
+  getAccountEntitlements,
+  getAiUsage,
+  getBillingOverview,
+  getBillingPortalUrl,
+  getCurrentUserId,
+  getSettings,
+  listAccountMembers,
+  listFeeds,
+  listFilters,
+  listFolders,
+  removeMember,
+  requestAccountDeletion,
+  updateBillingSubscription,
+  updateSettings,
+} from "@/lib/api";
 
 function relativeTime(iso: string | null): string {
   if (!iso) return "Never";
@@ -62,13 +62,9 @@ function relativeTime(iso: string | null): string {
 }
 
 function MembersSection() {
-  const [members, setMembers] = useState<WorkspaceMember[]>([]);
-  const [policy, setPolicy] = useState<MembershipPolicy>("invite_only");
-  const [policyDraft, setPolicyDraft] = useState<MembershipPolicy>("invite_only");
+  const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [policySaving, setPolicySaving] = useState(false);
-  const [policySaved, setPolicySaved] = useState(false);
   const [actionBusy, setActionBusy] = useState<Set<string>>(new Set());
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -76,13 +72,8 @@ function MembersSection() {
   useEffect(() => {
     async function load() {
       try {
-        const [memberList, workspacePolicy] = await Promise.all([
-          listMembers(),
-          getWorkspacePolicy(),
-        ]);
+        const memberList = await listAccountMembers();
         setMembers(memberList);
-        setPolicy(workspacePolicy);
-        setPolicyDraft(workspacePolicy);
         setCurrentUserId(getCurrentUserId());
       } catch {
         setError("Failed to load members.");
@@ -94,9 +85,6 @@ function MembersSection() {
 
   const currentMember = members.find((m) => m.id === currentUserId);
   const isOwner = currentMember?.role === "owner";
-  const pendingMembers = members.filter((m) => m.status === "pending_approval");
-  const activeMembers = members.filter((m) => m.status !== "pending_approval");
-
   function markBusy(id: string) {
     setActionBusy((prev) => new Set(prev).add(id));
   }
@@ -107,37 +95,6 @@ function MembersSection() {
       next.delete(id);
       return next;
     });
-  }
-
-  async function handleApprove(id: string) {
-    markBusy(id);
-    setMembers((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, status: "active" as const } : m))
-    );
-    const result = await approveMember(id);
-    if (!result.ok) {
-      setMembers((prev) =>
-        prev.map((m) =>
-          m.id === id ? { ...m, status: "pending_approval" as const } : m
-        )
-      );
-      setError(result.error);
-    }
-    clearBusy(id);
-  }
-
-  async function handleReject(id: string) {
-    markBusy(id);
-    const original = members.find((m) => m.id === id);
-    setMembers((prev) => prev.filter((m) => m.id !== id));
-    const result = await rejectMember(id);
-    if (!result.ok) {
-      if (original) {
-        setMembers((prev) => [...prev, original]);
-      }
-      setError(result.error);
-    }
-    clearBusy(id);
   }
 
   async function handleRemove(id: string) {
@@ -155,38 +112,6 @@ function MembersSection() {
     clearBusy(id);
   }
 
-  async function handleRoleChange(id: string, newRole: UserRole) {
-    markBusy(id);
-    const oldRole = members.find((m) => m.id === id)?.role;
-    setMembers((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, role: newRole } : m))
-    );
-    const result = await updateMemberRole(id, { role: newRole });
-    if (!result.ok) {
-      setMembers((prev) =>
-        prev.map((m) => (m.id === id ? { ...m, role: oldRole ?? "member" } : m))
-      );
-      setError(result.error);
-    }
-    clearBusy(id);
-  }
-
-  async function handleSavePolicy(e: FormEvent) {
-    e.preventDefault();
-    setPolicySaving(true);
-    setPolicySaved(false);
-    const result = await updateWorkspacePolicy(policyDraft);
-    if (result.ok) {
-      setPolicy(policyDraft);
-      setPolicySaved(true);
-      setTimeout(() => setPolicySaved(false), 2000);
-    } else {
-      setError(result.error);
-      setPolicyDraft(policy);
-    }
-    setPolicySaving(false);
-  }
-
   if (loading) {
     return (
       <section className="section-card" id="members">
@@ -196,98 +121,50 @@ function MembersSection() {
     );
   }
 
+  if (!isOwner) {
+    return (
+      <section className="section-card" id="members">
+        <h2>Members</h2>
+        <p className="muted">Only the account owner can manage members.</p>
+      </section>
+    );
+  }
+
   return (
     <section className="section-card" id="members">
-      <h2>
-        Members
-        {policySaved && (
-          <span className="key-status key-status-active saved-indicator-lg">SAVED</span>
-        )}
-      </h2>
-      <p className="muted">Manage workspace members, roles, and membership policy.</p>
+      <h2>Members</h2>
+      <p className="muted">This build supports a single owner account plus invited members.</p>
 
-      {error && <p className="error-text">{error}</p>}
-
-      {/* Membership Policy (owner only) */}
-      {isOwner && (
-        <form onSubmit={handleSavePolicy} className="settings-form">
-          <label>
-            Membership Policy
-            <select
-              value={policyDraft}
-              onChange={(e) => setPolicyDraft(e.target.value as MembershipPolicy)}
-            >
-              <option value="invite_only">Invite Only — Users need an invite code to join</option>
-              <option value="open">Open — Anyone can join this workspace</option>
-              <option value="approval_required">Approval Required — New members need owner approval after joining</option>
-            </select>
-          </label>
-          <button
-            type="submit"
-            className="button button-primary"
-            disabled={policySaving || policyDraft === policy}
-          >
-            {policySaving ? "Saving..." : policyDraft === policy ? "Policy saved" : "Save policy"}
-          </button>
-        </form>
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
       )}
 
-      {/* Pending Approvals */}
-      {pendingMembers.length > 0 && isOwner && (
-        <div className="members-pending-banner">
-          <strong>{pendingMembers.length} member{pendingMembers.length !== 1 ? "s" : ""} awaiting approval</strong>
-          <div className="members-pending-list">
-            {pendingMembers.map((m) => (
-              <div key={m.id} className="members-pending-item">
-                <div className="members-pending-info">
-                  <span className="members-username">{m.username}</span>
-                  <span className="muted">{m.email ?? ""}</span>
-                  <span className="muted">{relativeTime(m.joinedAt)}</span>
-                </div>
-                <div className="members-pending-actions">
-                  <button
-                    type="button"
-                    className="button button-small members-btn-approve"
-                    disabled={actionBusy.has(m.id)}
-                    onClick={() => handleApprove(m.id)}
-                  >
-                    Approve
-                  </button>
-                  <button
-                    type="button"
-                    className="button button-small button-danger"
-                    disabled={actionBusy.has(m.id)}
-                    onClick={() => handleReject(m.id)}
-                  >
-                    Reject
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Active Members Table */}
-      {activeMembers.length === 0 ? (
-        <p className="muted" style={{ marginTop: "var(--sp-3)" }}>No members yet.</p>
+      {members.length === 0 ? (
+        <p className="muted" style={{ marginTop: "var(--sp-3)" }}>
+          No members yet.
+        </p>
       ) : (
         <table className="feed-table members-table">
           <thead>
             <tr>
-              <th>Username</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Joined</th>
-              <th>Last Active</th>
-              {isOwner && <th></th>}
+              <th scope="col">Username</th>
+              <th scope="col">Email</th>
+              <th scope="col">Role</th>
+              <th scope="col">Status</th>
+              <th scope="col">Joined</th>
+              <th scope="col">Last Active</th>
+              {isOwner && (
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
+              )}
             </tr>
           </thead>
           <tbody>
-            {activeMembers.map((m) => {
+            {members.map((m) => {
               const isSelf = m.id === currentUserId;
-              const isMemberOwner = m.role === "owner";
               return (
                 <tr key={m.id}>
                   <td>
@@ -296,76 +173,53 @@ function MembersSection() {
                   </td>
                   <td>{m.email ?? "\u2014"}</td>
                   <td>
-                    {isOwner && !isSelf && !isMemberOwner ? (
-                      <select
-                        className="members-role-select"
-                        value={m.role}
-                        disabled={actionBusy.has(m.id)}
-                        onChange={(e) => handleRoleChange(m.id, e.target.value as UserRole)}
-                      >
-                        <option value="member">Member</option>
-                        <option value="owner">Owner</option>
-                      </select>
-                    ) : (
-                      <span className={`badge ${m.role === "owner" ? "badge-approved" : ""}`}>
-                        {m.role === "owner" ? "Owner" : "Member"}
-                      </span>
-                    )}
+                    <span className={`badge ${m.role === "owner" ? "badge-approved" : ""}`}>
+                      {m.role === "owner" ? "Owner" : "Member"}
+                    </span>
                   </td>
                   <td>
                     <span
                       className={`badge ${
-                        m.status === "active"
-                          ? "badge-approved"
-                          : m.status === "pending_approval"
-                            ? "badge-pending"
-                            : "badge-rejected"
+                        m.status === "active" ? "badge-approved" : "badge-rejected"
                       }`}
                     >
-                      {m.status === "active"
-                        ? "Active"
-                        : m.status === "pending_approval"
-                          ? "Pending"
-                          : "Suspended"}
+                      {m.status === "active" ? "Active" : "Suspended"}
                     </span>
                   </td>
                   <td className="muted">{relativeTime(m.joinedAt)}</td>
                   <td className="muted">{relativeTime(m.lastLoginAt)}</td>
                   {isOwner && (
                     <td>
-                      {!isSelf && !isMemberOwner && (
-                        <>
-                          {confirmRemove === m.id ? (
-                            <div className="members-confirm-remove">
-                              <span className="muted">Remove {m.username}?</span>
-                              <button
-                                type="button"
-                                className="button button-small button-danger"
-                                disabled={actionBusy.has(m.id)}
-                                onClick={() => handleRemove(m.id)}
-                              >
-                                Yes
-                              </button>
-                              <button
-                                type="button"
-                                className="button button-small"
-                                onClick={() => setConfirmRemove(null)}
-                              >
-                                No
-                              </button>
-                            </div>
-                          ) : (
+                      {!isSelf &&
+                        (confirmRemove === m.id ? (
+                          <div className="members-confirm-remove">
+                            <span className="muted">Remove {m.username}?</span>
                             <button
                               type="button"
                               className="button button-small button-danger"
                               disabled={actionBusy.has(m.id)}
-                              onClick={() => setConfirmRemove(m.id)}
+                              onClick={() => handleRemove(m.id)}
                             >
-                              Remove
+                              Yes
                             </button>
-                          )}
-                        </>
-                      )}
+                            <button
+                              type="button"
+                              className="button button-small"
+                              onClick={() => setConfirmRemove(null)}
+                            >
+                              No
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="button button-small button-danger"
+                            disabled={actionBusy.has(m.id)}
+                            onClick={() => setConfirmRemove(m.id)}
+                          >
+                            Remove
+                          </button>
+                        ))}
                     </td>
                   )}
                 </tr>
@@ -373,6 +227,200 @@ function MembersSection() {
             })}
           </tbody>
         </table>
+      )}
+    </section>
+  );
+}
+
+function budgetBarColor(percent: number | null): string {
+  if (percent === null) return "var(--text-muted)";
+  if (percent >= 90) return "var(--danger)";
+  if (percent >= 70) return "var(--warning)";
+  return "var(--success)";
+}
+
+function formatTokenCount(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return n.toLocaleString();
+}
+
+function AiUsageSection() {
+  const [usage, setUsage] = useState<AiUsageSummary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const data = await getAiUsage();
+        setUsage(data);
+      } catch {
+        setError("Failed to load AI usage.");
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  if (loading) {
+    return (
+      <section className="section-card" id="ai-usage">
+        <h2>AI Usage</h2>
+        <p className="muted">Loading AI usage...</p>
+      </section>
+    );
+  }
+
+  if (error || !usage) {
+    return (
+      <section className="section-card" id="ai-usage">
+        <h2>AI Usage</h2>
+        {error && (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        )}
+        {!error && <p className="muted">AI usage data unavailable.</p>}
+      </section>
+    );
+  }
+
+  const totalTokens = usage.totalInputTokens + usage.totalOutputTokens;
+  const barColor = budgetBarColor(usage.budgetUsedPercent);
+  const barWidth = usage.budgetUsedPercent !== null ? Math.min(usage.budgetUsedPercent, 100) : 0;
+  const costBarColor = budgetBarColor(usage.budgetCostPercent ?? null);
+  const costBarWidth =
+    usage.budgetCostPercent !== null ? Math.min(usage.budgetCostPercent, 100) : 0;
+  const providerEntries = Object.entries(usage.byProvider);
+  const featureEntries = Object.entries(usage.byFeature);
+
+  return (
+    <section className="section-card" id="ai-usage">
+      <h2>AI Usage</h2>
+      <p className="muted">Token usage and estimated cost for {usage.month}.</p>
+
+      <div className="billing-usage-grid">
+        <article className="billing-usage-card">
+          <h3>Input Tokens</h3>
+          <p className="billing-usage-value">{formatTokenCount(usage.totalInputTokens)}</p>
+        </article>
+        <article className="billing-usage-card">
+          <h3>Output Tokens</h3>
+          <p className="billing-usage-value">{formatTokenCount(usage.totalOutputTokens)}</p>
+        </article>
+        <article className="billing-usage-card">
+          <h3>Total Tokens</h3>
+          <p className="billing-usage-value">{formatTokenCount(totalTokens)}</p>
+        </article>
+        <article className="billing-usage-card">
+          <h3>Est. Cost</h3>
+          <p className="billing-usage-value">${usage.totalCostUsd.toFixed(2)}</p>
+        </article>
+        <article className="billing-usage-card">
+          <h3>API Calls</h3>
+          <p className="billing-usage-value">{usage.totalCalls.toLocaleString()}</p>
+        </article>
+      </div>
+
+      {usage.budgetTokens !== null && (
+        <div className="ai-budget-section">
+          <div className="ai-budget-label">
+            <span>
+              Token budget: {formatTokenCount(totalTokens)} / {formatTokenCount(usage.budgetTokens)}
+            </span>
+            <span style={{ color: barColor }}>
+              {usage.budgetUsedPercent !== null ? `${usage.budgetUsedPercent.toFixed(1)}%` : "N/A"}
+            </span>
+          </div>
+          <div className="ai-budget-bar-track">
+            <div
+              className="ai-budget-bar-fill"
+              style={{ width: `${barWidth}%`, backgroundColor: barColor }}
+            />
+          </div>
+        </div>
+      )}
+
+      {usage.budgetCapUsd !== null && (
+        <div className="ai-budget-section">
+          <div className="ai-budget-label">
+            <span>
+              Cost budget: ${usage.totalCostUsd.toFixed(2)} / ${usage.budgetCapUsd.toFixed(2)}
+            </span>
+            <span style={{ color: costBarColor }}>
+              {usage.budgetCostPercent !== null ? `${usage.budgetCostPercent.toFixed(1)}%` : "N/A"}
+            </span>
+          </div>
+          <div className="ai-budget-bar-track">
+            <div
+              className="ai-budget-bar-fill"
+              style={{ width: `${costBarWidth}%`, backgroundColor: costBarColor }}
+            />
+          </div>
+        </div>
+      )}
+
+      {providerEntries.length > 0 && (
+        <div className="ai-breakdown">
+          <h3>By Provider</h3>
+          <table className="feed-table" aria-label="AI usage by provider">
+            <thead>
+              <tr>
+                <th scope="col">Provider</th>
+                <th scope="col">Input</th>
+                <th scope="col">Output</th>
+                <th scope="col">Cost</th>
+                <th scope="col">Calls</th>
+              </tr>
+            </thead>
+            <tbody>
+              {providerEntries.map(([provider, data]) => (
+                <tr key={provider}>
+                  <td>{provider}</td>
+                  <td>{formatTokenCount(data.inputTokens)}</td>
+                  <td>{formatTokenCount(data.outputTokens)}</td>
+                  <td>${data.costUsd.toFixed(4)}</td>
+                  <td>{data.calls.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {featureEntries.length > 0 && (
+        <div className="ai-breakdown">
+          <h3>By Feature</h3>
+          <table className="feed-table" aria-label="AI usage by feature">
+            <thead>
+              <tr>
+                <th scope="col">Feature</th>
+                <th scope="col">Input</th>
+                <th scope="col">Output</th>
+                <th scope="col">Cost</th>
+                <th scope="col">Calls</th>
+              </tr>
+            </thead>
+            <tbody>
+              {featureEntries.map(([feature, data]) => (
+                <tr key={feature}>
+                  <td>{feature}</td>
+                  <td>{formatTokenCount(data.inputTokens)}</td>
+                  <td>{formatTokenCount(data.outputTokens)}</td>
+                  <td>${data.costUsd.toFixed(4)}</td>
+                  <td>{data.calls.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {usage.totalCalls === 0 && (
+        <p className="muted" style={{ marginTop: "var(--sp-3)" }}>
+          No AI usage recorded this month.
+        </p>
       )}
     </section>
   );
@@ -411,7 +459,9 @@ function BillingSection() {
   const [error, setError] = useState("");
   const [busyPlan, setBusyPlan] = useState<HostedPlanId | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
-  const [subscriptionActionBusy, setSubscriptionActionBusy] = useState<"cancel" | "resume" | null>(null);
+  const [subscriptionActionBusy, setSubscriptionActionBusy] = useState<"cancel" | "resume" | null>(
+    null,
+  );
   const [showSuccess, setShowSuccess] = useState(false);
   const [actionNotice, setActionNotice] = useState("");
 
@@ -425,7 +475,7 @@ function BillingSection() {
     async function load() {
       const [billingData, entitlementsData] = await Promise.all([
         getBillingOverview(),
-        getAccountEntitlements()
+        getAccountEntitlements(),
       ]);
       if (!billingData) {
         setError("Failed to load billing details.");
@@ -486,10 +536,14 @@ function BillingSection() {
         subscriptionStatus: result.subscriptionStatus,
         cancelAtPeriodEnd: result.cancelAtPeriodEnd,
         currentPeriodEndsAt: result.currentPeriodEndsAt,
-        customerPortalUrl: result.customerPortalUrl
+        customerPortalUrl: result.customerPortalUrl,
       };
     });
-    setActionNotice(action === "cancel" ? "Subscription will cancel at period end." : "Auto-renew has been resumed.");
+    setActionNotice(
+      action === "cancel"
+        ? "Subscription will cancel at period end."
+        : "Auto-renew has been resumed.",
+    );
     setSubscriptionActionBusy(null);
   }
 
@@ -508,14 +562,28 @@ function BillingSection() {
       <p className="muted">Manage your hosted plan and billing portal access.</p>
 
       {showSuccess && (
-        <p className="key-status key-status-active" style={{ display: "inline-flex", marginTop: "var(--sp-2)" }}>
+        <p
+          className="key-status key-status-active"
+          role="status"
+          aria-live="polite"
+          style={{ display: "inline-flex", marginTop: "var(--sp-2)" }}
+        >
           Checkout completed. Refreshing plan status may take a few seconds.
         </p>
       )}
 
-      {error && <p className="error-text">{error}</p>}
+      {error && (
+        <p className="error-text" role="alert">
+          {error}
+        </p>
+      )}
       {actionNotice && (
-        <p className="key-status key-status-active" style={{ display: "inline-flex", marginTop: "var(--sp-2)" }}>
+        <p
+          className="key-status key-status-active"
+          role="status"
+          aria-live="polite"
+          style={{ display: "inline-flex", marginTop: "var(--sp-2)" }}
+        >
           {actionNotice}
         </p>
       )}
@@ -523,10 +591,16 @@ function BillingSection() {
       {overview ? (
         <div className="billing-overview">
           <div className="billing-current-plan">
-            <span className="badge badge-approved">Current plan: {formatPlanLabel(overview.planId)}</span>
+            <span className="badge badge-approved">
+              Current plan: {formatPlanLabel(overview.planId)}
+            </span>
             <span className="badge">{formatBillingStatus(overview.subscriptionStatus)}</span>
-            {overview.billingInterval && <span className="badge">Billed {overview.billingInterval}</span>}
-            {overview.cancelAtPeriodEnd && <span className="badge badge-pending">Cancels at period end</span>}
+            {overview.billingInterval && (
+              <span className="badge">Billed {overview.billingInterval}</span>
+            )}
+            {overview.cancelAtPeriodEnd && (
+              <span className="badge badge-pending">Cancels at period end</span>
+            )}
           </div>
 
           {entitlements && (
@@ -534,13 +608,15 @@ function BillingSection() {
               <article className="billing-usage-card">
                 <h3>Feeds</h3>
                 <p className="billing-usage-value">
-                  {entitlements.usage.feeds.toLocaleString()} / {formatLimit(entitlements.feedLimit)}
+                  {entitlements.usage.feeds.toLocaleString()} /{" "}
+                  {formatLimit(entitlements.feedLimit)}
                 </p>
               </article>
               <article className="billing-usage-card">
                 <h3>Items Today</h3>
                 <p className="billing-usage-value">
-                  {entitlements.usage.itemsIngested.toLocaleString()} / {formatLimit(entitlements.itemsPerDayLimit)}
+                  {entitlements.usage.itemsIngested.toLocaleString()} /{" "}
+                  {formatLimit(entitlements.itemsPerDayLimit)}
                 </p>
               </article>
               <article className="billing-usage-card">
@@ -569,25 +645,32 @@ function BillingSection() {
             >
               {portalBusy ? "Opening..." : "Open billing portal"}
             </button>
-            {overview.planId !== "free" && (overview.cancelAtPeriodEnd || overview.subscriptionStatus !== "canceled") && (
-              <button
-                type="button"
-                className={`button button-small ${overview.cancelAtPeriodEnd ? "" : "button-danger"}`}
-                disabled={subscriptionActionBusy !== null}
-                onClick={() => handleSubscriptionAction(overview.cancelAtPeriodEnd ? "resume" : "cancel")}
-              >
-                {subscriptionActionBusy === "cancel"
-                  ? "Cancelling..."
-                  : subscriptionActionBusy === "resume"
-                    ? "Resuming..."
-                    : overview.cancelAtPeriodEnd
-                      ? "Resume auto-renew"
-                      : "Cancel at period end"}
-              </button>
-            )}
+            {overview.planId !== "free" &&
+              (overview.cancelAtPeriodEnd || overview.subscriptionStatus !== "canceled") && (
+                <button
+                  type="button"
+                  className={`button button-small ${overview.cancelAtPeriodEnd ? "" : "button-danger"}`}
+                  disabled={subscriptionActionBusy !== null}
+                  onClick={() =>
+                    handleSubscriptionAction(overview.cancelAtPeriodEnd ? "resume" : "cancel")
+                  }
+                >
+                  {subscriptionActionBusy === "cancel"
+                    ? "Cancelling..."
+                    : subscriptionActionBusy === "resume"
+                      ? "Resuming..."
+                      : overview.cancelAtPeriodEnd
+                        ? "Resume auto-renew"
+                        : "Cancel at period end"}
+                </button>
+              )}
           </div>
 
-          <div className="layout-toggle billing-interval-toggle" role="tablist" aria-label="Billing interval">
+          <div
+            className="layout-toggle billing-interval-toggle"
+            role="tablist"
+            aria-label="Billing interval"
+          >
             <button
               type="button"
               className={`layout-toggle-btn button-small ${billingInterval === "monthly" ? "button-active" : ""}`}
@@ -610,7 +693,9 @@ function BillingSection() {
           <div className="billing-plans">
             <div className="billing-plan-card">
               <div className="billing-plan-title">Pro</div>
-              <div className="billing-plan-price">{billingInterval === "annual" ? "$70 / year" : "$7 / month"}</div>
+              <div className="billing-plan-price">
+                {billingInterval === "annual" ? "$70 / year" : "$7 / month"}
+              </div>
               <p className="muted">Unlimited feeds, faster polling, full-text search.</p>
               <button
                 type="button"
@@ -635,8 +720,12 @@ function BillingSection() {
 
             <div className="billing-plan-card">
               <div className="billing-plan-title">Pro + AI</div>
-              <div className="billing-plan-price">{billingInterval === "annual" ? "$140 / year" : "$14 / month"}</div>
-              <p className="muted">Everything in Pro plus summaries, digests, and AI ranking features.</p>
+              <div className="billing-plan-price">
+                {billingInterval === "annual" ? "$140 / year" : "$14 / month"}
+              </div>
+              <p className="muted">
+                Everything in Pro plus summaries, digests, and AI ranking features.
+              </p>
               <button
                 type="button"
                 className="button button-primary button-small"
@@ -691,18 +780,28 @@ function SettingsContent() {
   const [filters, setFilters] = useState<FilterRule[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingFields, setSavingFields] = useState<Set<string>>(new Set());
   const [savedFields, setSavedFields] = useState<Set<string>>(new Set());
 
   // API key editing state
   const [editingKey, setEditingKey] = useState(false);
   const [keyDraft, setKeyDraft] = useState("");
 
+  // Feeds and folders for scope selector
+  const [feeds, setFeeds] = useState<Feed[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+
   // New filter form
   const [newPattern, setNewPattern] = useState("");
+  const [newTarget, setNewTarget] = useState<FilterTarget>("keyword");
   const [newType, setNewType] = useState<FilterType>("phrase");
   const [newMode, setNewMode] = useState<FilterMode>("mute");
   const [newBreakout, setNewBreakout] = useState(true);
+  const [newScopeType, setNewScopeType] = useState<"global" | "feed" | "folder">("global");
+  const [newScopeFeedId, setNewScopeFeedId] = useState<string>("");
+  const [newScopeFolderId, setNewScopeFolderId] = useState<string>("");
   const [filterBusy, setFilterBusy] = useState(false);
+  const [filterError, setFilterError] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -719,18 +818,25 @@ function SettingsContent() {
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    Promise.all([getSettings(), listFilters(), getAccountDeletionStatus()]).then(([s, f, d]) => {
+    Promise.all([
+      getSettings(),
+      listFilters(),
+      getAccountDeletionStatus(),
+      listFeeds(),
+      listFolders(),
+    ]).then(([s, f, d, fe, fo]) => {
       setSettings(s);
       setSavedSettings(s);
       setFilters(f);
       setDeletionStatus(d);
+      setFeeds(fe);
+      setFolders(fo);
       setLoading(false);
     });
   }, []);
 
-  const isDirty = settings && savedSettings
-    ? JSON.stringify(settings) !== JSON.stringify(savedSettings)
-    : false;
+  const isDirty =
+    settings && savedSettings ? JSON.stringify(settings) !== JSON.stringify(savedSettings) : false;
 
   const doSave = useCallback(async (toSave: Settings, changedField?: string) => {
     setSaving(true);
@@ -739,6 +845,11 @@ function SettingsContent() {
       setSettings(result);
       setSavedSettings(result);
       if (changedField) {
+        setSavingFields((prev) => {
+          const next = new Set(prev);
+          next.delete(changedField);
+          return next;
+        });
         setSavedFields((prev) => new Set(prev).add(changedField));
         setTimeout(() => {
           setSavedFields((prev) => {
@@ -748,6 +859,12 @@ function SettingsContent() {
           });
         }, 2000);
       }
+    } else if (changedField) {
+      setSavingFields((prev) => {
+        const next = new Set(prev);
+        next.delete(changedField);
+        return next;
+      });
     }
     setSaving(false);
   }, []);
@@ -757,7 +874,7 @@ function SettingsContent() {
     const next = { ...settings, [field]: value };
     setSettings(next);
 
-    // Auto-save with debounce
+    setSavingFields((prev) => new Set(prev).add(field));
     if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
     autoSaveTimer.current = setTimeout(() => {
       doSave(next, field);
@@ -768,10 +885,13 @@ function SettingsContent() {
     return (
       <>
         {label}
-        {savedFields.has(field) && (
-          <span className="key-status key-status-active saved-indicator">
-            SAVED
+        {savingFields.has(field) && (
+          <span className="key-status saved-indicator" style={{ color: "var(--text-muted)" }}>
+            SAVING...
           </span>
+        )}
+        {savedFields.has(field) && (
+          <span className="key-status key-status-active saved-indicator">SAVED</span>
         )}
       </>
     );
@@ -803,16 +923,42 @@ function SettingsContent() {
 
   async function handleAddFilter(e: FormEvent) {
     e.preventDefault();
+    setFilterError("");
+
+    // Client-side regex validation
+    if (newType === "regex") {
+      try {
+        new RegExp(newPattern);
+      } catch (err) {
+        setFilterError(`Invalid regex: ${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+    }
+
     setFilterBusy(true);
+
+    const feedId = newScopeType === "feed" && newScopeFeedId ? newScopeFeedId : null;
+    const folderId = newScopeType === "folder" && newScopeFolderId ? newScopeFolderId : null;
+
     const rule = await createFilter({
       pattern: newPattern,
+      target: newTarget,
       type: newType,
       mode: newMode,
       breakoutEnabled: newBreakout,
+      feedId,
+      folderId,
     });
     if (rule) {
       setFilters((prev) => [...prev, rule]);
       setNewPattern("");
+      setNewTarget("keyword");
+      setNewType("phrase");
+      setNewMode("mute");
+      setNewBreakout(true);
+      setNewScopeType("global");
+      setNewScopeFeedId("");
+      setNewScopeFolderId("");
     }
     setFilterBusy(false);
   }
@@ -911,6 +1057,7 @@ function SettingsContent() {
     { id: "ai-provider", label: "AI Provider" },
     { id: "general", label: "General" },
     { id: "billing", label: "Billing" },
+    { id: "ai-usage", label: "AI Usage" },
     { id: "members", label: "Members" },
     { id: "account", label: "Account" },
     { id: "account-deletion", label: "Danger Zone" },
@@ -927,7 +1074,7 @@ function SettingsContent() {
     <>
       <div className="page-header">
         <h1 className="page-title">Settings</h1>
-        <div className="settings-nav">
+        <nav className="settings-nav" aria-label="Settings sections">
           {sections.map((s) => (
             <button
               key={s.id}
@@ -938,390 +1085,698 @@ function SettingsContent() {
               {s.label}
             </button>
           ))}
-        </div>
+        </nav>
       </div>
 
       <div className="settings-layout">
-      {/* AI Provider section */}
-      <section className="section-card" id="ai-provider">
-        <h2>
-          AI Provider
-          {savedFields.has("openaiApiKey") && (
-            <span className="key-status key-status-active saved-indicator-lg">SAVED</span>
-          )}
-        </h2>
-        <p className="muted">Configure the AI backend for summaries and digests.</p>
+        {/* AI Provider section */}
+        <section className="section-card" id="ai-provider">
+          <h2>
+            AI Provider
+            {savedFields.has("openaiApiKey") && (
+              <span className="key-status key-status-active saved-indicator-lg">SAVED</span>
+            )}
+          </h2>
+          <p className="muted">Configure the AI backend for summaries and digests.</p>
 
-        <div className="settings-form">
-          <label>
-            {fieldLabel("aiMode", "AI mode")}
-            <select
-              value={settings.aiMode}
-              onChange={(e) => updateField("aiMode", e.target.value as AiMode)}
-            >
-              <option value="off">Off</option>
-              <option value="summaries_digest">Summaries + Digest</option>
-              <option value="full">Full</option>
-            </select>
-          </label>
+          <div className="settings-form">
+            <label>
+              {fieldLabel("aiMode", "AI mode")}
+              <select
+                value={settings.aiMode}
+                onChange={(e) => updateField("aiMode", e.target.value as AiMode)}
+              >
+                <option value="off">Off</option>
+                <option value="summaries_digest">Summaries + Digest</option>
+                <option value="full">Full</option>
+              </select>
+            </label>
 
-          <label>
-            {fieldLabel("aiProvider", "Provider")}
-            <select
-              value={settings.aiProvider}
-              onChange={(e) => updateField("aiProvider", e.target.value as AiProvider)}
-            >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic</option>
-              <option value="local">Local</option>
-            </select>
-          </label>
+            <label>
+              {fieldLabel("aiProvider", "Provider")}
+              <select
+                value={settings.aiProvider}
+                onChange={(e) => updateField("aiProvider", e.target.value as AiProvider)}
+              >
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="local">Local</option>
+              </select>
+            </label>
 
-          <div className="key-section">
-            <span className="key-label">API key</span>
-            {editingKey ? (
-              <div className="key-edit-row">
-                <input
-                  type="password"
-                  placeholder="sk-..."
-                  value={keyDraft}
-                  onChange={(e) => setKeyDraft(e.target.value)}
-                  className="input"
-                  autoComplete="off"
-                  autoFocus
-                />
-                <button
-                  type="button"
-                  className="button button-primary button-small"
-                  onClick={handleSaveApiKey}
-                  disabled={!keyDraft.trim()}
-                >
-                  Save key
-                </button>
-                <button
-                  type="button"
-                  className="button button-small"
-                  onClick={() => { setEditingKey(false); setKeyDraft(""); }}
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <div className="key-display-row">
-                {hasKey ? (
-                  <>
-                    <code className="key-masked">{maskKey(settings.openaiApiKey!)}</code>
-                    <span className="key-status key-status-active">Active</span>
-                    <button
-                      type="button"
-                      className="button button-small"
-                      onClick={() => setEditingKey(true)}
-                    >
-                      Change
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-small button-danger"
-                      onClick={handleClearApiKey}
-                    >
-                      Remove
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="muted">No key set</span>
-                    <button
-                      type="button"
-                      className="button button-small button-primary"
-                      onClick={() => setEditingKey(true)}
-                    >
-                      Add key
-                    </button>
-                  </>
-                )}
+            <div className="key-section">
+              <span className="key-label">API key</span>
+              {editingKey ? (
+                <div className="key-edit-row">
+                  <input
+                    type="password"
+                    placeholder="sk-..."
+                    value={keyDraft}
+                    onChange={(e) => setKeyDraft(e.target.value)}
+                    className="input"
+                    autoComplete="off"
+                    aria-label="API key"
+                  />
+                  <button
+                    type="button"
+                    className="button button-primary button-small"
+                    onClick={handleSaveApiKey}
+                    disabled={!keyDraft.trim()}
+                  >
+                    Save key
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-small"
+                    onClick={() => {
+                      setEditingKey(false);
+                      setKeyDraft("");
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <div className="key-display-row">
+                  {hasKey ? (
+                    <>
+                      <code className="key-masked">{maskKey(settings.openaiApiKey!)}</code>
+                      <span className="key-status key-status-active">Active</span>
+                      <button
+                        type="button"
+                        className="button button-small"
+                        onClick={() => setEditingKey(true)}
+                      >
+                        Change
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-small button-danger"
+                        onClick={handleClearApiKey}
+                      >
+                        Remove
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className="muted">No key set</span>
+                      <button
+                        type="button"
+                        className="button button-small button-primary"
+                        onClick={() => setEditingKey(true)}
+                      >
+                        Add key
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <label>
+              {fieldLabel("monthlyAiCapUsd", "Monthly AI cap ($)")}
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={settings.monthlyAiCapUsd}
+                onChange={(e) => updateField("monthlyAiCapUsd", Number(e.target.value))}
+                className="input"
+              />
+            </label>
+
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={settings.aiFallbackToLocal}
+                onChange={(e) => updateField("aiFallbackToLocal", e.target.checked)}
+              />
+              {fieldLabel("aiFallbackToLocal", "Fallback to local on cap hit")}
+            </label>
+          </div>
+        </section>
+
+        {/* General settings */}
+        <section className="section-card" id="general">
+          <h2>General</h2>
+          <form onSubmit={handleManualSave} className="settings-form">
+            <label>
+              {fieldLabel("digestAwayHours", "Digest away trigger (hours)")}
+              <input
+                type="number"
+                min={1}
+                value={settings.digestAwayHours}
+                onChange={(e) => updateField("digestAwayHours", Number(e.target.value))}
+                className="input"
+              />
+            </label>
+
+            <label>
+              {fieldLabel("digestBacklogThreshold", "Digest backlog threshold")}
+              <input
+                type="number"
+                min={1}
+                value={settings.digestBacklogThreshold}
+                onChange={(e) => updateField("digestBacklogThreshold", Number(e.target.value))}
+                className="input"
+              />
+            </label>
+
+            <label>
+              {fieldLabel("feedPollMinutes", "Feed poll interval (minutes)")}
+              <input
+                type="number"
+                min={5}
+                value={settings.feedPollMinutes}
+                onChange={(e) => updateField("feedPollMinutes", Number(e.target.value))}
+                className="input"
+              />
+            </label>
+
+            <label>
+              {fieldLabel("unreadMaxAgeDays", "Unread max-age (days)")}
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                placeholder="Disabled"
+                value={settings.unreadMaxAgeDays ?? ""}
+                onChange={(e) => {
+                  updateField(
+                    "unreadMaxAgeDays",
+                    e.target.value === "" ? null : Number(e.target.value),
+                  );
+                }}
+                className="input"
+              />
+            </label>
+
+            <label>
+              {fieldLabel("readPurgeDays", "Read purge (days)")}
+              <input
+                type="number"
+                min={1}
+                max={3650}
+                placeholder="Disabled"
+                value={settings.readPurgeDays ?? ""}
+                onChange={(e) => {
+                  updateField(
+                    "readPurgeDays",
+                    e.target.value === "" ? null : Number(e.target.value),
+                  );
+                }}
+                className="input"
+              />
+            </label>
+
+            <p className="muted">
+              Retention cleanup runs in the worker. Leave blank to disable either policy.
+            </p>
+
+            <div className="settings-separator" />
+
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={settings.progressiveSummarizationEnabled}
+                onChange={(e) => updateField("progressiveSummarizationEnabled", e.target.checked)}
+              />
+              {fieldLabel("progressiveSummarizationEnabled", "Progressive summarization")}
+            </label>
+
+            <p className="muted">
+              Stories age gracefully: fresh items show full content, aging items get AI summaries,
+              old items collapse to headlines.
+            </p>
+
+            {settings.progressiveSummarizationEnabled && (
+              <div className="settings-grid">
+                <label>
+                  {fieldLabel("progressiveFreshHours", "Fresh threshold (hours)")}
+                  <input
+                    type="range"
+                    min={1}
+                    max={24}
+                    step={1}
+                    value={settings.progressiveFreshHours}
+                    onChange={(e) => updateField("progressiveFreshHours", Number(e.target.value))}
+                    className="input-range"
+                  />
+                  <span className="muted">
+                    {settings.progressiveFreshHours}h -- items younger than this show full content
+                  </span>
+                </label>
+
+                <label>
+                  {fieldLabel("progressiveAgingDays", "Aging threshold (days)")}
+                  <input
+                    type="range"
+                    min={1}
+                    max={14}
+                    step={1}
+                    value={settings.progressiveAgingDays}
+                    onChange={(e) => updateField("progressiveAgingDays", Number(e.target.value))}
+                    className="input-range"
+                  />
+                  <span className="muted">
+                    {settings.progressiveAgingDays}d -- items older than this collapse to headlines
+                  </span>
+                </label>
               </div>
             )}
-          </div>
 
-          <label>
-            {fieldLabel("monthlyAiCapUsd", "Monthly AI cap ($)")}
-            <input
-              type="number"
-              min={0}
-              step={1}
-              value={settings.monthlyAiCapUsd}
-              onChange={(e) => updateField("monthlyAiCapUsd", Number(e.target.value))}
-              className="input"
-            />
-          </label>
+            <div className="settings-separator" />
 
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={settings.aiFallbackToLocal}
-              onChange={(e) => updateField("aiFallbackToLocal", e.target.checked)}
-            />
-            {fieldLabel("aiFallbackToLocal", "Fallback to local on cap hit")}
-          </label>
-        </div>
-      </section>
+            <label>
+              {fieldLabel("markReadOnScroll", "Mark as read")}
+              <select
+                value={settings.markReadOnScroll}
+                onChange={(e) =>
+                  updateField("markReadOnScroll", e.target.value as Settings["markReadOnScroll"])
+                }
+              >
+                <option value="off">Off</option>
+                <option value="on_scroll">On scroll</option>
+                <option value="on_open">On open</option>
+              </select>
+            </label>
 
-      {/* General settings */}
-      <section className="section-card" id="general">
-        <h2>General</h2>
-        <form onSubmit={handleManualSave} className="settings-form">
-          <label>
-            {fieldLabel("digestAwayHours", "Digest away trigger (hours)")}
-            <input
-              type="number"
-              min={1}
-              value={settings.digestAwayHours}
-              onChange={(e) => updateField("digestAwayHours", Number(e.target.value))}
-              className="input"
-            />
-          </label>
+            {settings.markReadOnScroll === "on_scroll" ? (
+              <div className="settings-grid">
+                <label>
+                  {fieldLabel("markReadOnScrollListDelayMs", "List view delay (ms)")}
+                  <input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    step={100}
+                    value={settings.markReadOnScrollListDelayMs}
+                    onChange={(e) =>
+                      updateField("markReadOnScrollListDelayMs", Number(e.target.value))
+                    }
+                    className="input"
+                  />
+                </label>
 
-          <label>
-            {fieldLabel("digestBacklogThreshold", "Digest backlog threshold")}
-            <input
-              type="number"
-              min={1}
-              value={settings.digestBacklogThreshold}
-              onChange={(e) => updateField("digestBacklogThreshold", Number(e.target.value))}
-              className="input"
-            />
-          </label>
+                <label>
+                  {fieldLabel("markReadOnScrollListThreshold", "List view threshold (%)")}
+                  <input
+                    type="number"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={Math.round((settings.markReadOnScrollListThreshold ?? 0.6) * 100)}
+                    onChange={(e) =>
+                      updateField("markReadOnScrollListThreshold", Number(e.target.value) / 100)
+                    }
+                    className="input"
+                  />
+                </label>
 
-          <label>
-            {fieldLabel("feedPollMinutes", "Feed poll interval (minutes)")}
-            <input
-              type="number"
-              min={5}
-              value={settings.feedPollMinutes}
-              onChange={(e) => updateField("feedPollMinutes", Number(e.target.value))}
-              className="input"
-            />
-          </label>
+                <label>
+                  {fieldLabel("markReadOnScrollCompactDelayMs", "Compact view delay (ms)")}
+                  <input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    step={100}
+                    value={settings.markReadOnScrollCompactDelayMs}
+                    onChange={(e) =>
+                      updateField("markReadOnScrollCompactDelayMs", Number(e.target.value))
+                    }
+                    className="input"
+                  />
+                </label>
 
-          <label>
-            {fieldLabel("wallabagUrl", "Wallabag server URL (optional)")}
-            <input
-              type="url"
-              placeholder="https://your-wallabag-server.com"
-              value={settings.wallabagUrl ?? ""}
-              onChange={(e) => updateField("wallabagUrl", e.target.value)}
-              className="input"
-            />
-          </label>
+                <label>
+                  {fieldLabel("markReadOnScrollCompactThreshold", "Compact view threshold (%)")}
+                  <input
+                    type="number"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={Math.round((settings.markReadOnScrollCompactThreshold ?? 0.6) * 100)}
+                    onChange={(e) =>
+                      updateField("markReadOnScrollCompactThreshold", Number(e.target.value) / 100)
+                    }
+                    className="input"
+                  />
+                </label>
 
-          <button
-            type="submit"
-            className="button button-primary"
-            disabled={saving || !isDirty}
-          >
-            {saving ? "Saving..." : isDirty ? "Save settings" : "Settings saved"}
-          </button>
-        </form>
-      </section>
+                <label>
+                  {fieldLabel("markReadOnScrollCardDelayMs", "Card view delay (ms)")}
+                  <input
+                    type="number"
+                    min={0}
+                    max={5000}
+                    step={100}
+                    value={settings.markReadOnScrollCardDelayMs}
+                    onChange={(e) =>
+                      updateField("markReadOnScrollCardDelayMs", Number(e.target.value))
+                    }
+                    className="input"
+                  />
+                </label>
 
-      <BillingSection />
+                <label>
+                  {fieldLabel("markReadOnScrollCardThreshold", "Card view threshold (%)")}
+                  <input
+                    type="number"
+                    min={10}
+                    max={100}
+                    step={5}
+                    value={Math.round((settings.markReadOnScrollCardThreshold ?? 0.6) * 100)}
+                    onChange={(e) =>
+                      updateField("markReadOnScrollCardThreshold", Number(e.target.value) / 100)
+                    }
+                    className="input"
+                  />
+                </label>
+              </div>
+            ) : null}
 
-      {/* Members */}
-      <MembersSection />
+            <label>
+              {fieldLabel("wallabagUrl", "Wallabag server URL (optional)")}
+              <input
+                type="url"
+                placeholder="https://your-wallabag-server.com"
+                value={settings.wallabagUrl ?? ""}
+                onChange={(e) => updateField("wallabagUrl", e.target.value)}
+                className="input"
+              />
+            </label>
 
-      {/* Account */}
-      <section className="section-card" id="account">
-        <h2>
-          Account
-          {passwordSaved ? (
-            <span className="key-status key-status-active saved-indicator-lg">UPDATED</span>
-          ) : null}
-        </h2>
-        <p className="muted">Change your account password.</p>
-        <form onSubmit={handleChangePassword} className="settings-form">
-          <label>
-            Current password
-            <input
-              type="password"
-              autoComplete="current-password"
-              value={currentPassword}
-              onChange={(e) => setCurrentPassword(e.target.value)}
-              className="input"
-              required
-            />
-          </label>
-
-          <label>
-            New password
-            <input
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-              value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
-              className="input"
-              required
-            />
-          </label>
-
-          <label>
-            Confirm new password
-            <input
-              type="password"
-              autoComplete="new-password"
-              minLength={8}
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              className="input"
-              required
-            />
-          </label>
-
-          {passwordError ? <p className="error-text">{passwordError}</p> : null}
-
-          <button type="submit" className="button button-primary" disabled={passwordBusy}>
-            {passwordBusy ? "Updating..." : "Update password"}
-          </button>
-        </form>
-      </section>
-
-      <section className="section-card" id="account-deletion">
-        <h2>
-          Danger Zone
-          {deletionSaved ? (
-            <span className="key-status key-status-active saved-indicator-lg">UPDATED</span>
-          ) : null}
-        </h2>
-        <p className="muted">
-          Request account deletion. This is a request-only workflow for now and does not purge data immediately.
-        </p>
-
-        {deletionStatus?.status === "pending" ? (
-          <div className="settings-form">
-            <p className="muted">
-              Deletion requested on {new Date(deletionStatus.requestedAt).toLocaleString()}.
-            </p>
-            <button
-              type="button"
-              className="button button-danger"
-              disabled={deletionBusy}
-              onClick={handleCancelDeletion}
-            >
-              {deletionBusy ? "Cancelling..." : "Cancel deletion request"}
+            <button type="submit" className="button button-primary" disabled={saving || !isDirty}>
+              {saving ? "Saving..." : isDirty ? "Save settings" : "Settings saved"}
             </button>
-            {deletionError ? <p className="error-text">{deletionError}</p> : null}
-          </div>
-        ) : (
-          <form onSubmit={handleRequestDeletion} className="settings-form">
+          </form>
+        </section>
+
+        <BillingSection />
+
+        <AiUsageSection />
+
+        {/* Members */}
+        <MembersSection />
+
+        {/* Account */}
+        <section className="section-card" id="account">
+          <h2>
+            Account
+            {passwordSaved ? (
+              <span className="key-status key-status-active saved-indicator-lg">UPDATED</span>
+            ) : null}
+          </h2>
+          <p className="muted">Change your account password.</p>
+          <form onSubmit={handleChangePassword} className="settings-form">
             <label>
               Current password
               <input
                 type="password"
                 autoComplete="current-password"
-                value={deletePassword}
-                onChange={(e) => setDeletePassword(e.target.value)}
+                value={currentPassword}
+                onChange={(e) => setCurrentPassword(e.target.value)}
                 className="input"
                 required
               />
             </label>
+
             <label>
-              Type DELETE to confirm
+              New password
               <input
-                type="text"
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
                 className="input"
                 required
               />
             </label>
-            {deletionError ? <p className="error-text">{deletionError}</p> : null}
-            <button type="submit" className="button button-danger" disabled={deletionBusy}>
-              {deletionBusy ? "Submitting..." : "Request account deletion"}
+
+            <label>
+              Confirm new password
+              <input
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="input"
+                required
+              />
+            </label>
+
+            {passwordError ? (
+              <p className="error-text" role="alert">
+                {passwordError}
+              </p>
+            ) : null}
+
+            <button type="submit" className="button button-primary" disabled={passwordBusy}>
+              {passwordBusy ? "Updating..." : "Update password"}
             </button>
           </form>
-        )}
-      </section>
+        </section>
 
-      {/* Notifications */}
-      <section className="section-card" id="notifications">
-        <h2>Notifications</h2>
-        <p className="muted">Receive push notifications when new stories arrive.</p>
-        <div className="settings-form">
-          <NotificationToggle />
-        </div>
-      </section>
+        <section className="section-card" id="account-deletion">
+          <h2>
+            Danger Zone
+            {deletionSaved ? (
+              <span className="key-status key-status-active saved-indicator-lg">UPDATED</span>
+            ) : null}
+          </h2>
+          <p className="muted">
+            Request account deletion. This is a request-only workflow for now and does not purge
+            data immediately.
+          </p>
 
-      {/* Filter rules */}
-      <section className="section-card" id="filters">
-        <h2>Filter rules</h2>
-        <p className="muted">Mute or block content matching patterns.</p>
+          {deletionStatus?.status === "pending" ? (
+            <div className="settings-form">
+              <p className="muted">
+                Deletion requested on {new Date(deletionStatus.requestedAt).toLocaleString()}.
+              </p>
+              <button
+                type="button"
+                className="button button-danger"
+                disabled={deletionBusy}
+                onClick={handleCancelDeletion}
+              >
+                {deletionBusy ? "Cancelling..." : "Cancel deletion request"}
+              </button>
+              {deletionError ? (
+                <p className="error-text" role="alert">
+                  {deletionError}
+                </p>
+              ) : null}
+            </div>
+          ) : (
+            <form onSubmit={handleRequestDeletion} className="settings-form">
+              <label>
+                Current password
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  className="input"
+                  required
+                />
+              </label>
+              <label>
+                Type DELETE to confirm
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  className="input"
+                  required
+                />
+              </label>
+              {deletionError ? (
+                <p className="error-text" role="alert">
+                  {deletionError}
+                </p>
+              ) : null}
+              <button type="submit" className="button button-danger" disabled={deletionBusy}>
+                {deletionBusy ? "Submitting..." : "Request account deletion"}
+              </button>
+            </form>
+          )}
+        </section>
 
-        <form onSubmit={handleAddFilter} className="filter-form">
-          <input
-            type="text"
-            placeholder="Pattern (e.g. roblox)"
-            required
-            value={newPattern}
-            onChange={(e) => setNewPattern(e.target.value)}
-            className="input"
-          />
-          <select value={newType} onChange={(e) => setNewType(e.target.value as FilterType)}>
-            <option value="phrase">Phrase</option>
-            <option value="regex">Regex</option>
-          </select>
-          <select value={newMode} onChange={(e) => setNewMode(e.target.value as FilterMode)}>
-            <option value="mute">Mute</option>
-            <option value="block">Block</option>
-          </select>
-          <label className="checkbox-label">
+        {/* Notifications */}
+        <section className="section-card" id="notifications">
+          <h2>Notifications</h2>
+          <p className="muted">Receive push notifications when new stories arrive.</p>
+          <div className="settings-form">
+            <NotificationToggle />
+          </div>
+        </section>
+
+        {/* Filter rules */}
+        <section className="section-card" id="filters">
+          <h2>Filter rules</h2>
+          <p className="muted">
+            Mute, block, or keep/allow content matching patterns. Use keep mode to whitelist -- only
+            matching items pass through.
+          </p>
+
+          <form onSubmit={handleAddFilter} className="filter-form">
             <input
-              type="checkbox"
-              checked={newBreakout}
-              onChange={(e) => setNewBreakout(e.target.checked)}
+              type="text"
+              placeholder="Pattern (e.g. roblox)"
+              required
+              value={newPattern}
+              onChange={(e) => setNewPattern(e.target.value)}
+              className="input"
+              aria-label="Filter pattern"
             />
-            Breakout
-          </label>
-          <button type="submit" className="button button-primary" disabled={filterBusy}>
-            Add rule
-          </button>
-        </form>
+            <select
+              value={newTarget}
+              onChange={(e) => setNewTarget(e.target.value as FilterTarget)}
+              aria-label="Filter target"
+            >
+              <option value="keyword">Keyword</option>
+              <option value="author">Author</option>
+              <option value="domain">Domain</option>
+              <option value="url_pattern">URL pattern</option>
+            </select>
+            <select
+              value={newType}
+              onChange={(e) => setNewType(e.target.value as FilterType)}
+              aria-label="Filter type"
+            >
+              <option value="phrase">Phrase</option>
+              <option value="regex">Regex</option>
+            </select>
+            <select
+              value={newMode}
+              onChange={(e) => setNewMode(e.target.value as FilterMode)}
+              aria-label="Filter mode"
+            >
+              <option value="mute">Mute</option>
+              <option value="block">Block</option>
+              <option value="keep">Keep/Allow</option>
+            </select>
+            <select
+              value={newScopeType}
+              onChange={(e) => {
+                setNewScopeType(e.target.value as "global" | "feed" | "folder");
+                setNewScopeFeedId("");
+                setNewScopeFolderId("");
+              }}
+              aria-label="Filter scope"
+            >
+              <option value="global">Global</option>
+              <option value="feed">Specific feed</option>
+              <option value="folder">Specific folder</option>
+            </select>
+            {newScopeType === "feed" && (
+              <select
+                value={newScopeFeedId}
+                onChange={(e) => setNewScopeFeedId(e.target.value)}
+                aria-label="Scope feed"
+              >
+                <option value="">-- Select feed --</option>
+                {feeds.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.title || f.url}
+                  </option>
+                ))}
+              </select>
+            )}
+            {newScopeType === "folder" && (
+              <select
+                value={newScopeFolderId}
+                onChange={(e) => setNewScopeFolderId(e.target.value)}
+                aria-label="Scope folder"
+              >
+                <option value="">-- Select folder --</option>
+                {folders.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <label className="checkbox-label">
+              <input
+                type="checkbox"
+                checked={newBreakout}
+                onChange={(e) => setNewBreakout(e.target.checked)}
+              />
+              Breakout
+            </label>
+            <button type="submit" className="button button-primary" disabled={filterBusy}>
+              Add rule
+            </button>
+          </form>
 
-        {filters.length === 0 ? (
-          <p className="muted">No filter rules yet.</p>
-        ) : (
-          <table className="feed-table">
-            <thead>
-              <tr>
-                <th>Pattern</th>
-                <th>Type</th>
-                <th>Mode</th>
-                <th>Breakout</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filters.map((rule) => (
-                <tr key={rule.id}>
-                  <td><code>{rule.pattern}</code></td>
-                  <td>{rule.type}</td>
-                  <td>{rule.mode}</td>
-                  <td>{rule.breakoutEnabled ? "Yes" : "No"}</td>
-                  <td>
-                    <button
-                      type="button"
-                      className="button button-small button-danger"
-                      onClick={() => handleDeleteFilter(rule.id)}
-                    >
-                      Delete
-                    </button>
-                  </td>
+          {filterError ? (
+            <p className="error-text" role="alert">
+              {filterError}
+            </p>
+          ) : null}
+
+          {filters.length === 0 ? (
+            <p className="muted">No filter rules yet.</p>
+          ) : (
+            <table className="feed-table" aria-label="Filter rules">
+              <thead>
+                <tr>
+                  <th scope="col">Pattern</th>
+                  <th scope="col">Target</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Mode</th>
+                  <th scope="col">Scope</th>
+                  <th scope="col">Breakout</th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </div>
+              </thead>
+              <tbody>
+                {filters.map((rule) => {
+                  let scopeLabel = "Global";
+                  if (rule.feedId) {
+                    const feed = feeds.find((f) => f.id === rule.feedId);
+                    scopeLabel = feed
+                      ? `Feed: ${feed.title}`
+                      : `Feed: ${rule.feedId.slice(0, 8)}...`;
+                  } else if (rule.folderId) {
+                    const folder = folders.find((f) => f.id === rule.folderId);
+                    scopeLabel = folder
+                      ? `Folder: ${folder.name}`
+                      : `Folder: ${rule.folderId.slice(0, 8)}...`;
+                  }
+                  return (
+                    <tr key={rule.id}>
+                      <td>
+                        <code>{rule.pattern}</code>
+                      </td>
+                      <td>{rule.target}</td>
+                      <td>{rule.type}</td>
+                      <td>{rule.mode}</td>
+                      <td>{scopeLabel}</td>
+                      <td>{rule.breakoutEnabled ? "Yes" : "No"}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="button button-small button-danger"
+                          onClick={() => handleDeleteFilter(rule.id)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </div>
     </>
   );
 }

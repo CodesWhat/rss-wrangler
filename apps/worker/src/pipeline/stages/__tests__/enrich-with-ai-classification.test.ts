@@ -1,8 +1,5 @@
-import { describe, it, expect } from "vitest";
-import {
-  parseClassificationResponse,
-  type ItemClassification,
-} from "../enrich-with-ai.js";
+import { describe, expect, it } from "vitest";
+import { parseClassificationResponse } from "../enrich-with-ai.js";
 
 describe("parseClassificationResponse", () => {
   it("parses a valid wrapped response", () => {
@@ -19,16 +16,15 @@ describe("parseClassificationResponse", () => {
   });
 
   it("parses a raw array response", () => {
-    const raw = JSON.stringify([
-      { index: 0, intent: "opinion", confidence: 0.7 },
-    ]);
+    const raw = JSON.stringify([{ index: 0, intent: "opinion", confidence: 0.7 }]);
     const result = parseClassificationResponse(raw, 1);
     expect(result.size).toBe(1);
     expect(result.get(0)).toEqual({ intent: "opinion", confidence: 0.7 });
   });
 
   it("strips markdown fences (Ollama compatibility)", () => {
-    const raw = '```json\n{"classifications": [{"index": 0, "intent": "analysis", "confidence": 0.85}]}\n```';
+    const raw =
+      '```json\n{"classifications": [{"index": 0, "intent": "analysis", "confidence": 0.85}]}\n```';
     const result = parseClassificationResponse(raw, 1);
     expect(result.size).toBe(1);
     expect(result.get(0)).toEqual({ intent: "analysis", confidence: 0.85 });
@@ -103,11 +99,11 @@ describe("parseClassificationResponse", () => {
   it("skips entries missing required fields", () => {
     const raw = JSON.stringify({
       classifications: [
-        { index: 0, confidence: 0.9 },         // no intent -> skipped
-        { index: 1, intent: "news" },           // no confidence -> defaults to 0, still valid
-        { intent: "news", confidence: 0.9 },    // no index -> defaults to -1 -> skipped
-        null,                                    // not object -> skipped
-        42,                                      // not object -> skipped
+        { index: 0, confidence: 0.9 }, // no intent -> skipped
+        { index: 1, intent: "news" }, // no confidence -> defaults to 0, still valid
+        { intent: "news", confidence: 0.9 }, // no index -> defaults to -1 -> skipped
+        null, // not object -> skipped
+        42, // not object -> skipped
       ],
     });
     const result = parseClassificationResponse(raw, 3);

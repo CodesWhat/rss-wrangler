@@ -1,7 +1,7 @@
 "use client";
 
+import { type FormEvent, useState } from "react";
 import { requestPasswordReset } from "@/lib/api";
-import { useState, type FormEvent } from "react";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");

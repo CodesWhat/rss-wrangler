@@ -1,5 +1,5 @@
-import pg from "pg";
 import OpenAI from "openai";
+import pg from "pg";
 
 const DB_URL = "postgres://claude-burner@localhost:5432/rss_wrangler";
 const OG_FETCH_TIMEOUT_MS = 10_000;

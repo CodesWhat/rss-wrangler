@@ -9,24 +9,20 @@ export interface PushConfig {
 
 export async function sendNewStoriesNotification(
   pool: Pool,
-  tenantId: string,
+  accountId: string,
   config: PushConfig,
   newClusterCount: number,
-  topHeadline: string
+  topHeadline: string,
 ): Promise<{ sent: number; failed: number }> {
   if (!config.vapidPublicKey || !config.vapidPrivateKey) {
     return { sent: 0, failed: 0 };
   }
 
-  webpush.setVapidDetails(
-    config.vapidContact,
-    config.vapidPublicKey,
-    config.vapidPrivateKey
-  );
+  webpush.setVapidDetails(config.vapidContact, config.vapidPublicKey, config.vapidPrivateKey);
 
   const { rows } = await pool.query(
     "SELECT endpoint, p256dh, auth FROM push_subscription WHERE tenant_id = $1",
-    [tenantId]
+    [accountId],
   );
 
   if (rows.length === 0) {
@@ -36,7 +32,7 @@ export async function sendNewStoriesNotification(
   const payload = JSON.stringify({
     title: `${newClusterCount} new ${newClusterCount === 1 ? "story" : "stories"}`,
     body: `Top: ${topHeadline}`,
-    url: "/"
+    url: "/",
   });
 
   let sent = 0;
@@ -48,19 +44,19 @@ export async function sendNewStoriesNotification(
       await webpush.sendNotification(
         {
           endpoint: sub.endpoint,
-          keys: { p256dh: sub.p256dh, auth: sub.auth }
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
         },
-        payload
+        payload,
       );
       sent++;
     } catch (err: unknown) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode === 410 || statusCode === 404) {
         // Subscription expired or invalid, remove it
-        await pool.query(
-          "DELETE FROM push_subscription WHERE endpoint = $1 AND tenant_id = $2",
-          [sub.endpoint, tenantId]
-        );
+        await pool.query("DELETE FROM push_subscription WHERE endpoint = $1 AND tenant_id = $2", [
+          sub.endpoint,
+          accountId,
+        ]);
       }
       failed++;
     }

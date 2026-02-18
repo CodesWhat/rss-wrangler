@@ -1,8 +1,8 @@
 "use client";
 
-import { useAuth } from "@/components/auth-provider";
 import { useRouter } from "next/navigation";
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode, useEffect } from "react";
+import { useAuth } from "@/components/auth-provider";
 
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { authenticated, loading } = useAuth();
@@ -15,7 +15,11 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   }, [loading, authenticated, router]);
 
   if (loading) {
-    return <div className="muted" style={{ padding: "2rem", textAlign: "center" }}>Loading...</div>;
+    return (
+      <div className="muted" style={{ padding: "2rem", textAlign: "center" }}>
+        Loading...
+      </div>
+    );
   }
 
   if (!authenticated) {

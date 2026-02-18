@@ -1,5 +1,5 @@
-import type { Pool } from "pg";
 import type { AiProviderAdapter } from "@rss-wrangler/contracts";
+import type { Pool } from "pg";
 import { logAiUsage } from "../../services/ai-usage";
 
 /** Threshold: if more than 35% of new topics differ from current, drift is detected */
@@ -201,10 +201,10 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
       currentTopicNames,
       suggestedTopicNames,
     });
-    await pool.query(
-      `UPDATE feed SET classified_at = NOW() WHERE id = $1 AND tenant_id = $2`,
-      [feedId, accountId],
-    );
+    await pool.query(`UPDATE feed SET classified_at = NOW() WHERE id = $1 AND tenant_id = $2`, [
+      feedId,
+      accountId,
+    ]);
     return result;
   }
 

@@ -1,9 +1,9 @@
 "use client";
 
+import type { Digest, DigestEntry } from "@rss-wrangler/contracts";
 import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { listDigests } from "@/lib/api";
-import type { Digest, DigestEntry } from "@rss-wrangler/contracts";
 
 function simpleMarkdownToHtml(md: string): string {
   // Pre-process: merge continuation lines into their parent list items.
@@ -18,13 +18,14 @@ function simpleMarkdownToHtml(md: string): string {
       !/^[-*] /.test(line) &&
       !/^#{2,4} /.test(line)
     ) {
-      merged[merged.length - 1] += " " + line;
+      merged[merged.length - 1] += ` ${line}`;
     } else {
       merged.push(line);
     }
   }
 
-  let html = merged.join("\n")
+  let html = merged
+    .join("\n")
     // Escape HTML entities
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -64,7 +65,7 @@ function simpleMarkdownToHtml(md: string): string {
   html = html.replace(/\n/g, "<br>");
 
   // Wrap in paragraph
-  html = "<p>" + html + "</p>";
+  html = `<p>${html}</p>`;
 
   // Clean up empty paragraphs
   html = html.replace(/<p>\s*<\/p>/g, "");
@@ -144,15 +145,15 @@ function DigestContent() {
                     />
                     {renderSection(
                       "Top picks for you",
-                      digest.entries.filter((e) => e.section === "top_picks")
+                      digest.entries.filter((e) => e.section === "top_picks"),
                     )}
                     {renderSection(
                       "Big stories",
-                      digest.entries.filter((e) => e.section === "big_stories")
+                      digest.entries.filter((e) => e.section === "big_stories"),
                     )}
                     {renderSection(
                       "Quick scan",
-                      digest.entries.filter((e) => e.section === "quick_scan")
+                      digest.entries.filter((e) => e.section === "quick_scan"),
                     )}
                   </div>
                 )}

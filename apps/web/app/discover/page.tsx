@@ -1,10 +1,10 @@
 "use client";
 
+import type { Feed } from "@rss-wrangler/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
-import { addFeed, listFeeds } from "@/lib/api";
-import type { Feed } from "@rss-wrangler/contracts";
 import feedDirectory from "@/data/feed-directory.json" with { type: "json" };
+import { addFeed, listFeeds } from "@/lib/api";
 
 interface DirectoryEntry {
   name: string;
@@ -44,7 +44,7 @@ function DiscoverContent() {
         (f) =>
           f.name.toLowerCase().includes(q) ||
           f.description.toLowerCase().includes(q) ||
-          f.category.toLowerCase().includes(q)
+          f.category.toLowerCase().includes(q),
       );
     }
     return result;
@@ -74,7 +74,11 @@ function DiscoverContent() {
           <p className="discover-card-desc">{entry.description}</p>
           <div className="row">
             <span className="badge">{entry.category}</span>
-            <span className="popularity-star" aria-label={`Popularity ${entry.popularity}`}>
+            <span
+              className="popularity-star"
+              role="img"
+              aria-label={`Popularity ${entry.popularity}`}
+            >
               {"*".repeat(entry.popularity)}
             </span>
           </div>
@@ -103,9 +107,7 @@ function DiscoverContent() {
     <>
       <div className="page-header">
         <h1 className="page-title">Discover Feeds</h1>
-        <p className="page-meta">
-          Browse popular RSS feeds and subscribe with one click.
-        </p>
+        <p className="page-meta">Browse popular RSS feeds and subscribe with one click.</p>
       </div>
 
       <section className="section-card">
@@ -128,7 +130,10 @@ function DiscoverContent() {
               <section className="banner">
                 <div>
                   <strong>Personalized recommendations are coming.</strong>
-                  <p>Subscribe to feeds and read articles — we&apos;ll learn your interests and suggest new sources.</p>
+                  <p>
+                    Subscribe to feeds and read articles — we&apos;ll learn your interests and
+                    suggest new sources.
+                  </p>
                 </div>
                 <button
                   type="button"

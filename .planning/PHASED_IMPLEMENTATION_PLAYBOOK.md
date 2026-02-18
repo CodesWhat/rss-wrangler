@@ -11,8 +11,8 @@ Locked architecture for Phase 0:
 
 - Self-hosted: single instance, one bootstrap admin, many users with isolated feeds/settings.
 - Hosted SaaS: one Wrangler product, many direct user accounts (Free/Pro/Pro+AI per user).
-- Workspace slug is not a user-facing auth concept in v1 (no workspace field in login/signup/recovery).
-- Existing tenant scaffolding may remain internal during transition, but UX and contracts must be workspace-free.
+- Account slug is not a user-facing auth concept in v1 (no workspace/tenant field in login/signup/recovery).
+- Existing `tenant_id` DB columns remain as internal isolation keys; application code has been migrated to `account`/`member` naming with backward-compat aliases in contracts, routes, billing, AI-usage, and entitlements.
 
 Execution tracker (must complete before net-new Phase 0 feature slices):
 
@@ -24,10 +24,10 @@ Execution tracker (must complete before net-new Phase 0 feature slices):
 
 Done criteria for this tracker:
 
-1. No auth page asks for workspace/tenant input.
+1. No auth page asks for workspace/tenant/account slug input.
 2. Signup/login/reset/verification flows succeed in Docker self-host smoke and hosted smoke.
 3. Planning docs consistently describe single-product multi-user hosted model.
-4. Existing tenant columns are treated as internal implementation detail only.
+4. Existing `tenant_id` DB columns are treated as internal implementation detail only; application code uses `account`/`member` naming.
 
 ---
 
@@ -56,6 +56,7 @@ If docs conflict, resolve in this order and update all affected docs in the same
 ## Provider Lock (Hobby / Phase 0)
 
 This is the default provider stack until hosted usage requires paid upgrades.
+This provider lock applies to the hosted track. Immediate self-host readiness gates are Docker Compose build + smoke checks.
 
 | Layer | Locked Provider | Hobby Default | Upgrade Trigger |
 |---|---|---|---|
@@ -71,7 +72,7 @@ This is the default provider stack until hosted usage requires paid upgrades.
 
 Implementation notes:
 - Keep queueing on `pg-boss` backed by Postgres to avoid introducing an additional queue vendor in Phase 0.
-- All services deploy to Render as separate services: Web (Next.js static/SSR), API (Fastify + Better Auth), Worker (pg-boss jobs), Postgres.
+- Hosted services deploy to Render as separate services: Web (Next.js static/SSR), API (Fastify + Better Auth), Worker (pg-boss jobs), Postgres.
 - Better Auth runs inside the Fastify process — no separate auth service. Provides: signup, login, password reset, email verification, MFA (TOTP), and session management. Uses existing Postgres for auth tables.
 - Resend handles transactional email (password reset, email verification). Free tier covers early launch.
 - Self-hosted mode: keep existing env-based bootstrap (`AUTH_USERNAME`/`AUTH_PASSWORD`) as simple alternative. Better Auth is the hosted auth path.
@@ -89,9 +90,12 @@ Implementation notes:
 ## Current Status Snapshot (2026-02-09)
 
 - Phase 0 completed slices: auth recovery/verification, onboarding wizard + server persistence, account data-export baseline, invite-token controls, member approval policy/roles, account-deletion automation, hosted load/SLO baseline + calibration, billing foundation baseline + annual/alerting polish, consent/CMP baseline, self-host Docker/OrbStack smoke hardening, hosted post-deploy smoke verification tooling, and identity model alignment (workspace-free auth UX + account-facing entitlement/billing surface naming).
-- Phase 0 in progress: entitlements hardening beyond baseline limits and hosted dogfood rollout readiness.
+- Hosted dogfood readiness tooling now includes a consolidated runner (`npm run hosted:dogfood`) that combines hosted smoke, Phase 0 SLO gate, and account telemetry probes (`/v1/account/entitlements`, `/v1/billing`, `/v1/privacy/consent`) into one report artifact for rollout decisions.
+- Self-host checkpoint tooling now includes `npm run selfhost:readiness` to gate Docker build/smoke readiness with a report artifact (`infra/load/results/latest-selfhost-readiness.json`).
+- Sequencing update: self-host-first checkpoint is now the immediate execution path (Docker Compose build + self-host smoke hardening before first live hosted dogfood run).
+- Phase 0 in progress: entitlements hardening beyond baseline limits, self-host release-readiness hardening, and hosted dogfood rollout readiness.
 - Still open for hosted launch: CMP adapter + script-gating verification, and first hosted dogfood telemetry run.
-- Deployment readiness update: Render blueprint profiles now exist (`render.free.yaml` smoke, `render.yaml` dogfood baseline); next action is first live deploy + telemetry validation.
+- Deployment readiness update: Render blueprint profiles now exist (`render.free.yaml` smoke, `render.yaml` dogfood baseline); hosted-track next action remains first live deploy + telemetry validation after the Docker self-host checkpoint.
 
 ---
 

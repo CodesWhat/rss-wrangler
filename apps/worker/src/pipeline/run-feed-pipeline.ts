@@ -1,24 +1,25 @@
 import { randomUUID } from "node:crypto";
-import type { Pool } from "pg";
 import type { AiProviderAdapter } from "@rss-wrangler/contracts";
+import type { Pool } from "pg";
 import type { DueFeed } from "../services/feed-service";
 import { FeedService } from "../services/feed-service";
-import { pollFeed } from "./stages/poll-feed";
-import { parseAndUpsert } from "./stages/parse-and-upsert";
-import { assignClusters } from "./stages/cluster-assignment";
-import { enrichWithAi } from "./stages/enrich-with-ai";
-import { classifyFeedTopics } from "./stages/classify-feed-topics";
-import { extractAndPersistFullText } from "./stages/extract-fulltext";
-import { preFilterSoftGate, postClusterFilter } from "./stages/filter";
-import { maybeGenerateDigest } from "./stages/generate-digest";
 import { sendNewStoriesNotification } from "../services/push-service";
 import {
   getPipelineEntitlements,
   incrementDailyIngestionUsage,
   isPollAllowed,
   releaseDailyIngestionBudget,
-  reserveDailyIngestionBudget
+  reserveDailyIngestionBudget,
 } from "./entitlements";
+import { classifyFeedTopics } from "./stages/classify-feed-topics";
+import { assignClusters } from "./stages/cluster-assignment";
+import { enrichWithAi } from "./stages/enrich-with-ai";
+import { extractAndPersistFullText } from "./stages/extract-fulltext";
+import { postClusterFilter, preFilterSoftGate } from "./stages/filter";
+import { maybeGenerateDigest } from "./stages/generate-digest";
+import { parseAndUpsert } from "./stages/parse-and-upsert";
+import { pollFeed } from "./stages/poll-feed";
+import { scoreRelevance } from "./stages/score-relevance";
 
 export interface PushConfig {
   vapidPublicKey?: string;
@@ -33,7 +34,12 @@ export interface PipelineContext {
   pushConfig?: PushConfig;
 }
 
-export async function runFeedPipeline({ feed, pool, aiProvider, pushConfig }: PipelineContext): Promise<void> {
+export async function runFeedPipeline({
+  feed,
+  pool,
+  aiProvider,
+  pushConfig,
+}: PipelineContext): Promise<void> {
   const feedService = new FeedService(pool);
 
   try {
@@ -51,7 +57,7 @@ async function runFeedPipelineInner({
   pool,
   feedService,
   aiProvider,
-  pushConfig
+  pushConfig,
 }: PipelineContext & { feedService: FeedService }): Promise<void> {
   const entitlements = await getPipelineEntitlements(pool, feed.accountId);
 
@@ -59,7 +65,7 @@ async function runFeedPipelineInner({
     console.info("[pipeline] feed not due for plan poll interval", {
       feedId: feed.id,
       planId: entitlements.planId,
-      minPollMinutes: entitlements.minPollMinutes
+      minPollMinutes: entitlements.minPollMinutes,
     });
     return;
   }
@@ -75,7 +81,7 @@ async function runFeedPipelineInner({
       feedId: feed.id,
       feedUrl: feed.url,
       failureStage: classifyPollFailureStage(message),
-      error: message
+      error: message,
     });
     throw error;
   }
@@ -85,17 +91,22 @@ async function runFeedPipelineInner({
       feedId: feed.id,
       feedUrl: feed.url,
       format: pollResult.format,
-      parsedItems: pollResult.items.length
+      parsedItems: pollResult.items.length,
     });
     console.info("[pipeline] parsed feed", {
       feedId: feed.id,
       format: pollResult.format,
-      parsedItems: pollResult.items.length
+      parsedItems: pollResult.items.length,
     });
   }
 
   // Update etag/last-modified regardless
-  await feedService.updateLastPolled(feed.accountId, feed.id, pollResult.etag, pollResult.lastModified);
+  await feedService.updateLastPolled(
+    feed.accountId,
+    feed.id,
+    pollResult.etag,
+    pollResult.lastModified,
+  );
 
   if (pollResult.notModified) {
     console.info("[pipeline] feed not modified, skipping", { feedId: feed.id });
@@ -112,7 +123,7 @@ async function runFeedPipelineInner({
         feedId: feed.id,
         originalCount: pollResult.items.length,
         filteredCount: fetchedItems.length,
-        backfillSince: feed.backfillSince.toISOString()
+        backfillSince: feed.backfillSince.toISOString(),
       });
     }
   }
@@ -131,7 +142,7 @@ async function runFeedPipelineInner({
       pool,
       feed.accountId,
       entitlements.itemsPerDayLimit,
-      fetchedItems.length
+      fetchedItems.length,
     );
     hasReservedSlots = true;
 
@@ -140,7 +151,7 @@ async function runFeedPipelineInner({
         feedId: feed.id,
         accountId: feed.accountId,
         planId: entitlements.planId,
-        dailyLimit: entitlements.itemsPerDayLimit
+        dailyLimit: entitlements.itemsPerDayLimit,
       });
       return;
     }
@@ -151,7 +162,7 @@ async function runFeedPipelineInner({
         feedId: feed.id,
         requested: fetchedItems.length,
         allowed: reservedSlots,
-        planId: entitlements.planId
+        planId: entitlements.planId,
       });
     }
   }
@@ -208,13 +219,13 @@ async function runFeedPipelineInner({
       feedId: feed.id,
       attempted: extraction.attempted,
       extracted: extraction.extracted,
-      persisted: extraction.persisted
+      persisted: extraction.persisted,
     });
   } catch (err) {
     // Reader text-mode already has summary fallback in the UI; extraction is additive.
     console.error("[pipeline] full-text extraction failed (non-fatal)", {
       feedId: feed.id,
-      error: err instanceof Error ? err.message : String(err)
+      error: err instanceof Error ? err.message : String(err),
     });
   }
 
@@ -242,7 +253,7 @@ async function runFeedPipelineInner({
       url: i.url,
       feedId: i.feedId,
       folderId: feed.folderId,
-    }))
+    })),
   );
 
   // Muted items still participate in clustering (per spec).
@@ -264,12 +275,22 @@ async function runFeedPipelineInner({
     });
   }
 
+  // Stage: Score relevance (opt-in via settings)
+  try {
+    await scoreRelevance(pool, feed.accountId, newItems, aiProvider ?? null);
+  } catch (err) {
+    console.error("[pipeline] score-relevance failed (non-fatal)", {
+      feedId: feed.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // Stage 8: Post-cluster filter (mute-with-breakout)
   // Get the cluster IDs for newly clustered items
   const clusterIds = await getClusterIdsForItems(
     pool,
     feed.accountId,
-    newItems.map((i) => i.id)
+    newItems.map((i) => i.id),
   );
   await postClusterFilter(pool, feed.accountId, clusterIds);
 
@@ -286,10 +307,10 @@ async function runFeedPipelineInner({
         {
           vapidPublicKey: pushConfig.vapidPublicKey,
           vapidPrivateKey: pushConfig.vapidPrivateKey,
-          vapidContact: pushConfig.vapidContact ?? "mailto:admin@localhost"
+          vapidContact: pushConfig.vapidContact ?? "mailto:admin@localhost",
         },
         clusterIds.length,
-        topHeadline
+        topHeadline,
       );
       if (result.sent > 0) {
         console.info("[pipeline] push notifications sent", result);
@@ -308,7 +329,11 @@ async function runFeedPipelineInner({
   });
 }
 
-async function getClusterIdsForItems(pool: Pool, accountId: string, itemIds: string[]): Promise<string[]> {
+async function getClusterIdsForItems(
+  pool: Pool,
+  accountId: string,
+  itemIds: string[],
+): Promise<string[]> {
   if (itemIds.length === 0) return [];
 
   const result = await pool.query<{ cluster_id: string }>(
@@ -316,7 +341,7 @@ async function getClusterIdsForItems(pool: Pool, accountId: string, itemIds: str
      FROM cluster_member
      WHERE item_id = ANY($1)
        AND tenant_id = $2`,
-    [itemIds, accountId]
+    [itemIds, accountId],
   );
 
   return result.rows.map((r) => r.cluster_id);
@@ -326,7 +351,7 @@ async function recordWorkerEvent(
   pool: Pool,
   accountId: string,
   type: string,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): Promise<void> {
   const idempotencyKey = `worker:${type}:${Date.now()}:${randomUUID()}`;
   try {
@@ -334,13 +359,13 @@ async function recordWorkerEvent(
       `INSERT INTO event (tenant_id, idempotency_key, ts, type, payload_json)
        VALUES ($1, $2, NOW(), $3, $4::jsonb)
        ON CONFLICT (tenant_id, idempotency_key) DO NOTHING`,
-      [accountId, idempotencyKey, type, JSON.stringify(payload)]
+      [accountId, idempotencyKey, type, JSON.stringify(payload)],
     );
   } catch (error) {
     console.warn("[pipeline] failed to record worker event", {
       accountId,
       type,
-      error: error instanceof Error ? error.message : String(error)
+      error: error instanceof Error ? error.message : String(error),
     });
   }
 }

@@ -1,10 +1,5 @@
-import { describe, it, expect } from "vitest";
-import {
-  tokenize,
-  simhash,
-  hammingDistance,
-  jaccardSimilarity,
-} from "../compute-features.js";
+import { describe, expect, it } from "vitest";
+import { hammingDistance, jaccardSimilarity, simhash, tokenize } from "../compute-features.js";
 
 // ─── tokenize ────────────────────────────────────────────────────────────────
 

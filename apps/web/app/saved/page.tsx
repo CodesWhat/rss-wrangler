@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { StoryCard } from "@/components/story-card";
-import { ProtectedRoute } from "@/components/protected-route";
-import { listClusters } from "@/lib/api";
 import type { ClusterCard } from "@rss-wrangler/contracts";
+import { useEffect, useState } from "react";
+import { ProtectedRoute } from "@/components/protected-route";
+import { StoryCard } from "@/components/story-card";
+import { listClusters } from "@/lib/api";
 
 function SavedFeed() {
   const [clusters, setClusters] = useState<ClusterCard[]>([]);

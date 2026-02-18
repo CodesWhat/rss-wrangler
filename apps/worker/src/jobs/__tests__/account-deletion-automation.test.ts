@@ -10,25 +10,25 @@ describe("processDueAccountDeletions", () => {
       .mockResolvedValueOnce({
         rows: [
           { request_id: "req-1", user_id: "user-1", user_deleted: true },
-          { request_id: "req-2", user_id: "user-2", user_deleted: false }
-        ]
+          { request_id: "req-2", user_id: "user-2", user_deleted: false },
+        ],
       })
-      .mockResolvedValueOnce({ rows: [{ id: "tenant-1" }] }) // DELETE tenant
+      .mockResolvedValueOnce({ rows: [{ id: "account-1" }] }) // DELETE tenant
       .mockResolvedValueOnce({ rows: [] }); // COMMIT
 
     const client = { query } as unknown as PoolClient;
 
     const result = await processDueAccountDeletions(client, {
-      tenantId: "tenant-1",
+      accountId: "account-1",
       batchSize: 2,
-      graceWindowDays: 7
+      graceWindowDays: 7,
     });
 
     expect(result).toEqual({
       processed: 2,
       deletedUsers: 1,
       tenantPurged: true,
-      requestIds: ["req-1", "req-2"]
+      requestIds: ["req-1", "req-2"],
     });
 
     expect(query).toHaveBeenCalledTimes(4);
@@ -37,7 +37,7 @@ describe("processDueAccountDeletions", () => {
 
     const [sql, params] = query.mock.calls[1] as [string, unknown[]];
     expect(sql).toContain("WITH due AS");
-    expect(params).toEqual(["tenant-1", 2, "7 days", 7]);
+    expect(params).toEqual(["account-1", 2, "7 days", 7]);
   });
 
   it("rolls back when processing fails", async () => {
@@ -51,8 +51,8 @@ describe("processDueAccountDeletions", () => {
 
     await expect(
       processDueAccountDeletions(client, {
-        tenantId: "tenant-1"
-      })
+        accountId: "account-1",
+      }),
     ).rejects.toThrow("db exploded");
 
     expect(query).toHaveBeenCalledTimes(3);

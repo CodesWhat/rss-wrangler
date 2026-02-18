@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ClusterAiSummaryResponse, ClusterDetail } from "@rss-wrangler/contracts";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
+import { getClusterAiSummary, getClusterDetail } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { getClusterDetail, getClusterAiSummary } from "@/lib/api";
-import type { ClusterAiSummaryResponse, ClusterDetail } from "@rss-wrangler/contracts";
 
 function isSafeUrl(url: string): boolean {
   try {
@@ -163,9 +163,10 @@ function ClusterDetailView() {
   const storyLabel = (detail.cluster.topicName ?? detail.cluster.folderName).toUpperCase();
   const storyText = detail.storySoFar ?? "No story summary is available yet.";
   const storyStateLabel = storyTextStateLabel(detail);
-  const heroImage = detail.cluster.heroImageUrl && isSafeUrl(detail.cluster.heroImageUrl)
-    ? detail.cluster.heroImageUrl
-    : null;
+  const heroImage =
+    detail.cluster.heroImageUrl && isSafeUrl(detail.cluster.heroImageUrl)
+      ? detail.cluster.heroImageUrl
+      : null;
 
   return (
     <section className="cluster-detail-shell">
@@ -186,7 +187,9 @@ function ClusterDetailView() {
           <span className="badge">{storyLabel}</span>
           <span className="muted">{detail.cluster.primarySource}</span>
           <span className="muted">{relativeTime(detail.cluster.primarySourcePublishedAt)}</span>
-          <span className="muted">{new Date(detail.cluster.primarySourcePublishedAt).toLocaleString()}</span>
+          <span className="muted">
+            {new Date(detail.cluster.primarySourcePublishedAt).toLocaleString()}
+          </span>
         </div>
 
         <h2 className="cluster-detail-headline">{detail.cluster.headline}</h2>
@@ -202,7 +205,9 @@ function ClusterDetailView() {
           />
         )}
 
-        {detail.cluster.summary && <p className="cluster-detail-summary">{detail.cluster.summary}</p>}
+        {detail.cluster.summary && (
+          <p className="cluster-detail-summary">{detail.cluster.summary}</p>
+        )}
 
         {primaryMember && (
           <div className="cluster-detail-actions-row">
@@ -284,15 +289,27 @@ function ClusterDetailView() {
         </div>
 
         {readerMode === "feed" && (
-          <div id="reader-panel-feed" className="cluster-reader-panel" role="tabpanel" aria-labelledby="reader-tab-feed">
+          <div
+            id="reader-panel-feed"
+            className="cluster-reader-panel"
+            role="tabpanel"
+            aria-labelledby="reader-tab-feed"
+          >
             <p className="cluster-story-text">
-              {detail.cluster.summary ?? detail.storySoFar ?? "No feed preview is available for this story."}
+              {detail.cluster.summary ??
+                detail.storySoFar ??
+                "No feed preview is available for this story."}
             </p>
           </div>
         )}
 
         {readerMode === "original" && (
-          <div id="reader-panel-original" className="cluster-reader-panel" role="tabpanel" aria-labelledby="reader-tab-original">
+          <div
+            id="reader-panel-original"
+            className="cluster-reader-panel"
+            role="tabpanel"
+            aria-labelledby="reader-tab-original"
+          >
             {primaryMember ? (
               <>
                 <div className="cluster-reader-frame-wrap">
@@ -302,6 +319,7 @@ function ClusterDetailView() {
                     className="cluster-reader-frame"
                     loading="lazy"
                     referrerPolicy="no-referrer"
+                    sandbox="allow-scripts allow-same-origin"
                     onError={() => setFrameLoadFailed(true)}
                   />
                 </div>
@@ -326,7 +344,12 @@ function ClusterDetailView() {
         )}
 
         {readerMode === "text" && (
-          <div id="reader-panel-text" className="cluster-reader-panel" role="tabpanel" aria-labelledby="reader-tab-text">
+          <div
+            id="reader-panel-text"
+            className="cluster-reader-panel"
+            role="tabpanel"
+            aria-labelledby="reader-tab-text"
+          >
             <p className="muted cluster-story-state">{storyStateLabel}</p>
             <p className="cluster-story-text">
               {detail.storySoFar ?? "No extracted text is available yet."}
@@ -356,7 +379,9 @@ function ClusterDetailView() {
                   <span className="cluster-member-title">{member.title}</span>
                 )}
                 <p className="cluster-member-meta">
-                  <span className="source-name">{member.sourceName.toUpperCase().replace(/ /g, "_")}</span>
+                  <span className="source-name">
+                    {member.sourceName.toUpperCase().replace(/ /g, "_")}
+                  </span>
                   <span className="source-sep">/</span>
                   <time dateTime={member.publishedAt}>{relativeTime(member.publishedAt)}</time>
                 </p>

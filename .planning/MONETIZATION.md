@@ -148,11 +148,12 @@ user_id -> plan -> features -> limits
 ## Launch Plan
 
 1. Start with **Free + Pro** (single plan, easy to explain)
-2. Complete hosted foundation first: **single-product multi-user auth/onboarding + account management/compliance controls + per-user entitlements enforcement**
-3. Run an internal **hosted dogfood pilot + synthetic load tests** to measure real cost/user/day and calibrate limits (feeds/items/day/retention/index size)
-4. Add **annual billing** early
-5. Add **usage-based add-ons** only when cost pressure appears
-6. Add **team plan** only after multi-user demand materializes
+2. Complete a **self-host-first checkpoint** before hosted rollout: Docker Compose build + OrbStack smoke reliability (`docker compose -f infra/docker-compose.yml build`, `npm run orbstack:smoke`), migration safety, and table-stakes reading UX hardening for daily use.
+3. Continue hosted foundation work in parallel: **single-product multi-user auth/onboarding + account management/compliance controls + per-user entitlements enforcement**.
+4. Run an internal **hosted dogfood pilot + synthetic load tests** only after the Docker self-host checkpoint passes, to measure real cost/user/day and calibrate limits (feeds/items/day/retention/index size).
+5. Add **annual billing** early (already shipped).
+6. Add **usage-based add-ons** only when cost pressure appears.
+7. Add **team plan** only after multi-user demand materializes.
 
 ---
 
@@ -161,19 +162,25 @@ user_id -> plan -> features -> limits
 ### Current Phase 0 Snapshot (2026-02-09)
 
 - Hosted foundations are in-progress with shipped slices for onboarding wizard, invite-token onboarding guard, password recovery/verification, account-export baseline, account-deletion automation, and load/SLO tooling.
-- Identity model alignment is now explicit: hosted and self-host auth UX should be workspace-free (single product, direct user accounts).
+- Identity model alignment is now explicit: hosted and self-host auth UX should be account-facing (single product, direct user accounts). Internal naming migration from workspace/tenant to member/account is substantially complete across contracts, routes, billing, AI-usage, and entitlements.
 - Entitlements are partial: feed/search/ingest gates are live and now sync with Lemon webhook plan changes; broader route coverage + usage UX remain.
 - Billing foundation is launch-ready: checkout/webhook sync/pricing/portal handoff, in-app cancel/resume controls, annual plan variants, and webhook failure alerting are shipped. Consent baseline is now partial-live; hosted dogfood rollout remains open.
-- Deployment bootstrap is in place: Render blueprints exist for free smoke (`render.free.yaml`) and dogfood baseline (`render.yaml`), awaiting first live run.
+- Deployment bootstrap is in place: Render blueprints exist for free smoke (`render.free.yaml`) and dogfood baseline (`render.yaml`), awaiting first live run on the hosted track. They are not part of the immediate self-host checkpoint.
+- Sequencing update: execute a self-host-first hardening pass before first live hosted dogfood telemetry run.
 
 ### What we need to build
+
+Immediate self-host-first checkpoint:
+
+- [ ] Self-host release-readiness checklist: Docker Compose build + OrbStack smoke pass, migrations pass on clean DB, auth/login baseline, and feed pipeline health sanity checks.
+- [ ] Prioritize table-stakes self-host UX reliability slices before new hosted-only expansion work (reader completeness + core card/detail usability fixes from Phase 1/P0 gaps).
 
 - [ ] Entitlements service (user -> plan -> features -> limits) *(partial: baseline service and plan defaults exist)*
 - [ ] Free tier enforcement (feed count limit, refresh throttle, search restriction) *(partial: feed/import/search/ingest baseline gates exist)*
 - [ ] Limit dimensions model (feeds, items/day, retention, search index bytes) + per-plan defaults *(partial: feeds/items/day/search mode/min poll modeled)*
 - [ ] Usage metering pipeline (daily counters + rollups per user) *(partial: daily ingest + feed-count usage baseline exists)*
 - [ ] Quota enforcement middleware (soft warning + hard cap behavior) *(partial: hard caps in API/worker baseline, warning UX pending)*
-- [ ] Hosted auth via Better Auth (signup/login/password reset/email verify/MFA) with workspace-free UX
+- [ ] Hosted auth via Better Auth (signup/login/password reset/email verify/MFA) with account-facing UX
 - [x] Guided product onboarding wizard (first-run: OPML import / starter directory / add URL + optional topic picks + AI opt-in explanation) *(baseline shipped; deeper bootstrap still pending)*
 - [x] Hosted account settings: password change/reset flow (provided by Better Auth)
 - [ ] Hosted account deletion workflow (self-serve request, confirmation, grace window, hard purge SLA + worker job) *(partial: request/cancel + worker automation shipped; completion notifications pending)*
@@ -371,7 +378,7 @@ Self-hosted mode: entitlements always return `true` for everything. No license c
 - Keep consent state auditable and versioned to support policy changes
 
 ### Hosted SaaS Cost Tracking Pilot
-- Recommended first step: run your own hosted deployment and use it as a dogfood account to gather real cost baselines
+- Recommended first step (after Docker self-host gate passes): run your own hosted deployment and use it as a dogfood account to gather real cost baselines
 - Track per-user metrics: feeds count, items ingested/day, retained items, search index bytes, and worker/runtime cost
 - Use measured p50/p95 usage to set Free/Pro defaults instead of guessing
 - Add scripted synthetic load profiles (hosted read/write + ingest pipeline) to validate p95 latency/error budgets before public launch
@@ -394,7 +401,7 @@ Self-hosted mode: entitlements always return `true` for everything. No license c
 | Decision | Choice | Date |
 |----------|--------|------|
 | Auth provider | Better Auth (MIT, npm library in Fastify process, $0 cost) | 2026-02-07 |
-| Identity/isolation model (v1) | Single-product multi-user UX. No workspace field in auth screens. Keep `tenant_id` scaffolding internal during transition with default tenant scope. | 2026-02-08 |
+| Identity/isolation model (v1) | Single-product multi-user UX. No workspace field in auth screens. `tenant_id` DB column remains as internal isolation key; application code migrating to `account`/`member` naming with backward-compat aliases. | 2026-02-08 |
 | OPML import gating | Free (import allowed, feed count cap enforced, clear upsell moment) | 2026-02-07 |
 | AI pricing model | Defer until dogfood pilot. Direction: $7/mo Pro, $14/mo Pro+AI | 2026-02-07 |
 | Deployment platform | Render (separate services: web, API, worker, Postgres) | 2026-02-07 |
@@ -459,11 +466,11 @@ Product model:
 
 - Self-hosted = single instance, one bootstrap admin, many users.
 - Hosted = one Wrangler product, many direct user accounts (Free/Pro/Pro+AI per user).
-- Workspace slug is not a user-facing concept in v1 auth UX.
+- Account slug is not a user-facing concept in v1 auth UX (was previously called "workspace slug").
 
-Phase 0 mandatory scope for launch readiness:
+Phase 0 mandatory scope for hosted launch readiness (executed after the self-host-first checkpoint):
 
-- [ ] Workspace-free auth UI/UX (login/signup/recovery/verification)
+- [x] Account-facing auth UI/UX (login/signup/recovery/verification) -- workspace fields removed
 - [ ] User registration + onboarding via **Better Auth** (signup/login/email verify/MFA) — **LOCKED**
 - [ ] Hosted account settings (password change/reset) via **Better Auth** — **LOCKED**
 - [ ] Hosted account deletion flow (self-serve request + purge lifecycle)

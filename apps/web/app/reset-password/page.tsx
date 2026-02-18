@@ -1,7 +1,7 @@
 "use client";
 
+import { type FormEvent, useEffect, useState } from "react";
 import { resetPassword } from "@/lib/api";
-import { useEffect, useState, type FormEvent } from "react";
 
 export default function ResetPasswordPage() {
   const [token, setToken] = useState("");

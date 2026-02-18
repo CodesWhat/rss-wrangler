@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import type { AccountDataExportStatus } from "@rss-wrangler/contracts";
+import { useCallback, useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import {
   downloadAccountDataExport,
   getAccountDataExportStatus,
-  requestAccountDataExport
+  requestAccountDataExport,
 } from "@/lib/api";
 
 function formatBytes(bytes: number | null): string {
@@ -83,7 +83,7 @@ function DataExportContent() {
     setSuccess(
       result.status.status === "completed"
         ? "A fresh export was generated."
-        : "Export request submitted."
+        : "Export request submitted.",
     );
   }
 
@@ -117,7 +117,7 @@ function DataExportContent() {
       <section className="section-card">
         <h2>Data portability bundle</h2>
         <p className="muted">
-          Generate a JSON export of your workspace data: subscriptions, saved items, annotations,
+          Generate a JSON export of your account data: subscriptions, saved items, annotations,
           filters/rules, settings, digests, and interaction events.
         </p>
 

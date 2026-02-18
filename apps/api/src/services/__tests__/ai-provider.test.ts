@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   createAiRegistry,
-  createOpenAiProvider,
   createAnthropicProvider,
   createOllamaProvider,
+  createOpenAiProvider,
 } from "@rss-wrangler/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 describe("createAiRegistry", () => {
   it("returns null when no providers configured", () => {

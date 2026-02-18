@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 
 type FeedWeight = "prefer" | "neutral" | "deprioritize";
 
@@ -47,11 +47,7 @@ function computeSourceWeight(weight: FeedWeight): number {
   return 0;
 }
 
-function computeEngagement(
-  dwellSeconds: number,
-  clicked: boolean,
-  notInterested: boolean
-): number {
+function computeEngagement(dwellSeconds: number, clicked: boolean, notInterested: boolean): number {
   const dwellPart = Math.min(dwellSeconds / 120.0, 0.25);
   const clickPart = clicked ? 0.15 : 0;
   const notInterestedPart = notInterested ? -2.5 : 0;
@@ -79,11 +75,7 @@ function computeRanking(input: RankingInput): RankingFactors {
   const saved = computeSaved(input.isSaved);
   const clusterSize = computeClusterSize(input.clusterSize);
   const sourceWeight = computeSourceWeight(input.feedWeight);
-  const engagement = computeEngagement(
-    input.dwellSeconds,
-    input.clicked,
-    input.notInterested
-  );
+  const engagement = computeEngagement(input.dwellSeconds, input.clicked, input.notInterested);
   const topicAffinity = computeTopicAffinity(input.topicAffinityScore);
   const folderAffinity = computeFolderAffinity(input.folderAffinityScore);
   const diversityPenalty = computeDiversityPenalty(input.topicUnreadCount);
@@ -132,9 +124,7 @@ function makeInput(overrides: Partial<RankingInput> = {}): RankingInput {
 }
 
 function rankByScore(inputs: RankingInput[]): RankingFactors[] {
-  return inputs
-    .map((i) => computeRanking(i))
-    .sort((a, b) => b.finalScore - a.finalScore);
+  return inputs.map((i) => computeRanking(i)).sort((a, b) => b.finalScore - a.finalScore);
 }
 
 describe("ranking formula: individual factors", () => {
@@ -412,23 +402,38 @@ describe("ranking regression: deterministic stability", () => {
 describe("ranking regression: breakout override preserves visibility", () => {
   it("severity keyword in title triggers breakout_shown for muted items", () => {
     const SEVERITY_KEYWORDS = [
-      "hack", "hacked", "breach", "breached", "0day", "zero-day", "zeroday",
-      "arrest", "arrested", "indictment", "doj", "cisa", "fbi",
-      "state-backed", "state-sponsored", "nation-state",
-      "outage", "down", "disruption", "ransomware", "exploit",
-      "vulnerability", "critical", "emergency", "recall",
-      "leak", "leaked", "data breach",
+      "hack",
+      "hacked",
+      "breach",
+      "breached",
+      "0day",
+      "zero-day",
+      "zeroday",
+      "arrest",
+      "arrested",
+      "indictment",
+      "doj",
+      "cisa",
+      "fbi",
+      "state-backed",
+      "state-sponsored",
+      "nation-state",
+      "outage",
+      "down",
+      "disruption",
+      "ransomware",
+      "exploit",
+      "vulnerability",
+      "critical",
+      "emergency",
+      "recall",
+      "leak",
+      "leaked",
+      "data breach",
     ];
-    const SEVERITY_PATTERN = new RegExp(
-      `\\b(${SEVERITY_KEYWORDS.join("|")})\\b`,
-      "i"
-    );
+    const SEVERITY_PATTERN = new RegExp(`\\b(${SEVERITY_KEYWORDS.join("|")})\\b`, "i");
 
-    function checkBreakout(
-      text: string,
-      feedWeight: string,
-      clusterSize: number
-    ): string | null {
+    function checkBreakout(text: string, feedWeight: string, clusterSize: number): string | null {
       const severityMatch = SEVERITY_PATTERN.exec(text);
       if (severityMatch) return `severity_keyword:${severityMatch[1]}`;
       if (feedWeight === "prefer") return "high_reputation_source";
@@ -436,26 +441,21 @@ describe("ranking regression: breakout override preserves visibility", () => {
       return null;
     }
 
-    expect(checkBreakout("Critical vulnerability discovered", "neutral", 1))
-      .toBe("severity_keyword:Critical");
-    expect(checkBreakout("Major data breach at company", "neutral", 1))
-      .toBe("severity_keyword:data breach");
-    expect(checkBreakout("Ransomware hits hospital", "neutral", 1))
-      .toBe("severity_keyword:Ransomware");
+    expect(checkBreakout("Critical vulnerability discovered", "neutral", 1)).toBe(
+      "severity_keyword:Critical",
+    );
+    expect(checkBreakout("Major data breach at company", "neutral", 1)).toBe(
+      "severity_keyword:data breach",
+    );
+    expect(checkBreakout("Ransomware hits hospital", "neutral", 1)).toBe(
+      "severity_keyword:Ransomware",
+    );
   });
 
   it("high reputation source triggers breakout even without severity keywords", () => {
-    function checkBreakout(
-      text: string,
-      feedWeight: string,
-      clusterSize: number
-    ): string | null {
-      const SEVERITY_KEYWORDS = [
-        "hack", "breach", "vulnerability", "critical", "ransomware",
-      ];
-      const SEVERITY_PATTERN = new RegExp(
-        `\\b(${SEVERITY_KEYWORDS.join("|")})\\b`, "i"
-      );
+    function checkBreakout(text: string, feedWeight: string, clusterSize: number): string | null {
+      const SEVERITY_KEYWORDS = ["hack", "breach", "vulnerability", "critical", "ransomware"];
+      const SEVERITY_PATTERN = new RegExp(`\\b(${SEVERITY_KEYWORDS.join("|")})\\b`, "i");
       const severityMatch = SEVERITY_PATTERN.exec(text);
       if (severityMatch) return `severity_keyword:${severityMatch[1]}`;
       if (feedWeight === "prefer") return "high_reputation_source";
@@ -463,22 +463,13 @@ describe("ranking regression: breakout override preserves visibility", () => {
       return null;
     }
 
-    expect(checkBreakout("routine news about sports", "prefer", 1))
-      .toBe("high_reputation_source");
+    expect(checkBreakout("routine news about sports", "prefer", 1)).toBe("high_reputation_source");
   });
 
   it("large cluster size triggers breakout for muted content", () => {
-    function checkBreakout(
-      text: string,
-      feedWeight: string,
-      clusterSize: number
-    ): string | null {
-      const SEVERITY_KEYWORDS = [
-        "hack", "breach", "vulnerability", "critical", "ransomware",
-      ];
-      const SEVERITY_PATTERN = new RegExp(
-        `\\b(${SEVERITY_KEYWORDS.join("|")})\\b`, "i"
-      );
+    function checkBreakout(text: string, feedWeight: string, clusterSize: number): string | null {
+      const SEVERITY_KEYWORDS = ["hack", "breach", "vulnerability", "critical", "ransomware"];
+      const SEVERITY_PATTERN = new RegExp(`\\b(${SEVERITY_KEYWORDS.join("|")})\\b`, "i");
       const severityMatch = SEVERITY_PATTERN.exec(text);
       if (severityMatch) return `severity_keyword:${severityMatch[1]}`;
       if (feedWeight === "prefer") return "high_reputation_source";
@@ -486,24 +477,14 @@ describe("ranking regression: breakout override preserves visibility", () => {
       return null;
     }
 
-    expect(checkBreakout("mundane topic", "neutral", 4))
-      .toBe("cluster_size:4");
-    expect(checkBreakout("mundane topic", "neutral", 8))
-      .toBe("cluster_size:8");
+    expect(checkBreakout("mundane topic", "neutral", 4)).toBe("cluster_size:4");
+    expect(checkBreakout("mundane topic", "neutral", 8)).toBe("cluster_size:8");
   });
 
   it("breakout is not triggered without severity, reputation, or cluster size", () => {
-    function checkBreakout(
-      text: string,
-      feedWeight: string,
-      clusterSize: number
-    ): string | null {
-      const SEVERITY_KEYWORDS = [
-        "hack", "breach", "vulnerability", "critical", "ransomware",
-      ];
-      const SEVERITY_PATTERN = new RegExp(
-        `\\b(${SEVERITY_KEYWORDS.join("|")})\\b`, "i"
-      );
+    function checkBreakout(text: string, feedWeight: string, clusterSize: number): string | null {
+      const SEVERITY_KEYWORDS = ["hack", "breach", "vulnerability", "critical", "ransomware"];
+      const SEVERITY_PATTERN = new RegExp(`\\b(${SEVERITY_KEYWORDS.join("|")})\\b`, "i");
       const severityMatch = SEVERITY_PATTERN.exec(text);
       if (severityMatch) return `severity_keyword:${severityMatch[1]}`;
       if (feedWeight === "prefer") return "high_reputation_source";
@@ -558,11 +539,26 @@ describe("ranking regression: combined factor interactions", () => {
 
   it("full ranking of 6 items with mixed signals produces expected order", () => {
     const items: Array<{ label: string; input: RankingInput }> = [
-      { label: "fresh-preferred-big-cluster", input: makeInput({ ageHours: 1, feedWeight: "prefer", clusterSize: 8 }) },
-      { label: "fresh-neutral-small", input: makeInput({ ageHours: 1, feedWeight: "neutral", clusterSize: 1 }) },
-      { label: "old-preferred-saved", input: makeInput({ ageHours: 12, feedWeight: "prefer", isSaved: true, clusterSize: 3 }) },
-      { label: "medium-high-topic-affinity", input: makeInput({ ageHours: 3, topicAffinityScore: 0.35, clusterSize: 4 }) },
-      { label: "fresh-deprioritized", input: makeInput({ ageHours: 1, feedWeight: "deprioritize", clusterSize: 1 }) },
+      {
+        label: "fresh-preferred-big-cluster",
+        input: makeInput({ ageHours: 1, feedWeight: "prefer", clusterSize: 8 }),
+      },
+      {
+        label: "fresh-neutral-small",
+        input: makeInput({ ageHours: 1, feedWeight: "neutral", clusterSize: 1 }),
+      },
+      {
+        label: "old-preferred-saved",
+        input: makeInput({ ageHours: 12, feedWeight: "prefer", isSaved: true, clusterSize: 3 }),
+      },
+      {
+        label: "medium-high-topic-affinity",
+        input: makeInput({ ageHours: 3, topicAffinityScore: 0.35, clusterSize: 4 }),
+      },
+      {
+        label: "fresh-deprioritized",
+        input: makeInput({ ageHours: 1, feedWeight: "deprioritize", clusterSize: 1 }),
+      },
       { label: "stale-not-interested", input: makeInput({ ageHours: 48, notInterested: true }) },
     ];
 
@@ -621,7 +617,9 @@ describe("ranking regression: engagement signal boosting", () => {
   });
 
   it("moderate dwell on older item can close gap with fresh no-engagement item", () => {
-    const olderEngaged = computeRanking(makeInput({ ageHours: 3, dwellSeconds: 120, clicked: true }));
+    const olderEngaged = computeRanking(
+      makeInput({ ageHours: 3, dwellSeconds: 120, clicked: true }),
+    );
     const freshNoEngagement = computeRanking(makeInput({ ageHours: 2 }));
     // Engagement factor (0.4) should narrow the recency gap (0.5 - 0.333 = ~0.167)
     expect(olderEngaged.engagement).toBeCloseTo(0.4);
@@ -657,8 +655,12 @@ describe("ranking regression: folder affinity", () => {
 
   it("folder and topic affinity stack for items in a preferred topic within a preferred folder", () => {
     const both = computeRanking(makeInput({ topicAffinityScore: 0.3, folderAffinityScore: 0.2 }));
-    const topicOnly = computeRanking(makeInput({ topicAffinityScore: 0.3, folderAffinityScore: 0 }));
-    const folderOnly = computeRanking(makeInput({ topicAffinityScore: 0, folderAffinityScore: 0.2 }));
+    const topicOnly = computeRanking(
+      makeInput({ topicAffinityScore: 0.3, folderAffinityScore: 0 }),
+    );
+    const folderOnly = computeRanking(
+      makeInput({ topicAffinityScore: 0, folderAffinityScore: 0.2 }),
+    );
     expect(both.finalScore).toBeGreaterThan(topicOnly.finalScore);
     expect(both.finalScore).toBeGreaterThan(folderOnly.finalScore);
     expect(both.finalScore - topicOnly.finalScore).toBeCloseTo(0.2);
@@ -674,12 +676,14 @@ describe("ranking regression: dismiss suppression", () => {
   });
 
   it("not-interested penalty of -2.5 overwhelms prefer weight + saved + big cluster combined", () => {
-    const dismissedWithBoosts = computeRanking(makeInput({
-      notInterested: true,
-      feedWeight: "prefer",
-      isSaved: true,
-      clusterSize: 10,
-    }));
+    const dismissedWithBoosts = computeRanking(
+      makeInput({
+        notInterested: true,
+        feedWeight: "prefer",
+        isSaved: true,
+        clusterSize: 10,
+      }),
+    );
     // prefer(0.3) + saved(0.5) + cluster(1.0) + recency(1.0) = 2.8, minus 2.5 = 0.3
     // Still positive but much lower than baseline of 1.1
     const baseline = computeRanking(makeInput());
@@ -702,11 +706,13 @@ describe("ranking regression: dismiss suppression", () => {
   });
 
   it("dismiss penalty persists even with maximum positive engagement", () => {
-    const dismissedAndEngaged = computeRanking(makeInput({
-      notInterested: true,
-      dwellSeconds: 120,
-      clicked: true,
-    }));
+    const dismissedAndEngaged = computeRanking(
+      makeInput({
+        notInterested: true,
+        dwellSeconds: 120,
+        clicked: true,
+      }),
+    );
     // dwell(0.25) + click(0.15) + notInterested(-2.5) = -2.1
     expect(dismissedAndEngaged.engagement).toBeCloseTo(-2.1);
     expect(dismissedAndEngaged.finalScore).toBeLessThan(0);
@@ -723,15 +729,23 @@ describe("ranking regression: exploration quota", () => {
   });
 
   it("exploration boost is not large enough to overcome source weight prefer advantage", () => {
-    const explored = computeRanking(makeInput({ explorationEligible: true, feedWeight: "neutral" }));
-    const preferred = computeRanking(makeInput({ explorationEligible: false, feedWeight: "prefer" }));
+    const explored = computeRanking(
+      makeInput({ explorationEligible: true, feedWeight: "neutral" }),
+    );
+    const preferred = computeRanking(
+      makeInput({ explorationEligible: false, feedWeight: "prefer" }),
+    );
     // exploration(0.22) vs prefer(0.3) — prefer wins
     expect(preferred.finalScore).toBeGreaterThan(explored.finalScore);
   });
 
   it("exploration boost can overcome deprioritize penalty", () => {
-    const explored = computeRanking(makeInput({ explorationEligible: true, feedWeight: "deprioritize" }));
-    const noExplore = computeRanking(makeInput({ explorationEligible: false, feedWeight: "deprioritize" }));
+    const explored = computeRanking(
+      makeInput({ explorationEligible: true, feedWeight: "deprioritize" }),
+    );
+    const noExplore = computeRanking(
+      makeInput({ explorationEligible: false, feedWeight: "deprioritize" }),
+    );
     expect(explored.finalScore).toBeGreaterThan(noExplore.finalScore);
     // But still below neutral baseline
     const neutral = computeRanking(makeInput({ feedWeight: "neutral" }));
@@ -740,8 +754,12 @@ describe("ranking regression: exploration quota", () => {
 
   it("exploration boost stacks with topic affinity", () => {
     const both = computeRanking(makeInput({ explorationEligible: true, topicAffinityScore: 0.2 }));
-    const affinityOnly = computeRanking(makeInput({ explorationEligible: false, topicAffinityScore: 0.2 }));
-    const exploreOnly = computeRanking(makeInput({ explorationEligible: true, topicAffinityScore: 0 }));
+    const affinityOnly = computeRanking(
+      makeInput({ explorationEligible: false, topicAffinityScore: 0.2 }),
+    );
+    const exploreOnly = computeRanking(
+      makeInput({ explorationEligible: true, topicAffinityScore: 0 }),
+    );
     expect(both.finalScore).toBeGreaterThan(affinityOnly.finalScore);
     expect(both.finalScore).toBeGreaterThan(exploreOnly.finalScore);
   });
@@ -751,16 +769,70 @@ describe("ranking regression: exploration quota", () => {
 
 describe("ranking regression: seeded 10-item snapshot", () => {
   const seededItems: Array<{ label: string; input: RankingInput }> = [
-    { label: "A-fresh-prefer-big",    input: makeInput({ ageHours: 1,  feedWeight: "prefer",       clusterSize: 10, dwellSeconds: 60,  clicked: true,  topicAffinityScore: 0.2,  folderAffinityScore: 0.1 }) },
-    { label: "B-fresh-neutral-small",  input: makeInput({ ageHours: 1,  feedWeight: "neutral",      clusterSize: 1 }) },
-    { label: "C-medium-saved",         input: makeInput({ ageHours: 6,  feedWeight: "neutral",      clusterSize: 3,  isSaved: true }) },
-    { label: "D-old-prefer-saved",     input: makeInput({ ageHours: 24, feedWeight: "prefer",       clusterSize: 5,  isSaved: true, topicAffinityScore: 0.15 }) },
-    { label: "E-fresh-deprioritize",   input: makeInput({ ageHours: 1,  feedWeight: "deprioritize", clusterSize: 2 }) },
-    { label: "F-medium-explored",      input: makeInput({ ageHours: 4,  feedWeight: "neutral",      clusterSize: 1,  explorationEligible: true }) },
-    { label: "G-stale-big-cluster",    input: makeInput({ ageHours: 48, feedWeight: "neutral",      clusterSize: 10 }) },
-    { label: "H-heavy-topic-penalty",  input: makeInput({ ageHours: 2,  feedWeight: "neutral",      clusterSize: 3,  topicUnreadCount: 15 }) },
-    { label: "I-dismiss-fresh",        input: makeInput({ ageHours: 1,  feedWeight: "neutral",      clusterSize: 1,  notInterested: true }) },
-    { label: "J-dismiss-prefer",       input: makeInput({ ageHours: 1,  feedWeight: "prefer",       clusterSize: 10, notInterested: true }) },
+    {
+      label: "A-fresh-prefer-big",
+      input: makeInput({
+        ageHours: 1,
+        feedWeight: "prefer",
+        clusterSize: 10,
+        dwellSeconds: 60,
+        clicked: true,
+        topicAffinityScore: 0.2,
+        folderAffinityScore: 0.1,
+      }),
+    },
+    {
+      label: "B-fresh-neutral-small",
+      input: makeInput({ ageHours: 1, feedWeight: "neutral", clusterSize: 1 }),
+    },
+    {
+      label: "C-medium-saved",
+      input: makeInput({ ageHours: 6, feedWeight: "neutral", clusterSize: 3, isSaved: true }),
+    },
+    {
+      label: "D-old-prefer-saved",
+      input: makeInput({
+        ageHours: 24,
+        feedWeight: "prefer",
+        clusterSize: 5,
+        isSaved: true,
+        topicAffinityScore: 0.15,
+      }),
+    },
+    {
+      label: "E-fresh-deprioritize",
+      input: makeInput({ ageHours: 1, feedWeight: "deprioritize", clusterSize: 2 }),
+    },
+    {
+      label: "F-medium-explored",
+      input: makeInput({
+        ageHours: 4,
+        feedWeight: "neutral",
+        clusterSize: 1,
+        explorationEligible: true,
+      }),
+    },
+    {
+      label: "G-stale-big-cluster",
+      input: makeInput({ ageHours: 48, feedWeight: "neutral", clusterSize: 10 }),
+    },
+    {
+      label: "H-heavy-topic-penalty",
+      input: makeInput({
+        ageHours: 2,
+        feedWeight: "neutral",
+        clusterSize: 3,
+        topicUnreadCount: 15,
+      }),
+    },
+    {
+      label: "I-dismiss-fresh",
+      input: makeInput({ ageHours: 1, feedWeight: "neutral", clusterSize: 1, notInterested: true }),
+    },
+    {
+      label: "J-dismiss-prefer",
+      input: makeInput({ ageHours: 1, feedWeight: "prefer", clusterSize: 10, notInterested: true }),
+    },
   ];
 
   it("produces a deterministic ordering across multiple runs", () => {
@@ -786,27 +858,30 @@ describe("ranking regression: seeded 10-item snapshot", () => {
     const ranked = seededItems
       .map((i) => ({ label: i.label, score: computeRanking(i.input).finalScore }))
       .sort((a, b) => b.score - a.score);
-    const bottomTwo = ranked.slice(-2).map((r) => r.label).sort();
+    const bottomTwo = ranked
+      .slice(-2)
+      .map((r) => r.label)
+      .sort();
     expect(bottomTwo).toContain("I-dismiss-fresh");
     expect(bottomTwo).toContain("J-dismiss-prefer");
   });
 
   it("saved items get meaningful boost vs unsaved at same age", () => {
     const savedScore = computeRanking(
-      seededItems.find((i) => i.label === "C-medium-saved")!.input
+      seededItems.find((i) => i.label === "C-medium-saved")!.input,
     ).finalScore;
     const unsavedEquiv = computeRanking(
-      makeInput({ ageHours: 6, feedWeight: "neutral", clusterSize: 3, isSaved: false })
+      makeInput({ ageHours: 6, feedWeight: "neutral", clusterSize: 3, isSaved: false }),
     ).finalScore;
     expect(savedScore - unsavedEquiv).toBeCloseTo(0.5);
   });
 
   it("stale big cluster outranks explored small due to cluster size dominance", () => {
     const exploredScore = computeRanking(
-      seededItems.find((i) => i.label === "F-medium-explored")!.input
+      seededItems.find((i) => i.label === "F-medium-explored")!.input,
     ).finalScore;
     const staleScore = computeRanking(
-      seededItems.find((i) => i.label === "G-stale-big-cluster")!.input
+      seededItems.find((i) => i.label === "G-stale-big-cluster")!.input,
     ).finalScore;
     // cluster size (1.0) on the stale item overwhelms exploration boost (0.22)
     // even though the explored item is much fresher (4h vs 48h)
@@ -826,11 +901,14 @@ interface AutoReadSettings {
   markReadOnScrollListThreshold: number;
   markReadOnScrollCompactThreshold: number;
   markReadOnScrollCardThreshold: number;
-  markReadOnScrollFeedOverrides: Record<string, {
-    mode?: MarkReadMode;
-    delayMs?: number;
-    threshold?: number;
-  }>;
+  markReadOnScrollFeedOverrides: Record<
+    string,
+    {
+      mode?: MarkReadMode;
+      delayMs?: number;
+      threshold?: number;
+    }
+  >;
 }
 
 type ViewMode = "list" | "compact" | "card";
@@ -838,7 +916,7 @@ type ViewMode = "list" | "compact" | "card";
 function resolveAutoReadForFeed(
   settings: AutoReadSettings,
   feedId: string | null,
-  viewMode: ViewMode
+  viewMode: ViewMode,
 ): { mode: MarkReadMode; delayMs: number; threshold: number } {
   const override = feedId ? settings.markReadOnScrollFeedOverrides[feedId] : undefined;
 
@@ -1039,7 +1117,7 @@ describe("auto-read: scroll threshold behavior", () => {
     threshold: number,
     dwellMs: number,
     delayMs: number,
-    mode: MarkReadMode
+    mode: MarkReadMode,
   ): boolean {
     if (mode === "off") return false;
     if (mode === "on_open") return true;

@@ -1,7 +1,7 @@
 import { PgBoss } from "pg-boss";
 import { loadEnv } from "./config/env";
+import { closePool, getPool } from "./db";
 import { registerJobs } from "./jobs/register-jobs";
-import { getPool, closePool } from "./db";
 
 async function start() {
   const env = loadEnv();
@@ -9,7 +9,7 @@ async function start() {
 
   const boss = new PgBoss({
     connectionString: env.DATABASE_URL,
-    application_name: "rss-wrangler-worker"
+    application_name: "rss-wrangler-worker",
   });
 
   boss.on("error", (error) => {
@@ -20,7 +20,10 @@ async function start() {
   await registerJobs(boss, { env, pool });
 
   console.info("[worker] started", {
-    pollMinutes: env.WORKER_POLL_MINUTES
+    pollMinutes: env.WORKER_POLL_MINUTES,
+    fullTextBackfillMinutes: env.WORKER_FULLTEXT_BACKFILL_MINUTES,
+    fullTextBackfillBatchSize: env.WORKER_FULLTEXT_BACKFILL_BATCH_SIZE,
+    retentionMinutes: env.WORKER_RETENTION_MINUTES,
   });
 
   const shutdown = async () => {

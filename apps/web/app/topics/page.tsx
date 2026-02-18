@@ -1,10 +1,15 @@
 "use client";
 
+import type {
+  ClusterCard,
+  MarkReadOnScroll,
+  MarkReadOnScrollOverride,
+  Topic,
+} from "@rss-wrangler/contracts";
 import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { StoryCard } from "@/components/story-card";
-import { listClusters, listTopics, getPendingClassifications } from "@/lib/api";
-import type { ClusterCard, Topic } from "@rss-wrangler/contracts";
+import { getPendingClassifications, getSettings, listClusters, listTopics } from "@/lib/api";
 
 function TopicsContent() {
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -14,14 +19,24 @@ function TopicsContent() {
   const [loadingClusters, setLoadingClusters] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [showUncategorized, setShowUncategorized] = useState(false);
+  const [markReadOnScroll, setMarkReadOnScroll] = useState<MarkReadOnScroll>("off");
+  const [markReadDelayMs, setMarkReadDelayMs] = useState(1500);
+  const [markReadThreshold, setMarkReadThreshold] = useState(0.6);
+  const [markReadOverrides, setMarkReadOverrides] = useState<
+    Record<string, MarkReadOnScrollOverride>
+  >({});
 
   useEffect(() => {
-    Promise.all([listTopics(), getPendingClassifications()]).then(
-      ([t, pending]) => {
+    Promise.all([listTopics(), getPendingClassifications(), getSettings()]).then(
+      ([t, pending, settings]) => {
         setTopics(t);
         setPendingCount(pending.length);
+        setMarkReadOnScroll(settings.markReadOnScroll ?? "off");
+        setMarkReadDelayMs(settings.markReadOnScrollListDelayMs ?? 1500);
+        setMarkReadThreshold(settings.markReadOnScrollListThreshold ?? 0.6);
+        setMarkReadOverrides(settings.markReadOnScrollFeedOverrides ?? {});
         setLoading(false);
-      }
+      },
     );
   }, []);
 
@@ -80,19 +95,25 @@ function TopicsContent() {
         </div>
         <section className="section-card">
           {loadingClusters ? (
-            <p className="muted">Loading stories...</p>
+            <p className="muted" role="status" aria-live="polite">
+              Loading stories...
+            </p>
           ) : clusters.length === 0 ? (
             <p className="muted">No unread stories in this topic.</p>
           ) : (
-            <div className="cards">
+            <section className="cards" aria-label="Topic stories">
               {clusters.map((cluster) => (
                 <StoryCard
                   key={cluster.id}
                   cluster={cluster}
+                  markReadOnScroll={markReadOnScroll}
+                  markReadOnScrollDelayMs={markReadDelayMs}
+                  markReadOnScrollThreshold={markReadThreshold}
+                  markReadOnScrollOverride={markReadOverrides[cluster.primaryFeedId]}
                   onRemove={handleRemove}
                 />
               ))}
-            </div>
+            </section>
           )}
         </section>
       </>
@@ -103,33 +124,28 @@ function TopicsContent() {
     <>
       <div className="page-header">
         <h1 className="page-title">Topics</h1>
-        <p className="page-meta">
-          Browse stories organized by AI-classified topics.
-        </p>
+        <p className="page-meta">Browse stories organized by AI-classified topics.</p>
       </div>
 
       <section className="section-card">
         {pendingCount > 0 && (
-          <a
-            href="/topics/pending"
-            className="banner"
-          >
+          <a href="/topics/pending" className="banner">
             <span>
               <strong>
                 {pendingCount} feed{pendingCount !== 1 ? "s" : ""} need
                 {pendingCount === 1 ? "s" : ""} topic approval
               </strong>
             </span>
-            <span className="button button-secondary button-small">
-              Review now
-            </span>
+            <span className="button button-secondary button-small">Review now</span>
           </a>
         )}
 
         {loading ? (
-          <p className="muted">Loading topics...</p>
+          <p className="muted" role="status" aria-live="polite">
+            Loading topics...
+          </p>
         ) : (
-          <div className="folder-grid">
+          <div className="folder-grid" role="group" aria-label="Topic categories">
             <button
               type="button"
               className="folder-card"

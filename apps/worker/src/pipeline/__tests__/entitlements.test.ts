@@ -5,7 +5,7 @@ import {
   incrementDailyIngestionUsage,
   isPollAllowed,
   releaseDailyIngestionBudget,
-  reserveDailyIngestionBudget
+  reserveDailyIngestionBudget,
 } from "../entitlements.js";
 
 function createPoolWithQuery(query: ReturnType<typeof vi.fn>): Pool {
@@ -35,27 +35,27 @@ describe("getPipelineEntitlements", () => {
     const query = vi.fn().mockResolvedValueOnce({ rows: [] });
     const pool = createPoolWithQuery(query);
 
-    const entitlements = await getPipelineEntitlements(pool, "tenant-1");
+    const entitlements = await getPipelineEntitlements(pool, "account-1");
 
     expect(entitlements).toEqual({
       planId: "free",
       itemsPerDayLimit: 500,
-      minPollMinutes: 60
+      minPollMinutes: 60,
     });
   });
 
   it("maps pro plan rows to pro defaults", async () => {
     const query = vi.fn().mockResolvedValueOnce({
-      rows: [{ plan_id: "pro" }]
+      rows: [{ plan_id: "pro" }],
     });
     const pool = createPoolWithQuery(query);
 
-    const entitlements = await getPipelineEntitlements(pool, "tenant-1");
+    const entitlements = await getPipelineEntitlements(pool, "account-1");
 
     expect(entitlements).toEqual({
       planId: "pro",
       itemsPerDayLimit: null,
-      minPollMinutes: 10
+      minPollMinutes: 10,
     });
   });
 });
@@ -65,23 +65,26 @@ describe("daily usage budget functions", () => {
     const query = vi.fn();
     const pool = createPoolWithQuery(query);
 
-    await expect(reserveDailyIngestionBudget(pool, "tenant-1", 500, 0)).resolves.toBe(0);
+    await expect(reserveDailyIngestionBudget(pool, "account-1", 500, 0)).resolves.toBe(0);
     expect(query).not.toHaveBeenCalled();
   });
 
   it("returns reserved slot count from SQL allocation", async () => {
-    const query = vi.fn().mockResolvedValueOnce({ rows: [{ allowed: 37 }] });
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce({ rows: [] }) // seed INSERT
+      .mockResolvedValueOnce({ rows: [{ allowed: 37 }] }); // allocation UPDATE
     const pool = createPoolWithQuery(query);
 
-    await expect(reserveDailyIngestionBudget(pool, "tenant-1", 500, 100)).resolves.toBe(37);
-    expect(query).toHaveBeenCalledTimes(1);
+    await expect(reserveDailyIngestionBudget(pool, "account-1", 500, 100)).resolves.toBe(37);
+    expect(query).toHaveBeenCalledTimes(2);
   });
 
   it("skips release query for non-positive releases", async () => {
     const query = vi.fn();
     const pool = createPoolWithQuery(query);
 
-    await releaseDailyIngestionBudget(pool, "tenant-1", 0);
+    await releaseDailyIngestionBudget(pool, "account-1", 0);
     expect(query).not.toHaveBeenCalled();
   });
 
@@ -89,7 +92,7 @@ describe("daily usage budget functions", () => {
     const query = vi.fn().mockResolvedValueOnce({ rows: [] });
     const pool = createPoolWithQuery(query);
 
-    await releaseDailyIngestionBudget(pool, "tenant-1", 15);
+    await releaseDailyIngestionBudget(pool, "account-1", 15);
     expect(query).toHaveBeenCalledTimes(1);
   });
 
@@ -97,7 +100,7 @@ describe("daily usage budget functions", () => {
     const query = vi.fn();
     const pool = createPoolWithQuery(query);
 
-    await incrementDailyIngestionUsage(pool, "tenant-1", 0);
+    await incrementDailyIngestionUsage(pool, "account-1", 0);
     expect(query).not.toHaveBeenCalled();
   });
 
@@ -105,7 +108,7 @@ describe("daily usage budget functions", () => {
     const query = vi.fn().mockResolvedValueOnce({ rows: [] });
     const pool = createPoolWithQuery(query);
 
-    await incrementDailyIngestionUsage(pool, "tenant-1", 25);
+    await incrementDailyIngestionUsage(pool, "account-1", 25);
     expect(query).toHaveBeenCalledTimes(1);
   });
 });

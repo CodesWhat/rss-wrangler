@@ -1,7 +1,7 @@
 "use client";
 
-import { verifyEmail } from "@/lib/api";
 import { useEffect, useState } from "react";
+import { verifyEmail } from "@/lib/api";
 
 export default function VerifyEmailPage() {
   const [token, setToken] = useState<string | null>(null);

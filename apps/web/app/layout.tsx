@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
-import { AppNav } from "@/components/nav";
 import { AuthProvider } from "@/components/auth-provider";
+import { AppNav } from "@/components/nav";
 import { PrivacyConsentManager } from "@/components/privacy-consent-manager";
 import "./globals.css";
 
@@ -32,8 +32,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <AuthProvider>
           <div className="app-shell">
+            <a href="#main-content" className="skip-to-main">
+              Skip to main content
+            </a>
             <AppNav />
-            <main className="main">{children}</main>
+            <main id="main-content" className="main">
+              {children}
+            </main>
             {privacyConsentEnabled ? <PrivacyConsentManager /> : null}
           </div>
         </AuthProvider>

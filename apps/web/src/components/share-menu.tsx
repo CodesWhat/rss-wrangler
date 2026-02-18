@@ -49,11 +49,28 @@ export function ShareMenu({ articleUrl, wallabagUrl }: ShareMenuProps) {
         type="button"
         className="button button-small"
         onClick={() => setOpen(!open)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Send to read-later service"
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && open) {
+            setOpen(false);
+          }
+        }}
       >
         Send to...
       </button>
       {open && (
-        <div className="share-menu-dropdown">
+        <div
+          className="share-menu-dropdown"
+          role="menu"
+          aria-label="Send to services"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
+        >
           {services.map((s) => (
             <a
               key={s.name}
@@ -61,6 +78,7 @@ export function ShareMenu({ articleUrl, wallabagUrl }: ShareMenuProps) {
               target="_blank"
               rel="noopener noreferrer"
               className="share-menu-item"
+              role="menuitem"
               onClick={() => setOpen(false)}
             >
               {s.name}

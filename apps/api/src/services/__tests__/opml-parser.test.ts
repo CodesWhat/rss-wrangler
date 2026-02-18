@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { parseOpml } from "../opml-parser.js";
+import { describe, expect, it } from "vitest";
 import type { OpmlFeed } from "../opml-parser.js";
+import { parseOpml } from "../opml-parser.js";
 
 describe("parseOpml", () => {
   it("parses a simple flat feed list", () => {

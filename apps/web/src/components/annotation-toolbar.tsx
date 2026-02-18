@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import type { AnnotationColor } from "@rss-wrangler/contracts";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createAnnotation } from "@/lib/api";
 
 const COLORS: { value: AnnotationColor; label: string; css: string }[] = [
@@ -118,6 +118,8 @@ export function AnnotationToolbar({
     <div
       ref={toolbarRef}
       className="annotation-toolbar"
+      role="toolbar"
+      aria-label="Annotation tools"
       style={{
         position: "absolute",
         top: position.top,
@@ -133,6 +135,7 @@ export function AnnotationToolbar({
             type="button"
             className="annotation-color-btn"
             style={{ background: c.css }}
+            aria-label={`Highlight ${c.label}`}
             title={`Highlight ${c.label}`}
             disabled={busy}
             onClick={() => handleHighlight(c.value)}
@@ -157,12 +160,12 @@ export function AnnotationToolbar({
             type="text"
             className="input"
             placeholder="Add a note..."
+            aria-label="Annotation note"
             value={note}
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") handleSaveWithNote();
             }}
-            autoFocus
             style={{ fontSize: "0.82rem" }}
           />
           <div style={{ display: "flex", gap: "0.3rem", alignItems: "center" }}>
@@ -176,6 +179,8 @@ export function AnnotationToolbar({
                   outline: pendingColor === c.value ? "2px solid var(--accent)" : "none",
                   outlineOffset: "1px",
                 }}
+                aria-label={`${c.label} highlight color`}
+                aria-pressed={pendingColor === c.value}
                 onClick={() => setPendingColor(c.value)}
               />
             ))}

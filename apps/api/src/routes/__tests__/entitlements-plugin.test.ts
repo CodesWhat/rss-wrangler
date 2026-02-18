@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { getAccountEntitlements } from "../../plugins/entitlements.js";
 
 describe("getAccountEntitlements", () => {
-  it("returns free defaults when tenant has no subscription row", async () => {
+  it("returns free defaults when account has no subscription row", async () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({ rows: [] })
@@ -24,8 +24,8 @@ describe("getAccountEntitlements", () => {
       usage: {
         date: "2026-02-08",
         itemsIngested: 0,
-        feeds: 12
-      }
+        feeds: 12,
+      },
     });
   });
 
@@ -33,12 +33,14 @@ describe("getAccountEntitlements", () => {
     const query = vi
       .fn()
       .mockResolvedValueOnce({
-        rows: [{
-          plan_id: "pro_ai",
-          status: "trialing",
-          trial_ends_at: new Date("2026-02-20T00:00:00.000Z"),
-          current_period_ends_at: new Date("2026-03-01T00:00:00.000Z")
-        }]
+        rows: [
+          {
+            plan_id: "pro_ai",
+            status: "trialing",
+            trial_ends_at: new Date("2026-02-20T00:00:00.000Z"),
+            current_period_ends_at: new Date("2026-03-01T00:00:00.000Z"),
+          },
+        ],
       })
       .mockResolvedValueOnce({ rows: [{ count: "85" }] })
       .mockResolvedValueOnce({ rows: [{ usage_date: "2026-02-08", items_ingested_count: 142 }] })
@@ -58,8 +60,8 @@ describe("getAccountEntitlements", () => {
       usage: {
         date: "2026-02-08",
         itemsIngested: 142,
-        feeds: 85
-      }
+        feeds: 85,
+      },
     });
   });
 });

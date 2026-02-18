@@ -1,5 +1,10 @@
+import {
+  type AiProviderAdapter,
+  sanitizeForPrompt,
+  stripMarkdownFences,
+} from "@rss-wrangler/contracts";
 import type { Pool } from "pg";
-import type { AiProviderAdapter } from "@rss-wrangler/contracts";
+import { isBudgetExceeded, logAiUsage } from "../../services/ai-usage";
 
 interface ArticleRow {
   title: string;
@@ -27,7 +32,7 @@ export async function classifyFeedTopics(
   pool: Pool,
   accountId: string,
   feedId: string,
-  provider: AiProviderAdapter | null
+  provider: AiProviderAdapter | null,
 ): Promise<void> {
   // Fetch up to 20 recent items for context
   const articlesResult = await pool.query<ArticleRow>(
@@ -36,7 +41,7 @@ export async function classifyFeedTopics(
        AND tenant_id = $2
      ORDER BY published_at DESC
      LIMIT 20`,
-    [feedId, accountId]
+    [feedId, accountId],
   );
 
   if (articlesResult.rows.length === 0) {
@@ -45,20 +50,43 @@ export async function classifyFeedTopics(
   }
 
   if (!provider) {
-    console.warn("[classify-feed-topics] no AI provider available, skipping classification", { feedId });
+    console.warn("[classify-feed-topics] no AI provider available, skipping classification", {
+      feedId,
+    });
     return;
+  }
+
+  // Check budget before making AI calls
+  try {
+    const overBudget = await isBudgetExceeded(pool, accountId);
+    if (overBudget) {
+      console.warn("[classify-feed-topics] AI budget exceeded, skipping classification", {
+        feedId,
+        accountId,
+      });
+      return;
+    }
+  } catch (err) {
+    console.warn("[classify-feed-topics] budget check failed, proceeding with caution", {
+      feedId,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   // Fetch existing topic names
   const topicsResult = await pool.query<{ name: string }>(
     `SELECT name FROM topic WHERE tenant_id = $1 ORDER BY name`,
-    [accountId]
+    [accountId],
   );
   const existingTopics = topicsResult.rows.map((r) => r.name);
 
   // Build article list for the prompt
   const articleLines = articlesResult.rows
-    .map((a, i) => `${i + 1}. ${a.title}${a.summary ? ` - ${a.summary.slice(0, 100)}` : ""}`)
+    .map((a, i) => {
+      const safeTitle = sanitizeForPrompt(a.title, 200);
+      const safeSummary = a.summary ? sanitizeForPrompt(a.summary, 100) : "";
+      return `${i + 1}. ${safeTitle}${safeSummary ? ` - ${safeSummary}` : ""}`;
+    })
     .join("\n");
 
   const prompt = `You are a topic classifier for an RSS feed reader. Given recent article titles from a single RSS feed, classify this feed into 1-3 topics.
@@ -84,13 +112,22 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
       temperature: 0.3,
     });
 
+    logAiUsage(pool, accountId, response, "classification").catch((err) => {
+      console.warn("[classify-feed-topics] failed to log AI usage", {
+        feedId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
     const content = response.text.trim();
     if (!content) {
       console.warn("[classify-feed-topics] empty LLM response", { feedId });
       return;
     }
 
-    const parsed = JSON.parse(content);
+    // Strip markdown fences if present (common with Ollama/smaller models)
+    const jsonStr = stripMarkdownFences(content);
+    const parsed = JSON.parse(jsonStr);
     // Handle both { topics: [...] } and raw array [...]
     const rawSuggestions: unknown[] = Array.isArray(parsed) ? parsed : parsed.topics;
     if (!Array.isArray(rawSuggestions) || rawSuggestions.length === 0) {
@@ -99,10 +136,12 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
     }
 
     suggestions = rawSuggestions
-      .filter((s): s is { topic: string; confidence: number } =>
-        typeof s === "object" && s !== null &&
-        typeof (s as Record<string, unknown>).topic === "string" &&
-        typeof (s as Record<string, unknown>).confidence === "number"
+      .filter(
+        (s): s is { topic: string; confidence: number } =>
+          typeof s === "object" &&
+          s !== null &&
+          typeof (s as Record<string, unknown>).topic === "string" &&
+          typeof (s as Record<string, unknown>).confidence === "number",
       )
       .slice(0, 3)
       .map((s) => ({
@@ -133,7 +172,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
   for (const suggestion of suggestions) {
     await pool.query(
       `INSERT INTO topic (tenant_id, name) VALUES ($1, $2) ON CONFLICT (tenant_id, name) DO NOTHING`,
-      [accountId, suggestion.topic]
+      [accountId, suggestion.topic],
     );
   }
 
@@ -144,7 +183,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
      FROM topic
      WHERE name = ANY($1)
        AND tenant_id = $2`,
-    [topicNames, accountId]
+    [topicNames, accountId],
   );
   const topicIdMap = new Map(topicIdsResult.rows.map((r) => [r.name, r.id]));
 
@@ -157,7 +196,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
       `INSERT INTO feed_topic (tenant_id, feed_id, topic_id, status, confidence, proposed_at)
        VALUES ($1, $2, $3, 'pending', $4, NOW())
        ON CONFLICT (feed_id, topic_id) DO NOTHING`,
-      [accountId, feedId, topicId, suggestion.confidence]
+      [accountId, feedId, topicId, suggestion.confidence],
     );
   }
 
@@ -167,7 +206,7 @@ Respond ONLY with a JSON object containing a "topics" array: {"topics": [{"topic
      SET classification_status = 'classified'
      WHERE id = $1
        AND tenant_id = $2`,
-    [feedId, accountId]
+    [feedId, accountId],
   );
 
   console.info("[classify-feed-topics] feed classified", {

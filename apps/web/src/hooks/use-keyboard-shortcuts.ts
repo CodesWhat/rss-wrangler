@@ -11,6 +11,9 @@ export interface KeyboardShortcutActions {
   onRefresh: () => void;
   onToggleHelp: () => void;
   onFocusSearch: () => void;
+  onOpenMenu: () => void;
+  onPreferSource: () => void;
+  onMuteSource: () => void;
 }
 
 export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
@@ -37,7 +40,15 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
           break;
         case "m":
           e.preventDefault();
-          actions.onToggleRead();
+          actions.onOpenMenu();
+          break;
+        case "p":
+          e.preventDefault();
+          actions.onPreferSource();
+          break;
+        case "x":
+          e.preventDefault();
+          actions.onMuteSource();
           break;
         case "s":
           e.preventDefault();
@@ -57,7 +68,7 @@ export function useKeyboardShortcuts(actions: KeyboardShortcutActions) {
           break;
       }
     },
-    [actions]
+    [actions],
   );
 
   useEffect(() => {

@@ -49,11 +49,11 @@ docker compose -f infra/docker-compose.yml up --build -d
 Services started:
 - **postgres** — PostgreSQL 16
 - **migrate** — one-shot SQL migration runner (exits after success)
-- **api** — Fastify API (port 4000)
+- **api** — Fastify API (container port 4000, host default `:4001`)
 - **worker** — feed polling, clustering, AI enrichment, digests
-- **web** — Next.js frontend (port 3000)
+- **web** — Next.js frontend (container port 3000, host default `:3001`)
 
-Access the web UI at `http://localhost:3000`. Login with the username/password from your `.env`, or create a workspace account via `/signup`.
+Access the web UI at `http://localhost:3001` (or your configured `HOST_WEB_PORT`). Login with the username/password from your `.env`, or create a workspace account via `/signup`.
 
 ## Local Development
 
@@ -80,7 +80,7 @@ npm run orbstack:smoke
 ```
 
 This builds and boots the Compose stack, verifies API/web health, checks login, and confirms required services are running.
-Health checks run from inside containers, so they are not affected by local processes already using ports 3000/4000.
+Health checks run from inside containers, so they are not affected by local processes already using your host ports (defaults: `3001/4001`).
 
 ## Scripts
 
@@ -107,7 +107,7 @@ See `infra/.env.example` for the full list. Key variables:
 | `AUTH_JWT_SECRET` | Yes | JWT signing secret (min 32 chars) |
 | `AUTH_USERNAME` | Yes | Admin username |
 | `AUTH_PASSWORD` | Yes | Admin password |
-| `APP_BASE_URL` | No | Base URL used in verification/reset email links (default: `http://localhost:3000`) |
+| `APP_BASE_URL` | No | Base URL used in verification/reset email links (default: `http://localhost:3001`) |
 | `REQUIRE_EMAIL_VERIFICATION` | No | Require verified email before login (`true`/`false`, default: `false`) |
 | `RESEND_API_KEY` | No | Resend API key for transactional emails |
 | `EMAIL_FROM` | No | Sender for verification/reset emails |
@@ -121,6 +121,7 @@ See `infra/.env.example` for the full list. Key variables:
 | `BILLING_ALERT_WEBHOOK_URL` | Hosted only | Optional alert sink URL for billing webhook failures |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `WORKER_POLL_MINUTES` | No | Feed poll interval in minutes (default: 60) |
+| `WORKER_RETENTION_MINUTES` | No | Retention cleanup interval in minutes (default: 1440) |
 | `OPENAI_API_KEY` | No | Required for AI features (summaries, topic classification) |
 
 ## Features

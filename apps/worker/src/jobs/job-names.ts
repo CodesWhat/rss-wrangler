@@ -7,7 +7,7 @@ export const JOBS = {
   processAccountDeletions: "process-account-deletions",
   retentionCleanup: "retention-cleanup",
   progressiveSummary: "progressive-summary",
-  detectTopicDrift: "detect-topic-drift"
+  detectTopicDrift: "detect-topic-drift",
 } as const;
 
 export type JobName = (typeof JOBS)[keyof typeof JOBS];

@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
 import type { AiMode } from "@rss-wrangler/contracts";
-import { addFeed, importOpml, listFeeds, updateSettings } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
 import feedDirectory from "@/data/feed-directory.json" with { type: "json" };
+import { addFeed, importOpml, listFeeds, updateSettings } from "@/lib/api";
 
 interface DirectoryEntry {
   name: string;
@@ -31,7 +31,7 @@ export function OnboardingWizard({
   feedsCount,
   initialAiMode,
   onFeedsCountChange,
-  onDismiss
+  onDismiss,
 }: OnboardingWizardProps) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [sourceMethod, setSourceMethod] = useState<SourceMethod>("url");
@@ -64,7 +64,7 @@ export function OnboardingWizard({
 
   const categories = useMemo(
     () => Array.from(entriesByCategory.keys()).sort(),
-    [entriesByCategory]
+    [entriesByCategory],
   );
 
   useEffect(() => {
@@ -117,7 +117,7 @@ export function OnboardingWizard({
 
     const total = await refreshFeedsCount();
     setAddMessage(
-      `Imported ${result.imported} / ${result.total} feeds (${result.skipped} skipped). Total sources: ${total}.`
+      `Imported ${result.imported} / ${result.total} feeds (${result.skipped} skipped). Total sources: ${total}.`,
     );
     setAddBusy(false);
   }
@@ -161,7 +161,7 @@ export function OnboardingWizard({
     setStarterAdded(true);
     setStarterBusy(false);
     setStarterMessage(
-      `Added ${addedCount} starter source${addedCount === 1 ? "" : "s"}. Total sources: ${total}.`
+      `Added ${addedCount} starter source${addedCount === 1 ? "" : "s"}. Total sources: ${total}.`,
     );
   }
 
@@ -298,9 +298,7 @@ export function OnboardingWizard({
               </div>
 
               {addMessage ? (
-                <p className={addMessageIsError ? "error-text" : "muted"}>
-                  {addMessage}
-                </p>
+                <p className={addMessageIsError ? "error-text" : "muted"}>{addMessage}</p>
               ) : null}
             </div>
           ) : null}
@@ -350,9 +348,7 @@ export function OnboardingWizard({
           {step === 3 ? (
             <div className="onboarding-step">
               <h3>3. Choose AI mode</h3>
-              <p className="muted">
-                AI is opt-in. You can change this any time in Settings.
-              </p>
+              <p className="muted">AI is opt-in. You can change this any time in Settings.</p>
 
               <div className="onboarding-card">
                 <label className="onboarding-radio">
@@ -417,7 +413,7 @@ export function OnboardingWizard({
               <button
                 type="button"
                 className="button button-small"
-                onClick={() => setStep((prev) => (prev > 1 ? (prev - 1) as 1 | 2 | 3 : prev))}
+                onClick={() => setStep((prev) => (prev > 1 ? ((prev - 1) as 1 | 2 | 3) : prev))}
               >
                 Back
               </button>
@@ -425,7 +421,7 @@ export function OnboardingWizard({
             <button
               type="button"
               className="button button-small button-primary"
-              onClick={() => setStep((prev) => (prev < 3 ? (prev + 1) as 1 | 2 | 3 : prev))}
+              onClick={() => setStep((prev) => (prev < 3 ? ((prev + 1) as 1 | 2 | 3) : prev))}
               disabled={step === 3}
             >
               Next

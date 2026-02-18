@@ -15,7 +15,7 @@ export function createEmailService(env: ApiEnv, logger: FastifyBaseLogger) {
     if (!env.RESEND_API_KEY) {
       logger.info(
         { to: input.to, subject: input.subject },
-        "RESEND_API_KEY not configured; skipping transactional email delivery"
+        "RESEND_API_KEY not configured; skipping transactional email delivery",
       );
       return "skipped";
     }
@@ -24,22 +24,22 @@ export function createEmailService(env: ApiEnv, logger: FastifyBaseLogger) {
       method: "POST",
       headers: {
         Authorization: `Bearer ${env.RESEND_API_KEY}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         from,
         to: [input.to],
         subject: input.subject,
         html: input.html,
-        text: input.text
-      })
+        text: input.text,
+      }),
     });
 
     if (!response.ok) {
       const details = await response.text().catch(() => "");
       logger.error(
         { status: response.status, details, to: input.to, subject: input.subject },
-        "failed to send transactional email"
+        "failed to send transactional email",
       );
       throw new Error("failed to send transactional email");
     }

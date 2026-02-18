@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import process from "node:process";
 import { performance } from "node:perf_hooks";
+import process from "node:process";
 import { pathToFileURL } from "node:url";
 
 const DEFAULT_OUTPUT_PATH = path.resolve("infra/load/results/latest-hosted-smoke.json");

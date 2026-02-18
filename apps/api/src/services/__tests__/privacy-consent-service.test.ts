@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeCountryCode,
   requiresExplicitConsent,
-  resolveCountryCode
+  resolveCountryCode,
 } from "../privacy-consent-service";
 
 describe("privacy-consent-service", () => {
@@ -20,7 +20,7 @@ describe("privacy-consent-service", () => {
   it("resolves the first available proxy country header", () => {
     const country = resolveCountryCode({
       "x-vercel-ip-country": "de",
-      "cf-ipcountry": "us"
+      "cf-ipcountry": "us",
     });
 
     expect(country).toBe("DE");

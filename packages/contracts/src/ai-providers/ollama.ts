@@ -1,4 +1,8 @@
-import type { AiCompletionRequest, AiCompletionResponse, AiProviderAdapter } from "../ai-provider.js";
+import type {
+  AiCompletionRequest,
+  AiCompletionResponse,
+  AiProviderAdapter,
+} from "../ai-provider.js";
 
 const DEFAULT_MODEL = "llama3.2";
 const DEFAULT_BASE_URL = "http://localhost:11434";

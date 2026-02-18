@@ -1,4 +1,8 @@
-import type { AiCompletionRequest, AiCompletionResponse, AiProviderAdapter } from "../ai-provider.js";
+import type {
+  AiCompletionRequest,
+  AiCompletionResponse,
+  AiProviderAdapter,
+} from "../ai-provider.js";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
 const API_URL = "https://api.openai.com/v1/chat/completions";

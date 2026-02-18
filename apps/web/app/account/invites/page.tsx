@@ -1,15 +1,17 @@
 "use client";
 
+import type { MemberInvite } from "@rss-wrangler/contracts";
 import { useEffect, useMemo, useState } from "react";
-import type { WorkspaceInvite } from "@rss-wrangler/contracts";
 import { ProtectedRoute } from "@/components/protected-route";
 import {
-  createWorkspaceInvite,
-  listWorkspaceInvites,
-  revokeWorkspaceInvite
+  createMemberInvite,
+  getCurrentUserId,
+  listAccountMembers,
+  listMemberInvites,
+  revokeMemberInvite,
 } from "@/lib/api";
 
-function statusLabel(invite: WorkspaceInvite): string {
+function statusLabel(invite: MemberInvite): string {
   if (invite.status === "pending") {
     return "Pending";
   }
@@ -23,27 +25,50 @@ function statusLabel(invite: WorkspaceInvite): string {
 }
 
 function InvitesContent() {
-  const [invites, setInvites] = useState<WorkspaceInvite[]>([]);
+  const [invites, setInvites] = useState<MemberInvite[]>([]);
+  const [isOwner, setIsOwner] = useState(false);
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [expiresInDays, setExpiresInDays] = useState(7);
   const [createBusy, setCreateBusy] = useState(false);
   const [error, setError] = useState("");
-  const [lastCreated, setLastCreated] = useState<WorkspaceInvite | null>(null);
+  const [lastCreated, setLastCreated] = useState<MemberInvite | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
 
   useEffect(() => {
-    listWorkspaceInvites()
-      .then((rows) => setInvites(rows))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    async function load() {
+      try {
+        const members = await listAccountMembers();
+        const currentUserId = getCurrentUserId();
+        const currentMember = members.find((member) => member.id === currentUserId);
+        const owner = currentMember?.role === "owner";
+        if (cancelled) return;
+        setIsOwner(owner);
+        if (!owner) {
+          return;
+        }
+        const rows = await listMemberInvites();
+        if (cancelled) return;
+        setInvites(rows);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function handleCreateInvite() {
     setError("");
     setCreateBusy(true);
-    const result = await createWorkspaceInvite({
+    const result = await createMemberInvite({
       email: email.trim() || undefined,
-      expiresInDays
+      expiresInDays,
     });
     setCreateBusy(false);
 
@@ -60,7 +85,7 @@ function InvitesContent() {
   async function handleRevoke(inviteId: string) {
     setError("");
     setRevokingId(inviteId);
-    const result = await revokeWorkspaceInvite(inviteId);
+    const result = await revokeMemberInvite(inviteId);
     setRevokingId(null);
     if (!result.ok) {
       setError(result.error);
@@ -71,24 +96,35 @@ function InvitesContent() {
 
   const pendingCount = useMemo(
     () => invites.filter((invite) => invite.status === "pending").length,
-    [invites]
+    [invites],
   );
 
   if (loading) {
     return <p className="muted">Loading invites...</p>;
   }
 
+  if (!isOwner) {
+    return (
+      <>
+        <div className="page-header">
+          <h1 className="page-title">Member Invites</h1>
+        </div>
+        <section className="section-card">
+          <p className="muted">Only the account owner can manage member invites.</p>
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       <div className="page-header">
-        <h1 className="page-title">Workspace Invites</h1>
+        <h1 className="page-title">Member Invites</h1>
       </div>
 
       <section className="section-card">
-        <h2>Create invite</h2>
-        <p className="muted">
-          Invite-only join is enforced after your first account. Pending invites: {pendingCount}.
-        </p>
+        <h2>Create Invite</h2>
+        <p className="muted">Member invites are owner-managed. Pending invites: {pendingCount}.</p>
 
         <div className="settings-form">
           <label htmlFor="invite-email">
@@ -206,7 +242,7 @@ function InvitesContent() {
   );
 }
 
-export default function WorkspaceInvitesPage() {
+export default function MemberInvitesPage() {
   return (
     <ProtectedRoute>
       <InvitesContent />

@@ -1,10 +1,10 @@
 "use client";
 
+import type { ReadingStats, StatsPeriod } from "@rss-wrangler/contracts";
 import { useEffect, useState } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { getReadingStats } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import type { ReadingStats, StatsPeriod } from "@rss-wrangler/contracts";
 
 function formatDwell(seconds: number): string {
   if (seconds < 60) return `${seconds}s`;
@@ -13,7 +13,10 @@ function formatDwell(seconds: number): string {
   return secs > 0 ? `${mins}m ${secs}s` : `${mins}m`;
 }
 
-function BarChart({ items, maxValue }: {
+function BarChart({
+  items,
+  maxValue,
+}: {
   items: { label: string; value: number }[];
   maxValue?: number;
 }) {
@@ -55,8 +58,17 @@ function StatsContent() {
 
   const peakHoursFormatted = stats.peakHours.map((h) => ({
     label: `${h.hour.toString().padStart(2, "0")}:00`,
-    value: h.count
+    value: h.count,
   }));
+  const parseFormatItems = [
+    { label: "RSS", value: stats.feedParseByFormat.rss },
+    { label: "JSON Feed", value: stats.feedParseByFormat.json },
+    { label: "Atom", value: stats.feedParseByFormat.atom },
+    { label: "RDF", value: stats.feedParseByFormat.rdf },
+  ];
+  const parseFormatTotal = parseFormatItems.reduce((sum, item) => sum + item.value, 0);
+  const autoReadPeriodLabel =
+    period === "7d" ? "last 7d" : period === "30d" ? "last 30d" : "all time";
 
   return (
     <div className="settings-layout">
@@ -93,6 +105,26 @@ function StatsContent() {
           <div className="muted">This month</div>
         </section>
         <section className="section-card">
+          <div className="bar-value stat-value">{stats.autoReadOnScrollCount}</div>
+          <div className="muted">Auto-read (scroll, {autoReadPeriodLabel})</div>
+        </section>
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.autoReadOnOpenCount}</div>
+          <div className="muted">Auto-read (open, {autoReadPeriodLabel})</div>
+        </section>
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.autoReadTotalCount}</div>
+          <div className="muted">Auto-read total ({autoReadPeriodLabel})</div>
+        </section>
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.feedParseSuccessCount}</div>
+          <div className="muted">Feed parses succeeded ({autoReadPeriodLabel})</div>
+        </section>
+        <section className="section-card">
+          <div className="bar-value stat-value">{stats.feedParseFailureCount}</div>
+          <div className="muted">Feed parses failed ({autoReadPeriodLabel})</div>
+        </section>
+        <section className="section-card">
           <div className="bar-value stat-value">{formatDwell(stats.avgDwellSeconds)}</div>
           <div className="muted">Avg. dwell time</div>
         </section>
@@ -116,9 +148,14 @@ function StatsContent() {
       {stats.topSources.length > 0 && (
         <section className="section-card">
           <h2>Top sources</h2>
-          <BarChart
-            items={stats.topSources.map((s) => ({ label: s.feedTitle, value: s.count }))}
-          />
+          <BarChart items={stats.topSources.map((s) => ({ label: s.feedTitle, value: s.count }))} />
+        </section>
+      )}
+
+      {parseFormatTotal > 0 && (
+        <section className="section-card">
+          <h2>Feed parse formats ({autoReadPeriodLabel})</h2>
+          <BarChart items={parseFormatItems} />
         </section>
       )}
 
@@ -134,9 +171,7 @@ function StatsContent() {
       {stats.dailyReads.length > 0 && (
         <section className="section-card">
           <h2>Daily reads</h2>
-          <BarChart
-            items={stats.dailyReads.map((d) => ({ label: d.date, value: d.count }))}
-          />
+          <BarChart items={stats.dailyReads.map((d) => ({ label: d.date, value: d.count }))} />
         </section>
       )}
     </div>

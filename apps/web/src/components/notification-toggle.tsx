@@ -30,13 +30,15 @@ export function NotificationToggle() {
     }
 
     // Check current subscription state
-    navigator.serviceWorker.ready.then(async (reg) => {
-      const sub = await reg.pushManager.getSubscription();
-      setEnabled(!!sub);
-      setLoading(false);
-    }).catch(() => {
-      setLoading(false);
-    });
+    navigator.serviceWorker.ready
+      .then(async (reg) => {
+        const sub = await reg.pushManager.getSubscription();
+        setEnabled(!!sub);
+        setLoading(false);
+      })
+      .catch(() => {
+        setLoading(false);
+      });
   }, []);
 
   const toggle = useCallback(async () => {
@@ -98,12 +100,7 @@ export function NotificationToggle() {
 
   return (
     <label className="checkbox-label">
-      <input
-        type="checkbox"
-        checked={enabled}
-        onChange={toggle}
-        disabled={loading}
-      />
+      <input type="checkbox" checked={enabled} onChange={toggle} disabled={loading} />
       Push notifications {loading ? "(loading...)" : enabled ? "(enabled)" : "(disabled)"}
     </label>
   );

@@ -1,7 +1,12 @@
+import {
+  type AiMode,
+  type AiProviderAdapter,
+  sanitizeForPrompt,
+  stripMarkdownFences,
+} from "@rss-wrangler/contracts";
 import type { Pool } from "pg";
+import { isBudgetExceeded, logAiUsage } from "../../services/ai-usage";
 import type { UpsertedItem } from "./parse-and-upsert";
-import type { AiMode, AiProviderAdapter } from "@rss-wrangler/contracts";
-import { logAiUsage, isBudgetExceeded } from "../../services/ai-usage";
 
 const OG_FETCH_TIMEOUT_MS = 10_000;
 const AI_BATCH_SIZE = 5;
@@ -65,7 +70,7 @@ interface EnrichableItem {
 async function getSettings(pool: Pool, accountId: string): Promise<Settings> {
   const result = await pool.query<{ data: unknown }>(
     `SELECT data FROM app_settings WHERE tenant_id = $1 AND key = 'main' LIMIT 1`,
-    [accountId]
+    [accountId],
   );
   const row = result.rows[0];
   if (!row || !row.data || typeof row.data !== "object") {
@@ -125,25 +130,23 @@ async function fetchOgImage(articleUrl: string): Promise<string | null> {
 
 function extractOgImageFromHtml(html: string): string | null {
   // Match <meta property="og:image" content="...">
-  const ogMatch = html.match(
-    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i
-  );
+  const ogMatch = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
   if (ogMatch?.[1]) return ogMatch[1];
 
   // Also try reversed attribute order: content before property
   const ogMatchReverse = html.match(
-    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
   );
   if (ogMatchReverse?.[1]) return ogMatchReverse[1];
 
   // Fall back to twitter:image
   const twitterMatch = html.match(
-    /<meta[^>]+(?:name|property)=["']twitter:image["'][^>]+content=["']([^"']+)["']/i
+    /<meta[^>]+(?:name|property)=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
   );
   if (twitterMatch?.[1]) return twitterMatch[1];
 
   const twitterMatchReverse = html.match(
-    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']twitter:image["']/i
+    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:name|property)=["']twitter:image["']/i,
   );
   if (twitterMatchReverse?.[1]) return twitterMatchReverse[1];
 
@@ -156,12 +159,12 @@ function extractOgImageFromHtml(html: string): string | null {
  */
 export function parseClassificationResponse(
   raw: string,
-  itemCount: number
+  itemCount: number,
 ): Map<number, ItemClassification> {
   const result = new Map<number, ItemClassification>();
 
   // Strip markdown fences (Ollama compatibility)
-  const jsonStr = raw.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+  const jsonStr = stripMarkdownFences(raw);
 
   let parsed: unknown;
   try {
@@ -205,14 +208,12 @@ async function classifyItemIntents(
   pool: Pool,
   accountId: string,
   provider: AiProviderAdapter,
-  items: EnrichableItem[]
+  items: EnrichableItem[],
 ): Promise<Map<string, ItemClassification>> {
   const classMap = new Map<string, ItemClassification>();
   if (items.length === 0) return classMap;
 
-  const articleLines = items
-    .map((item, i) => `${i}. ${item.title}`)
-    .join("\n");
+  const articleLines = items.map((item, i) => `${i}. ${item.title}`).join("\n");
 
   const prompt = `Classify each article by intent. Valid intents: news, opinion, tutorial, announcement, release, analysis.
 
@@ -259,11 +260,13 @@ async function generateSummary(
   provider: AiProviderAdapter,
   title: string,
   existingSummary: string | null,
-  classification?: ItemClassification
+  classification?: ItemClassification,
 ): Promise<string | null> {
-  const content = existingSummary
-    ? `Title: ${title}\n\nContent: ${existingSummary}`
-    : `Title: ${title}`;
+  const safeTitle = sanitizeForPrompt(title, 500);
+  const safeSummary = existingSummary ? sanitizeForPrompt(existingSummary, 2000) : null;
+  const content = safeSummary
+    ? `<article-title>${safeTitle}</article-title>\n\n<article-content>${safeSummary}</article-content>`
+    : `<article-title>${safeTitle}</article-title>`;
 
   const systemPrompt = classification
     ? INTENT_SUMMARY_PROMPTS[classification.intent]
@@ -305,7 +308,7 @@ async function updateItemEnrichment(
   accountId: string,
   itemId: string,
   summary: string | null,
-  heroImageUrl: string | null
+  heroImageUrl: string | null,
 ): Promise<void> {
   const setClauses: string[] = [];
   const values: unknown[] = [];
@@ -328,7 +331,7 @@ async function updateItemEnrichment(
      SET ${setClauses.join(", ")}
      WHERE id = $${paramIdx}
        AND tenant_id = $${paramIdx + 1}`,
-    values
+    values,
   );
 }
 
@@ -336,14 +339,14 @@ async function updateClusterHeroImage(
   pool: Pool,
   accountId: string,
   itemId: string,
-  _heroImageUrl: string
+  _heroImageUrl: string,
 ): Promise<void> {
   // Update hero_image_url on clusters where this item is the representative
   await pool.query(
     `UPDATE cluster SET updated_at = NOW()
      WHERE rep_item_id = $1
        AND tenant_id = $2`,
-    [itemId, accountId]
+    [itemId, accountId],
   );
 }
 
@@ -358,7 +361,7 @@ export async function enrichWithAi(
   pool: Pool,
   accountId: string,
   items: UpsertedItem[],
-  provider: AiProviderAdapter | null
+  provider: AiProviderAdapter | null,
 ): Promise<void> {
   if (items.length === 0) return;
 
@@ -401,7 +404,7 @@ export async function enrichWithAi(
             await updateItemEnrichment(pool, accountId, item.id, null, ogImage);
             await updateClusterHeroImage(pool, accountId, item.id, ogImage);
           }
-        })
+        }),
       );
 
       for (const result of results) {
@@ -451,10 +454,11 @@ export async function enrichWithAi(
 
     // Persist classifications to the database
     for (const [itemId, classification] of classificationMap) {
-      await pool.query(
-        `UPDATE item SET ai_classification = $1 WHERE id = $2 AND tenant_id = $3`,
-        [JSON.stringify(classification), itemId, accountId]
-      );
+      await pool.query(`UPDATE item SET ai_classification = $1 WHERE id = $2 AND tenant_id = $3`, [
+        JSON.stringify(classification),
+        itemId,
+        accountId,
+      ]);
     }
   } catch (err) {
     console.warn("[enrich-ai] classification phase failed, continuing with default prompts", {
@@ -481,13 +485,13 @@ export async function enrichWithAi(
           provider,
           item.title,
           item.summary,
-          classification
+          classification,
         );
         if (summary) {
           item.summary = summary;
           await updateItemEnrichment(pool, accountId, item.id, summary, null);
         }
-      })
+      }),
     );
 
     for (const result of results) {

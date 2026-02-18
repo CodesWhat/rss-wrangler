@@ -87,6 +87,10 @@ services:
         value: "60"
       - key: WORKER_BATCH_SIZE
         value: "100"
+      - key: WORKER_FULLTEXT_BACKFILL_MINUTES
+        value: "30"
+      - key: WORKER_FULLTEXT_BACKFILL_BATCH_SIZE
+        value: "20"
       - key: API_BASE_URL
         fromService:
           type: web

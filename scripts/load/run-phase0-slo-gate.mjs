@@ -2,8 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import { runHostedLoad } from "./run-hosted-load.mjs";
 import { checkWorkerSlo } from "./check-worker-slo.mjs";
+import { runHostedLoad } from "./run-hosted-load.mjs";
 
 const DEFAULT_API_PROFILE = path.resolve("infra/load/profiles/phase0-hosted-api-baseline.json");
 const DEFAULT_WORKER_PROFILE = path.resolve("infra/load/profiles/phase0-worker-slo-baseline.json");
@@ -82,7 +82,8 @@ export async function runPhase0SloGate(options = {}) {
     },
     artifacts: {
       apiOut,
-      workerOut: options.skipWorker ? null : workerOut
+      workerOut: options.skipWorker ? null : workerOut,
+      gateOut
     },
     api: {
       passed: Boolean(apiResult?.slo?.passed),

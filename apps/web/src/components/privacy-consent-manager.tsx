@@ -1,10 +1,10 @@
 "use client";
 
+import type { PrivacyConsent } from "@rss-wrangler/contracts";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { SettingsIcon, XIcon } from "@/components/icons";
 import { getPrivacyConsent, updatePrivacyConsent } from "@/lib/api";
-import type { PrivacyConsent } from "@rss-wrangler/contracts";
 
 interface ConsentDraft {
   analytics: boolean;
@@ -16,7 +16,7 @@ function toDraft(consent: PrivacyConsent): ConsentDraft {
   return {
     analytics: consent.analytics,
     advertising: consent.advertising,
-    functional: consent.functional
+    functional: consent.functional,
   };
 }
 
@@ -27,7 +27,7 @@ const DEFAULT_CONSENT: PrivacyConsent = {
   functional: false,
   consentCapturedAt: null,
   regionCode: null,
-  requiresExplicitConsent: false
+  requiresExplicitConsent: false,
 };
 
 export function PrivacyConsentManager() {
@@ -36,7 +36,7 @@ export function PrivacyConsentManager() {
   const [draft, setDraft] = useState<ConsentDraft>({
     analytics: false,
     advertising: false,
-    functional: false
+    functional: false,
   });
   const [open, setOpen] = useState(false);
   const [dismissedBanner, setDismissedBanner] = useState(false);
@@ -107,7 +107,7 @@ export function PrivacyConsentManager() {
     const ok = await saveConsent({
       analytics: true,
       advertising: false,
-      functional: true
+      functional: true,
     });
     if (ok) {
       setOpen(false);
@@ -118,7 +118,7 @@ export function PrivacyConsentManager() {
     const ok = await saveConsent({
       analytics: false,
       advertising: false,
-      functional: false
+      functional: false,
     });
     if (ok) {
       setOpen(false);
@@ -141,11 +141,12 @@ export function PrivacyConsentManager() {
   return (
     <>
       {showBanner && (
-        <section className="privacy-banner" role="region" aria-label="Privacy choices">
+        <section className="privacy-banner" aria-label="Privacy choices">
           <div className="privacy-banner-copy">
             <strong>Privacy choices</strong>
             <p>
-              Necessary storage is always on. Optional analytics/advertising stay off until you opt in.
+              Necessary storage is always on. Optional analytics/advertising stay off until you opt
+              in.
               {consent?.requiresExplicitConsent
                 ? " We detected a region that requires explicit consent for non-essential scripts."
                 : ""}
@@ -193,7 +194,12 @@ export function PrivacyConsentManager() {
       )}
 
       {open && consent && (
-        <section className="privacy-panel" role="dialog" aria-modal="true" aria-labelledby="privacy-title">
+        <section
+          className="privacy-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="privacy-title"
+        >
           <div className="privacy-panel-header">
             <h3 id="privacy-title">Privacy settings</h3>
             <button
@@ -206,12 +212,15 @@ export function PrivacyConsentManager() {
             </button>
           </div>
           <p className="muted">
-            Necessary storage is required for authentication and app operation. Optional categories are opt-in.
+            Necessary storage is required for authentication and app operation. Optional categories
+            are opt-in.
           </p>
           {consent.regionCode ? (
             <p className="muted">
               Detected region: <strong>{consent.regionCode}</strong>
-              {consent.requiresExplicitConsent ? " (explicit opt-in required for non-essential categories)." : "."}
+              {consent.requiresExplicitConsent
+                ? " (explicit opt-in required for non-essential categories)."
+                : "."}
             </p>
           ) : null}
 

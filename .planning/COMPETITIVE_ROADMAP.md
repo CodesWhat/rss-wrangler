@@ -11,13 +11,13 @@
 
 | Feature | Feedly | Inoreader | NewsBlur | Miniflux | Others | RSS Wrangler Status |
 |---------|--------|-----------|----------|----------|--------|---------------------|
-| RSS/Atom parsing | Yes | Yes | Yes | Yes (+ JSON Feed) | All | Implemented (rss-parser — unmaintained, swap to feedsmith planned Phase 1) |
+| RSS/Atom parsing | Yes | Yes | Yes | Yes (+ JSON Feed) | All | Implemented (2026-02-09 slice: feedsmith-backed RSS/Atom/RDF/JSON Feed parsing) |
 | OPML import | Yes | Yes | Yes | Yes | Feedbin, FreshRSS | Implemented |
 | OPML export | Yes | Yes | Yes | Yes | Feedbin, FreshRSS | Implemented |
 | Feed auto-discovery from URL | Yes | Yes | Yes | Yes | Feedbin, FreshRSS | Implemented |
 | Folder/category organization | Yes | Yes (hierarchical) | Yes (nested) | Yes | All | Implemented (via topics) |
 | Feed search/discovery | 40M+ sources | 5M+ sources | Autocomplete + embeddings | No | The Old Reader | Missing |
-| Feed health monitoring | No | Yes (stale/errored/engagement) | Yes (stats + fetch status) | No | FreshRSS (stats) | Missing |
+| Feed health monitoring | No | Yes (stale/errored/engagement) | Yes (stats + fetch status) | No | FreshRSS (stats) | Implemented (2026-02-09 baseline: Sources health badges from parser telemetry with healthy/stale/failing states) |
 | Per-feed view settings | Yes | Yes (3 levels) | Yes | No | -- | Missing |
 | Drag-and-drop reorder | Yes | Yes | Yes | No | The Old Reader | Missing |
 | Newsletter via email | Pro+ | Pro | Yes | No | Feedbin | Missing |
@@ -32,14 +32,14 @@
 
 | Feature | Feedly | Inoreader | NewsBlur | Miniflux | Others | RSS Wrangler Status |
 |---------|--------|-----------|----------|----------|--------|---------------------|
-| Hero images on cards | Yes | Yes | Yes (Grid view) | No | Feedbin | Missing (data exists) |
+| Hero images on cards | Yes | Yes | Yes (Grid view) | No | Feedbin | Implemented (2026-02-09 slice) |
 | Multiple view layouts | 4 (title/magazine/card/compact) | 5 (list/expanded/card/column/magazine) | 4 (split/list/full/grid) | 1 (list) | FreshRSS (multiple) | Partial (3 layouts) |
-| Reader mode / full-text extraction | Yes (Shift+V) | Yes (W key) | Yes (Text view) | Yes (Readability) | Feedbin | Missing |
+| Reader mode / full-text extraction | Yes (Shift+V) | Yes (W key) | Yes (Text view) | Yes (Readability) | Feedbin | Partial (2026-02-09 baseline: Feed/Original/Text mode toggle on cluster detail) |
 | Article slider/panel view | Yes | Yes (column view) | Yes (split view) | No | -- | Missing |
 | Inline article expand | Yes | Yes (expanded view) | Yes (full view) | Yes | -- | Missing |
-| Cluster detail page | No (not applicable) | No | No | No | -- | Missing (API ready) |
-| Mark as read on scroll | Yes (configurable) | Yes | Yes (configurable) | Yes | -- | Missing |
-| Mark all as read | Yes (Shift+A, with time filter) | Yes (Shift+A) | Yes | Yes | All | Missing (bulk action) |
+| Cluster detail page | No (not applicable) | No | No | No | -- | Implemented (2026-02-09 slice) |
+| Mark as read on scroll | Yes (configurable) | Yes | Yes (configurable) | Yes | -- | Implemented (2026-02-09 baseline: auto mark on scroll or open + per-view delay/threshold tuning + per-feed overrides + bulk folder/topic/weight/muted/trial/classification action + stats telemetry for scroll/open/total auto-read triggers) |
+| Mark all as read | Yes (Shift+A, with time filter) | Yes (Shift+A) | Yes | Yes | All | Implemented (2026-02-09 slice: all unread + older-than filter) |
 | Sort: newest/oldest | Yes | Yes | Yes | Yes | All | Implemented (For You / Latest) |
 | Dark/light theme | Yes | Yes (+sepia, custom) | Yes | Yes (6 themes) | All | Implemented |
 | Font/density customization | No | Yes (font, size, line height) | Yes (font, size, density) | No | FreshRSS (custom CSS) | Missing |
@@ -53,7 +53,7 @@
 | Feature | Feedly | Inoreader | NewsBlur | Miniflux | Others | RSS Wrangler Status |
 |---------|--------|-----------|----------|----------|--------|---------------------|
 | AI article summaries | Pro+ (Leo) | Yes (Intelligence) | No | No | FreshRSS (extension) | Partial (AI mode only) |
-| AI priority/topic ranking | Pro+ (Leo) | No | No | No | -- | Partial (recency only) |
+| AI priority/topic ranking | Pro+ (Leo) | No | No | No | -- | Partial (recency + source/topic/folder + engagement + diversity/exploration baseline) |
 | Multi-provider AI | No (proprietary) | No (proprietary) | Yes (model choice) | No | -- | Missing (OpenAI only) |
 | Ask AI / conversational | Enterprise | Yes (Intelligence) | Premium Archive | No | -- | Missing |
 | AI deduplication | Pro+ (85% threshold) | No | No | No | -- | Implemented (clustering) |
@@ -68,16 +68,17 @@
 | Feature | Feedly | Inoreader | NewsBlur | Miniflux | Others | RSS Wrangler Status |
 |---------|--------|-----------|----------|----------|--------|---------------------|
 | Intelligence training system | Leo (topic/event/industry/like-board) | Rules + spotlights | 6-dimension classifier (author/tag/title/text/URL/site) | Regex block/keep | Feedbin (actions) | Missing |
-| Source weight/preference | No (implicit via Leo) | No | Yes (like/dislike site) | No | -- | Partial (DB field, not in ranking) |
-| Topic/folder affinity | Leo priority | Rules-based | Tag/title classifiers | No | -- | Missing |
-| Engagement signals in ranking | Implicit | No | Implicit (training) | No | -- | Stub (only saved flag used) |
-| Diversity penalty | No | No | No | No | -- | Partial (cluster size bonus only) |
-| Exploration/serendipity quota | No | No | No | No | -- | Missing |
-| Mute keyword (inline) | Yes (highlight to mute) | Yes (via rules) | Yes (title classifier) | Yes (regex rules) | -- | Missing (no inline UI) |
-| Mute source (inline) | Yes | Yes | Yes (dislike site) | Yes | -- | Missing (no inline UI) |
-| Prefer source (inline) | No | No | Yes (like site) | No | -- | Missing (no inline UI) |
+| Source weight/preference | No (implicit via Leo) | No | Yes (like/dislike site) | No | -- | Implemented (2026-02-09 slice: ranking boost/penalty wired) |
+| Topic/folder affinity | Leo priority | Rules-based | Tag/title classifiers | No | -- | Partial (2026-02-09 baseline: topic + folder affinity weighting in personal ranking) |
+| Engagement signals in ranking | Implicit | No | Implicit (training) | No | -- | Partial (saved + dwell + click + not-interested penalty) |
+| Diversity penalty | No | No | No | No | -- | Partial (topic-saturation penalty baseline + cluster-size signal) |
+| Exploration/serendipity quota | No | No | No | No | -- | Partial (2026-02-09 baseline deterministic exploration boost) |
+| Ranking explainability ("Why shown") | No | No | No | No | -- | Partial (2026-02-09 baseline: card-level factor breakdown for ranked feed items) |
+| Mute keyword (inline) | Yes (highlight to mute) | Yes (via rules) | Yes (title classifier) | Yes (regex rules) | -- | Implemented (inline autocomplete from headline) |
+| Mute source (inline) | Yes | Yes | Yes (dislike site) | Yes | -- | Implemented (inline card action) |
+| Prefer source (inline) | No | No | Yes (like site) | No | -- | Implemented (inline card action) |
 | Mute with duration | Yes (1d/1w/1m/forever) | No | No | No | -- | Missing |
-| Breakout badge on muted items | N/A | N/A | N/A | N/A | -- | Stub (always null) |
+| Breakout badge on muted items | N/A | N/A | N/A | N/A | -- | Implemented (2026-02-09 slice) |
 
 ### Filtering & Rules Engine
 
@@ -98,9 +99,9 @@
 | Feature | Feedly | Inoreader | NewsBlur | Miniflux | Others | RSS Wrangler Status |
 |---------|--------|-----------|----------|----------|--------|---------------------|
 | Full-text search | Yes (Power Search) | Yes | Yes (Premium) | Yes (PostgreSQL) | Feedbin, FreshRSS | Implemented |
-| Search operators (AND/OR/NOT) | Yes | Yes | No | No | Feedbin | Missing |
-| Saved searches | Yes (via URL) | Yes (monitoring feeds) | Yes (virtual feeds) | No | Feedbin, FreshRSS | Missing |
-| Search within feed/folder | Yes | Yes | Yes | Yes | -- | Missing |
+| Search operators (AND/OR/NOT) | Yes | Yes | No | No | Feedbin | Implemented (2026-02-09 baseline: PostgreSQL `websearch_to_tsquery` syntax on search endpoint) |
+| Saved searches | Yes (via URL) | Yes (monitoring feeds) | Yes (virtual feeds) | No | Feedbin, FreshRSS | Implemented (2026-02-09 baseline: save/apply/delete scoped searches from topbar search) |
+| Search within feed/folder | Yes | Yes | Yes | Yes | -- | Implemented (2026-02-09 baseline: folder/source scoped search filters in UI + `/v1/search`) |
 
 ### Notifications
 
@@ -138,8 +139,8 @@
 | Save / read-later | Yes | Yes | Yes (star) | Yes (star) | All | Implemented |
 | Mark as read | Yes | Yes | Yes | Yes | All | Implemented |
 | Not interested / dismiss | No | No | Hidden (red) | No | -- | Implemented |
-| +N outlets badge | N/A | N/A | N/A | N/A | -- | Missing (data returned) |
-| Folder/topic label on card | No | No | No | No | -- | Missing (data returned) |
+| +N outlets badge | N/A | N/A | N/A | N/A | -- | Implemented (2026-02-09 slice) |
+| Folder/topic label on card | No | No | No | No | -- | Implemented (2026-02-09 slice) |
 | Mute keyword from card | Yes (inline highlight) | Via rules | Yes (train title) | No | -- | Missing |
 | Prefer/mute source from card | No | No | Yes (like/dislike site) | No | -- | Missing |
 
@@ -160,7 +161,7 @@
 | Circuit breaker per feed | Unknown (SaaS) | Unknown (SaaS) | Dynamic frequency adjustment | No | -- | Missing |
 | Dead-letter queue | Unknown (SaaS) | Unknown (SaaS) | Unknown | No | -- | Missing |
 | Retry with backoff | Unknown (SaaS) | Unknown (SaaS) | Unknown | Unknown | -- | Partial (pg-boss defaults) |
-| Data retention controls | Auto (30d read) | 30d default (configurable) | 14-30d by tier | Configurable | -- | Missing |
+| Data retention controls | Auto (30d read) | 30d default (configurable) | 14-30d by tier | Configurable | -- | Implemented (2026-02-09 baseline: configurable unread max-age/read purge + worker cleanup job) |
 | Feed error reporting | No | Yes (health status) | Yes (fetcher details) | No | -- | Missing |
 
 ### Sharing & Social
@@ -194,16 +195,16 @@ These features exist in every serious RSS reader. Without them, the app feels br
 
 | # | Feature | Gap Type | Who Has It |
 |---|---------|----------|------------|
-| 1 | **Hero images on cards** | Missing (data exists, not rendered) | Feedly, Inoreader, NewsBlur, Feedbin |
-| 2 | **Cluster detail page** | Missing (API ready, no frontend) | Unique to us -- but the article detail page is universal |
-| 3 | **Reader mode / full-text extraction** | Missing | Feedly, Inoreader, NewsBlur, Miniflux, Feedbin |
-| 4 | **Mark all as read** (with time filter) | Missing bulk action | Feedly, Inoreader, NewsBlur, Miniflux, all others |
-| 5 | **+N outlets badge on cards** | Missing (data returned, not displayed) | Unique to clustering model |
-| 6 | **Folder/topic label on cards** | Missing (data returned, not displayed) | Most readers show folder/category |
-| 7 | **Mute keyword from card** (inline) | Missing | Feedly, NewsBlur, Inoreader (via rules) |
-| 8 | **Prefer/mute source from card** (inline) | Missing | NewsBlur, Feedly |
-| 9 | **Breakout badge shows reason** | Stub (always null from API) | Unique to our mute-with-breakout model |
-| 10 | **Mark as read on scroll** (configurable) | Missing | Feedly, Inoreader, NewsBlur, Miniflux |
+| 1 | **Hero images on cards** | Implemented (2026-02-09) | Feedly, Inoreader, NewsBlur, Feedbin |
+| 2 | **Cluster detail page** | Implemented (2026-02-09 slice) | Unique to us -- but the article detail page is universal |
+| 3 | **Reader mode / full-text extraction** | Implemented (2026-02-09 slice) | Feedly, Inoreader, NewsBlur, Miniflux, Feedbin |
+| 4 | **Mark all as read** (with time filter) | Implemented (2026-02-09 slice) | Feedly, Inoreader, NewsBlur, Miniflux, all others |
+| 5 | **+N outlets badge on cards** | Implemented (2026-02-09) | Unique to clustering model |
+| 6 | **Folder/topic label on cards** | Implemented (2026-02-09) | Most readers show folder/category |
+| 7 | **Mute keyword from card** (inline) | Implemented (2026-02-09 slice) | Feedly, NewsBlur, Inoreader (via rules) |
+| 8 | **Prefer/mute source from card** (inline) | Implemented (2026-02-09 slice) | NewsBlur, Feedly |
+| 9 | **Breakout badge shows reason** | Implemented (2026-02-09 slice) | Unique to our mute-with-breakout model |
+| 10 | **Mark as read on scroll** (configurable) | Implemented (2026-02-09 baseline, incl. telemetry in Stats) | Feedly, Inoreader, NewsBlur, Miniflux |
 
 ### P1 -- Competitive
 
@@ -211,16 +212,16 @@ Features that 3 or more top readers have. These make us competitive rather than 
 
 | # | Feature | Gap Type | Who Has It |
 |---|---------|----------|------------|
-| 11 | **Source weight used in ranking** | Partial (DB field ignored) | NewsBlur (like/dislike), Feedly (Leo), Inoreader (rules) |
-| 12 | **Engagement signals in ranking** (dwell, click, dismiss) | Stub (only saved used) | Feedly (implicit), NewsBlur (training), Inoreader (rules) |
-| 13 | **Topic/folder affinity in ranking** | Missing | Feedly (Leo), NewsBlur (tag classifiers) |
+| 11 | **Source weight used in ranking** | Implemented (2026-02-09 slice) | NewsBlur (like/dislike), Feedly (Leo), Inoreader (rules) |
+| 12 | **Engagement signals in ranking** (dwell, click, dismiss) | Partial (2026-02-09 baseline) | Feedly (implicit), NewsBlur (training), Inoreader (rules) |
+| 13 | **Topic/folder affinity in ranking** | Partial (2026-02-09 baseline) | Feedly (Leo), NewsBlur (tag classifiers) |
 | 14 | **Multi-provider AI** (Anthropic, Ollama/local) | Missing (hardcoded OpenAI) | NewsBlur (model choice); essential for self-hosted |
 | 15 | **AI "Story so far" on cluster detail** | Missing (returns raw text) | Feedly (summaries), Inoreader (summaries), NewsBlur (Ask AI) |
-| 16 | **Full-text search within feed/folder** | Missing scoped search | Feedly, Inoreader, NewsBlur, Miniflux |
-| 17 | **Saved searches** | Missing | Feedly, Inoreader, NewsBlur, Feedbin, FreshRSS |
+| 16 | **Full-text search within feed/folder** | Implemented (2026-02-09 baseline: optional folder/source scoping on search endpoint and topbar search UI) | Feedly, Inoreader, NewsBlur, Miniflux |
+| 17 | **Saved searches** | Implemented (2026-02-09 baseline: persisted search presets in Settings with one-click apply/delete) | Feedly, Inoreader, NewsBlur, Feedbin, FreshRSS |
 | 18 | **Newsletter ingestion via email** | Missing | Feedly (Pro+), Inoreader (Pro), NewsBlur, Feedbin |
-| 19 | **Feed health monitoring** (stale, errored, last fetch) | Missing | Inoreader, NewsBlur, FreshRSS |
-| 20 | **Data retention controls** (unread max-age, read purge) | Missing | Inoreader (30d), NewsBlur (14-365d), Miniflux (configurable) |
+| 19 | **Feed health monitoring** (stale, errored, last fetch) | Implemented (2026-02-09 baseline: per-feed health badge/status + last success/failure detail in Sources) | Inoreader, NewsBlur, FreshRSS |
+| 20 | **Data retention controls** (unread max-age, read purge) | Implemented (2026-02-09 baseline: Settings controls + scheduled worker retention cleanup) | Inoreader (30d), NewsBlur (14-365d), Miniflux (configurable) |
 | 21 | **Digest trigger: away >= 24h** | Missing (no last_active_at) | Unique to our spec, but catch-up is common |
 | 22 | **AI digest with LLM generation** | Missing (reformats only) | Feedly (Enterprise), Inoreader (Teams) |
 | 23 | **Offline PWA with service worker caching** | Stub (SW handles push only) | Inoreader (Pro), NewsBlur, Miniflux (PWA) |
@@ -231,8 +232,8 @@ Features from 1-2 readers or unique ideas that would make RSS Wrangler stand out
 
 | # | Feature | Gap Type | Who Has It |
 |---|---------|----------|------------|
-| 24 | **Diversity penalty in ranking** (true topical diversity) | Partial (cluster size bonus only) | Unique to our design |
-| 25 | **Exploration quota** (surface low-ranked stories) | Missing | Unique to our design |
+| 24 | **Diversity penalty in ranking** (true topical diversity) | Partial (2026-02-09 baseline: topic-saturation penalty + cluster-size signal) | Unique to our design |
+| 25 | **Exploration quota** (surface low-ranked stories) | Partial (2026-02-09 baseline deterministic boost) | Unique to our design |
 | 26 | **Intelligence training** (like/dislike authors, tags, keywords) | Missing | NewsBlur (6 dimensions), Feedly (Leo) |
 | 27 | **Rules engine** (trigger-condition-action automation) | Missing | Inoreader (comprehensive), Feedbin (basic) |
 | 28 | **Keyword alert monitoring feeds** | Missing | Feedly (boolean), Inoreader (monitoring feeds) |
@@ -258,7 +259,7 @@ Features that only power users want or that only one app has.
 | 41 | **Public shared feed** (blurblog-style) | Missing | NewsBlur, Inoreader, Reeder |
 | 42 | **Customizable keyboard bindings** | Missing | NewsBlur |
 | 43 | **Regex filter support** | Missing | NewsBlur (Pro), Miniflux |
-| 44 | **Search operators** (AND/OR/NOT, title:, author:) | Missing | Feedly, Inoreader, Feedbin |
+| 44 | **Search operators** (AND/OR/NOT, title:, author:) | Partial (2026-02-09 baseline: AND/OR/NOT via `websearch_to_tsquery`; field-specific operators still missing) | Feedly, Inoreader, Feedbin |
 | 45 | **Drag-and-drop feed reorder** | Missing | Feedly, Inoreader, NewsBlur, The Old Reader |
 | 46 | **Custom CSS injection** | Missing | Miniflux, FreshRSS |
 | 47 | **Tracker/pixel removal** | Missing | Miniflux |
@@ -275,16 +276,16 @@ Features that only power users want or that only one app has.
 
 | Phase 0 Feature | Current Status | Notes |
 |---|---|---|
-| Multi-tenant data model + isolation strategy | ⚠️ Partial | Tenant IDs + RLS + tenant DB context are in place; hosted org/admin workflows still pending |
-| Hosted auth + onboarding flow | ⚠️ Partial | Signup/login/join, recovery, onboarding wizard, invite-token controls, owner/member roles, membership policy, member approval workflow, and Settings Members UI are live; richer bootstrap remains |
+| Multi-tenant data model + isolation strategy | ⚠️ Partial | Account IDs (DB column: `tenant_id`) + RLS + account DB context are in place; internal naming migrated to account/member in contracts, routes, billing, AI-usage, and entitlements; hosted org/admin workflows still pending |
+| Hosted auth + onboarding flow | ⚠️ Partial | Signup/login/join, recovery, onboarding wizard, invite-token controls, fixed single-owner + invited-member model, and owner-only member-management surfaces are live; deeper naming cleanup and richer bootstrap remain |
 | Hosted account management + compliance controls | ⚠️ Partial | Password reset/change, account deletion lifecycle automation, and baseline account export are live; completion notifications + export hardening remain |
 | Entitlements + plan-limit middleware baseline | ⚠️ Partial | Plan defaults + API/worker feed/search/ingest gates landed; billing webhook sync now lands plan updates into entitlements, broader coverage/usage UX remain |
 | Hosted performance/load testing + SLO baseline | ✅ Implemented | Load harness, SLO policy, and calibration workflow are in repo |
 | Billing foundation (Lemon Squeezy + plan management UX) | ✅ Implemented | Checkout + signed webhook sync + billing overview/portal APIs + settings/pricing surfaces, in-app cancel/reactivate controls, annual plan variants, and webhook failure alerting are live |
 | Consent + CMP baseline (hosted) | ⚠️ Partial | Necessary-only default + persistent privacy controls + region-aware consent metadata shipped; CMP adapter and automated non-essential script gating tests remain |
-| Hosted SaaS offering (dogfood pilot) | ⚠️ Partial | Infra/provider decisions plus Render blueprints (`render.free.yaml`, `render.yaml`) are in repo, self-host Docker/OrbStack smoke is green (`npm run orbstack:smoke`) with in-container health/login checks, and hosted post-deploy smoke is scripted (`npm run hosted:smoke`). First live hosted deploy + telemetry run still pending. |
+| Hosted SaaS offering (dogfood pilot) | ⚠️ Partial | Infra/provider decisions plus Render blueprints (`render.free.yaml`, `render.yaml`) are in repo, self-host Docker/OrbStack smoke is green (`npm run orbstack:smoke`) with in-container health/login checks, and hosted post-deploy smoke is scripted (`npm run hosted:smoke`). First live hosted deploy + telemetry run still pending, and now follows the Docker self-host checkpoint (`docker compose -f infra/docker-compose.yml build` + `npm run orbstack:smoke`). |
 
-**Immediate next slice:** Hosted SaaS dogfood pilot rollout (cost telemetry, limit tuning, and launch-readiness checks).
+**Immediate next slice:** Run the full self-host checkpoint (`npm run selfhost:readiness -- --clean-db true --teardown true`) once Docker is available, then execute the first hosted telemetry gate (`npm run hosted:dogfood`). Naming migration from tenant/workspace to member/account is substantially complete across contracts, routes, billing, AI-usage, and entitlements; remaining auth-service.ts, postgres-store.ts, and worker pipeline migration is tracked separately.
 
 ### Phase 0: Hosted SaaS Pilot & Cost Model
 
@@ -317,7 +318,7 @@ Features that only power users want or that only one app has.
 
 | Feature | Description | Complexity | Inspired By |
 |---------|-------------|------------|-------------|
-| Replace rss-parser with feedsmith | Swap unmaintained rss-parser (3yr stale) for feedsmith — adds JSON Feed 1.0/1.1, RDF, better OPML parsing, TypeScript types | M | Miniflux (JSON Feed), Feedsmith ecosystem |
+| Replace rss-parser with feedsmith | Implemented (2026-02-09 slice): worker polling now uses feedsmith parser with RSS/Atom/RDF/JSON Feed normalization into existing ingest contract | M | Miniflux (JSON Feed), Feedsmith ecosystem |
 | Hero images on cards | Render `image_url` from DB on story cards in all layouts | S | Feedly, Inoreader, NewsBlur |
 | +N outlets badge + inline expand | Display cluster member count on card. Clicking the badge expands a panel inline showing all source outlets (title, source, time) with links to each — no page navigation needed. Collapse to re-hide. Full cluster detail page still available for deep dive. | M | Unique (clustering model), Google News (expand sources inline) |
 | Folder/topic label on cards | Show topic tag from feed classification | S | Unique (LLM topic system) |
@@ -350,11 +351,11 @@ Features that only power users want or that only one app has.
 | Topic/folder affinity | Weight topics user engages with more heavily in ranking | M | Feedly (Leo topic priority), NewsBlur (tag classifiers) |
 | Diversity penalty | Penalize multiple clusters from same topic in top N results | M | Unique design goal |
 | Exploration quota | Reserve 5-10% of feed positions for low-ranked serendipity items | S | Unique design goal |
-| Mark as read on scroll | Configurable: off, on scroll past, on open | S | Feedly, Inoreader, NewsBlur, Miniflux |
+| Mark as read on scroll | Baseline shipped (2026-02-09): configurable off/on-scroll/on-open with auto-read when visible or opened, plus per-view delay/threshold tuning, per-feed overrides, and bulk folder/topic/weight/muted/trial/classification action. Remaining scope: analytics. | S | Feedly, Inoreader, NewsBlur, Miniflux |
 | Digest trigger: away detection | Track `last_active_at`, trigger digest when away >= configurable hours | S | Unique spec requirement |
 | Folder organization modes | Settings toggle: Manual (user creates/manages all folders), AI (LLM auto-classifies into topics, suggests subfolder hierarchy), Hybrid (AI suggests, user approves/overrides). Manual mode adds full CRUD for folders + subfolders. AI mode extends current topic system with nested suggestions. Hybrid = current approve/reject flow + manual overrides + drag-and-drop reorg. | M | Unique differentiator — most readers are fully manual or fully AI, never both |
 | Tunable noise controls | User-facing sliders/toggles in Settings for: dedup aggressiveness (Jaccard threshold — currently hardcoded 0.25), mute strictness (breakout cluster size threshold — currently hardcoded 4), collapse repeated stories vs show all, Focus-only mode (hide everything below score threshold globally). Surfaces currently-hardcoded constants as per-user preferences. | M | Unique — most readers hide these knobs |
-| Explainability UI | "Why shown" / "Why hidden" / "Why deduped" via tooltip on hover (desktop) or tap-to-reveal (mobile). Small info icon on card → hover shows ranking factors (source weight, topic affinity, engagement score, cluster size), filter matches, dedup reasoning. Lightweight — no modal, no page nav. Builds trust and lets users tune training directly from the tooltip. | M | Unique differentiator — no RSS reader explains its ranking |
+| Explainability UI | Baseline shipped (2026-02-09): card-level "Why shown" disclosure with ranking-factor breakdown for list results. Remaining scope: add "Why hidden" / "Why deduped" states plus filter/dedup reasoning and broader explainability coverage across non-list surfaces. | M | Unique differentiator — no RSS reader explains its ranking |
 | Focus / Priority inbox | Third sort mode alongside "For You" and "Latest." Applies score threshold to show only high-signal items. Starts rules-based (source weight + topic + filters). Evolves to learning-based once engagement signals accumulate (weeks 3+). Shares signal model with AI digest — both use same learned preferences for curation. Progressive card detail: top items get full cards (hero image + summary + actions), middle items get compact cards (headline + 1-liner), bottom items get title rows only. | M | NewsBlur (Focus mode — green items only), Feedly (Priority inbox via Leo) |
 
 **Total: 11 features (3S + 7M + 1S = moderate-heavy sprint)**
@@ -398,7 +399,7 @@ Features that only power users want or that only one app has.
 | Newsletter ingestion | Unique email address per user; parse email into article items | L | Feedly, Inoreader, NewsBlur, Feedbin |
 | Feed health monitoring | Track fetch errors, staleness, last success; surface in UI | M | Inoreader (health indicators), NewsBlur (stats) |
 | Feed error dashboard | Admin view of all feeds with error state, retry count, last fetch | M | Inoreader, NewsBlur |
-| Data retention controls | Configurable unread max-age and read-item purge with cleanup jobs | M | Inoreader (30d), NewsBlur (configurable), Miniflux |
+| Data retention controls | Implemented baseline (2026-02-09): configurable unread max-age and read-item purge in Settings, enforced by scheduled worker cleanup (tenant-aware). | M | Inoreader (30d), NewsBlur (configurable), Miniflux |
 | Feed drift detection | Weekly job re-classifies feeds, flags topic changes for review | M | Unique (LLM classification model) |
 | RSSHub upstream support + generator assist | Treat RSSHub-generated feeds as normal feeds (already works in URL add flow). Add Source enhancement: "Generate via RSSHub" assistant for known no-RSS sites using route templates, then subscribe to generated feed URL. | M | RSSHub ecosystem, Feedly RSS Builder concept (lighter-weight) |
 | Add-source preview + initial pull policy | In Add Source flow, show a live preview of recent items before subscribing (headline, source, publish time, sample snippet). Add initial import policy at subscribe time: default "new only / mark existing as read" for baseline cost control, with optional Pro backfill controls (last N items or N days with hard caps). Keep this explicit per-feed and editable later in feed settings. | M | Feedly (source preview in follow/RSS Builder), Miniflux (discover candidates), Inoreader/NewsBlur (quick add APIs; backfill handled as archive capability, not per-add count field) |
@@ -505,7 +506,7 @@ Features that only power users want or that only one app has.
 
 | Feature | Description | Complexity | Inspired By |
 |---------|-------------|------------|-------------|
-| First-party API (Wrangler-native endpoints) | Define a stable, versioned API contract for Wrangler clients/integrations: cluster primitives, dedup metadata, learning-signal ingest/retrieval, explainability payloads ("why shown/hidden/deduped"), and rules/filter audit logs. Baseline exists today via internal `/v1/*` routes (clusters, feedback, events, dwell), but contract/coverage is incomplete. | L | Feedly API, Inoreader API, NewsBlur API |
+| First-party API (Wrangler-native endpoints) | Define a stable, versioned API contract for Wrangler clients/integrations: cluster primitives, dedup metadata, learning-signal ingest/retrieval, explainability payloads ("why shown/hidden/deduped"), and rules/filter audit logs. Baseline exists today via internal `/v1/*` routes (clusters, feedback, events, dwell), and cluster list responses now include `rankingExplainability`; contract/coverage is still incomplete. | L | Feedly API, Inoreader API, NewsBlur API |
 | API compatibility layer (Google Reader + Fever subset) | Add compatibility endpoints mapped onto Wrangler's first-party API so clients like Reeder/NetNewsWire/Unread/ReadKit can sync subscriptions and basic read/starred states. Scope is intentional subset, not full protocol parity. Wrangler PWA remains superset client for clustering, AI features, annotations, and explainability UX. Hosted: Pro-gated with request rate limits. Self-hosted: unlocked. | L | Inoreader (Google Reader API), Miniflux (Google Reader + Fever), FreshRSS (both), NewsBlur ecosystem clients |
 
 **Total: 2 features (2L = focused, high-leverage interoperability phase)**
@@ -527,7 +528,7 @@ Features that only power users want or that only one app has.
 | 8 | PWA & Mobile Polish | 7 | Phase 1 | Moderate-Heavy |
 | 9 | Client Ecosystem Compatibility | 2 | Phase 1 minimum (expands with Phases 2 and 5) | Focused-Heavy |
 
-**Notes on parallelism:** Phase 0 can run in parallel with self-host product work, but hosted public launch should wait for Phase 0 completion (multi-tenancy, hosted auth/onboarding, account management/compliance controls, entitlements/limits, hosted load-test/SLO baseline, billing foundation, consent/CMP baseline, and stable cost telemetry). Phases 6, 7, 8, and 9 can run in parallel once their dependencies are met. Phases 1-5 are largely sequential because each phase builds on signals and infrastructure from the previous one.
+**Notes on parallelism:** Near-term execution is self-host-first for release readiness, while Phase 0 hosted work continues in parallel. Hosted public launch should still wait for Phase 0 completion (multi-tenancy, hosted auth/onboarding, account management/compliance controls, entitlements/limits, hosted load-test/SLO baseline, billing foundation, consent/CMP baseline, and stable cost telemetry). Phases 6, 7, 8, and 9 can run in parallel once their dependencies are met. Phases 1-5 are largely sequential because each phase builds on signals and infrastructure from the previous one.
 
 **Monetization gates:** Every feature should be built with entitlement awareness. See `.planning/MONETIZATION.md` for the full feature-to-tier map. Key rule: self-hosted = all features unlocked, hosted = gated by plan. AI features = AI add-on tier. Reader mode policy on hosted: per-feed opt-in, no paywalled extraction, and no server-side persistence of full-page extraction results. Dedupe policy on hosted: baseline clustering is available on all tiers; advanced dedupe controls (threshold tuning + split/merge tools) are Pro. Data portability policy: export remains free on all tiers (trust/no-lock-in). Ads policy: subscription-first at launch; if enabled later, only clearly labeled sponsored feed stories on free tier with frequency caps and consent gating, while paid plans stay ad-free. Build the entitlements middleware early (Phase 1 or pre-Phase 1 infra) so every subsequent phase can gate naturally. Pattern: `requirePlan('pro')` middleware on API routes, `entitlements.hasAccess('ai')` checks in worker jobs, frontend checks to show upgrade prompts.
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { useAuth } from "@/components/auth-provider";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useAuth } from "@/components/auth-provider";
 
 export default function LoginPage() {
   const { authenticated, loading, loginUser } = useAuth();
@@ -75,10 +75,18 @@ export default function LoginPage() {
           <button type="submit" className="button button-primary" disabled={submitting}>
             {submitting ? "Signing in..." : "Sign in"}
           </button>
-          <a href="/forgot-password" className="muted" style={{ textAlign: "center", display: "block" }}>
+          <a
+            href="/forgot-password"
+            className="muted"
+            style={{ textAlign: "center", display: "block" }}
+          >
             Forgot password?
           </a>
-          <a href="/resend-verification" className="muted" style={{ textAlign: "center", display: "block" }}>
+          <a
+            href="/resend-verification"
+            className="muted"
+            style={{ textAlign: "center", display: "block" }}
+          >
             Resend verification email
           </a>
           <a href="/signup" className="muted" style={{ textAlign: "center", display: "block" }}>

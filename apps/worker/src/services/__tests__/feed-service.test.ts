@@ -136,14 +136,24 @@ describe("FeedService", () => {
       pool.query.mockResolvedValue({ rows: [] });
 
       const service = new FeedService(pool);
-      await service.updateLastPolled(ACCOUNT_ID, "f1", '"new-etag"', "Mon, 01 Jan 2024 00:00:00 GMT");
+      await service.updateLastPolled(
+        ACCOUNT_ID,
+        "f1",
+        '"new-etag"',
+        "Mon, 01 Jan 2024 00:00:00 GMT",
+      );
 
       expect(pool.query).toHaveBeenCalledTimes(1);
       const callArgs = pool.query.mock.calls[0];
       expect(callArgs[0]).toContain("UPDATE feed");
       expect(callArgs[0]).toContain("last_polled_at = NOW()");
       expect(callArgs[0]).toContain("tenant_id");
-      expect(callArgs[1]).toEqual(["f1", '"new-etag"', "Mon, 01 Jan 2024 00:00:00 GMT", ACCOUNT_ID]);
+      expect(callArgs[1]).toEqual([
+        "f1",
+        '"new-etag"',
+        "Mon, 01 Jan 2024 00:00:00 GMT",
+        ACCOUNT_ID,
+      ]);
     });
 
     it("handles null etag and lastModified", async () => {

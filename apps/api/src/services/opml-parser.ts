@@ -58,7 +58,7 @@ export function parseOpml(xml: string): OpmlFeed[] {
         xmlUrl,
         title: title || xmlUrl,
         htmlUrl: htmlUrl ?? null,
-        category
+        category,
       });
       // Feed outlines that are not self-closing still don't act as categories
       if (!isSelfClosing) {

@@ -11,3 +11,9 @@ coverage
 .env.*
 !.env.example
 .DS_Store
+tests/e2e/test-results/
+tests/e2e/playwright-report/
+.playwright-mcp/
+qa-*.png
+.planning/agent-pass-cards/
+starthere.md

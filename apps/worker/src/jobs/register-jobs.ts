@@ -1,17 +1,17 @@
 import { createAiRegistry } from "@rss-wrangler/contracts";
 import type { Pool } from "pg";
-import { type Job, type PgBoss } from "pg-boss";
+import type { Job, PgBoss } from "pg-boss";
 import type { WorkerEnv } from "../config/env";
 import { withAccountDbClient } from "../db-context";
 import { runFeedPipeline } from "../pipeline/run-feed-pipeline";
+import { detectTopicDrift } from "../pipeline/stages/detect-topic-drift";
 import { backfillMissingFullText } from "../pipeline/stages/extract-fulltext";
 import { generateDigest } from "../pipeline/stages/generate-digest";
-import { detectTopicDrift } from "../pipeline/stages/detect-topic-drift";
 import { FeedService } from "../services/feed-service";
 import {
   ACCOUNT_DELETION_BATCH_SIZE,
   ACCOUNT_DELETION_GRACE_WINDOW_DAYS,
-  processDueAccountDeletions
+  processDueAccountDeletions,
 } from "./account-deletion-automation";
 import { JOBS } from "./job-names";
 import { runProgressiveSummary } from "./progressive-summary";
@@ -29,7 +29,10 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   const aiProvider = aiRegistry.getProvider();
 
   if (aiProvider) {
-    console.info("[worker] AI provider configured", { provider: aiProvider.name, available: aiRegistry.listAvailable() });
+    console.info("[worker] AI provider configured", {
+      provider: aiProvider.name,
+      available: aiRegistry.listAvailable(),
+    });
   } else {
     console.info("[worker] no AI provider configured, AI features will be skipped");
   }
@@ -44,9 +47,14 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   await boss.createQueue(JOBS.progressiveSummary);
   await boss.createQueue(JOBS.detectTopicDrift);
 
-  await boss.schedule(JOBS.pollFeeds, toCron(env.WORKER_POLL_MINUTES), {}, {
-    tz: "UTC"
-  });
+  await boss.schedule(
+    JOBS.pollFeeds,
+    toCron(env.WORKER_POLL_MINUTES),
+    {},
+    {
+      tz: "UTC",
+    },
+  );
 
   await boss.work(JOBS.pollFeeds, async () => {
     const accountIds = await feedService.listAccountIds();
@@ -99,7 +107,9 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
       lastModified: (data.lastModified as string) || null,
       lastPolledAt: data.lastPolledAt ? new Date(data.lastPolledAt as string) : null,
       backfillSince: data.backfillSince ? new Date(data.backfillSince as string) : null,
-      classificationStatus: (data.classificationStatus as "pending_classification" | "classified" | "approved") || "approved",
+      classificationStatus:
+        (data.classificationStatus as "pending_classification" | "classified" | "approved") ||
+        "approved",
     };
 
     try {
@@ -112,7 +122,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
             vapidPublicKey: env.VAPID_PUBLIC_KEY,
             vapidPrivateKey: env.VAPID_PRIVATE_KEY,
             vapidContact: env.VAPID_CONTACT,
-          }
+          },
         });
       });
     } catch (err) {
@@ -121,9 +131,14 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
     }
   });
 
-  await boss.schedule(JOBS.backfillFullText, toCron(env.WORKER_FULLTEXT_BACKFILL_MINUTES), {}, {
-    tz: "UTC"
-  });
+  await boss.schedule(
+    JOBS.backfillFullText,
+    toCron(env.WORKER_FULLTEXT_BACKFILL_MINUTES),
+    {},
+    {
+      tz: "UTC",
+    },
+  );
 
   await boss.work(JOBS.backfillFullText, async () => {
     try {
@@ -139,7 +154,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
           return backfillMissingFullText(
             client as unknown as Pool,
             accountId,
-            env.WORKER_FULLTEXT_BACKFILL_BATCH_SIZE
+            env.WORKER_FULLTEXT_BACKFILL_BATCH_SIZE,
           );
         });
 
@@ -158,7 +173,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
           totalCandidates,
           totalAttempted,
           totalExtracted,
-          totalPersisted
+          totalPersisted,
         });
       }
 
@@ -167,7 +182,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
         totalCandidates,
         totalAttempted,
         totalExtracted,
-        totalPersisted
+        totalPersisted,
       };
     } catch (err) {
       console.error("[worker] full-text backfill failed", { error: err });
@@ -176,9 +191,14 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   });
 
   // Schedule digest generation daily at 7:00 AM UTC
-  await boss.schedule(JOBS.generateDigest, "0 7 * * *", {}, {
-    tz: "UTC"
-  });
+  await boss.schedule(
+    JOBS.generateDigest,
+    "0 7 * * *",
+    {},
+    {
+      tz: "UTC",
+    },
+  );
 
   await boss.work(JOBS.generateDigest, async () => {
     try {
@@ -213,9 +233,14 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   });
 
   // Process account deletion requests every 30 minutes.
-  await boss.schedule(JOBS.processAccountDeletions, "*/30 * * * *", {}, {
-    tz: "UTC"
-  });
+  await boss.schedule(
+    JOBS.processAccountDeletions,
+    "*/30 * * * *",
+    {},
+    {
+      tz: "UTC",
+    },
+  );
 
   await boss.work(JOBS.processAccountDeletions, async () => {
     try {
@@ -229,7 +254,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
           return processDueAccountDeletions(client, {
             accountId,
             batchSize: ACCOUNT_DELETION_BATCH_SIZE,
-            graceWindowDays: ACCOUNT_DELETION_GRACE_WINDOW_DAYS
+            graceWindowDays: ACCOUNT_DELETION_GRACE_WINDOW_DAYS,
           });
         });
 
@@ -244,7 +269,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
         console.info("[worker] account deletion automation processed", {
           processed,
           deletedUsers,
-          purgedAccounts
+          purgedAccounts,
         });
       }
 
@@ -255,9 +280,14 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
     }
   });
 
-  await boss.schedule(JOBS.retentionCleanup, toCron(env.WORKER_RETENTION_MINUTES), {}, {
-    tz: "UTC"
-  });
+  await boss.schedule(
+    JOBS.retentionCleanup,
+    toCron(env.WORKER_RETENTION_MINUTES),
+    {},
+    {
+      tz: "UTC",
+    },
+  );
 
   await boss.work(JOBS.retentionCleanup, async () => {
     try {
@@ -285,7 +315,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
           appliedAccounts,
           totalAutoMarkedUnread,
           totalPurgedReadClusters,
-          totalPurgedOrphanItems
+          totalPurgedOrphanItems,
         });
       }
 
@@ -293,7 +323,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
         appliedAccounts,
         totalAutoMarkedUnread,
         totalPurgedReadClusters,
-        totalPurgedOrphanItems
+        totalPurgedOrphanItems,
       };
     } catch (err) {
       console.error("[worker] retention cleanup failed", { error: err });
@@ -302,9 +332,14 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   });
 
   // Progressive summarization: generate AI summaries for aging items every 2 hours
-  await boss.schedule(JOBS.progressiveSummary, "0 */2 * * *", {}, {
-    tz: "UTC"
-  });
+  await boss.schedule(
+    JOBS.progressiveSummary,
+    "0 */2 * * *",
+    {},
+    {
+      tz: "UTC",
+    },
+  );
 
   await boss.work(JOBS.progressiveSummary, async () => {
     try {
@@ -323,7 +358,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
       if (totalCandidates > 0 || totalSummarized > 0) {
         console.info("[worker] progressive summary processed", {
           totalCandidates,
-          totalSummarized
+          totalSummarized,
         });
       }
 
@@ -335,9 +370,14 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
   });
 
   // Weekly topic drift detection: every Sunday at 3:00 AM UTC
-  await boss.schedule(JOBS.detectTopicDrift, "0 3 * * 0", {}, {
-    tz: "UTC"
-  });
+  await boss.schedule(
+    JOBS.detectTopicDrift,
+    "0 3 * * 0",
+    {},
+    {
+      tz: "UTC",
+    },
+  );
 
   await boss.work(JOBS.detectTopicDrift, async () => {
     try {
@@ -357,7 +397,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
                AND (classified_at IS NULL OR classified_at < NOW() - INTERVAL '7 days')
              ORDER BY classified_at ASC NULLS FIRST
              LIMIT 50`,
-            [accountId]
+            [accountId],
           );
 
           for (const row of feedsResult.rows) {
@@ -373,7 +413,7 @@ export async function registerJobs(boss: PgBoss, dependencies: Dependencies): Pr
       if (totalFeeds > 0) {
         console.info("[worker] topic drift detection processed", {
           totalFeeds,
-          totalDrifted
+          totalDrifted,
         });
       }
 

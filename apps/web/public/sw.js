@@ -19,9 +19,7 @@ self.addEventListener("push", (event) => {
     renotify: true,
   };
 
-  event.waitUntil(
-    self.registration.showNotification(data.title || "RSS Wrangler", options)
-  );
+  event.waitUntil(self.registration.showNotification(data.title || "RSS Wrangler", options));
 });
 
 self.addEventListener("notificationclick", (event) => {
@@ -40,6 +38,6 @@ self.addEventListener("notificationclick", (event) => {
       }
       // Open new tab
       return self.clients.openWindow(url);
-    })
+    }),
   );
 });

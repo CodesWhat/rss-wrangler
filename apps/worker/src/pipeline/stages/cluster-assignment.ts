@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
-import type { UpsertedItem } from "./parse-and-upsert";
-import { simhash, hammingDistance, jaccardSimilarity, tokenize } from "./compute-features";
 import { classifyItem } from "./classify-folder";
+import { hammingDistance, jaccardSimilarity, simhash, tokenize } from "./compute-features";
+import type { UpsertedItem } from "./parse-and-upsert";
 
 // Thresholds for clustering
 const SIMHASH_MAX_DISTANCE = 10; // candidate pre-filter: Hamming distance
@@ -18,8 +18,8 @@ interface CandidateRow {
 
 export async function assignClusters(
   pool: Pool,
-  tenantId: string,
-  items: UpsertedItem[]
+  accountId: string,
+  items: UpsertedItem[],
 ): Promise<void> {
   const newItems = items.filter((i) => i.isNew);
   if (newItems.length === 0) return;
@@ -31,7 +31,7 @@ export async function assignClusters(
      FROM cluster_member
      WHERE item_id = ANY($1)
        AND tenant_id = $2`,
-    [itemIds, tenantId]
+    [itemIds, accountId],
   );
   const clusteredSet = new Set(alreadyClustered.rows.map((r) => r.item_id));
   const unclustered = newItems.filter((i) => !clusteredSet.has(i.id));
@@ -62,7 +62,7 @@ export async function assignClusters(
        AND c.tenant_id = $4
      ORDER BY i.published_at DESC
      LIMIT 2000`,
-    [windowStart.toISOString(), windowEnd.toISOString(), unclusteredIds, tenantId]
+    [windowStart.toISOString(), windowEnd.toISOString(), unclusteredIds, accountId],
   );
 
   // Group candidates by cluster
@@ -80,7 +80,7 @@ export async function assignClusters(
      FROM feed
      WHERE id = ANY($1)
        AND tenant_id = $2`,
-    [Array.from(feedIds), tenantId]
+    [Array.from(feedIds), accountId],
   );
   const feedWeights = new Map<string, string>();
   for (const row of feedWeightResult.rows) {
@@ -97,7 +97,7 @@ export async function assignClusters(
          AND status = 'approved'
          AND tenant_id = $2
        ORDER BY feed_id, confidence DESC`,
-      [Array.from(feedIds), tenantId]
+      [Array.from(feedIds), accountId],
     );
     for (const row of feedTopicResult.rows) {
       feedTopicMap.set(row.feed_id, row.topic_id);
@@ -110,8 +110,8 @@ export async function assignClusters(
   const repCandidates: { clusterId: string; item: UpsertedItem }[] = [];
 
   for (const item of unclustered) {
-    const itemTokens = tokenize(item.title + " " + (item.summary || ""));
-    const itemHash = simhash(item.title + " " + (item.summary || ""));
+    const itemTokens = tokenize(`${item.title} ${item.summary || ""}`);
+    const itemHash = simhash(`${item.title} ${item.summary || ""}`);
 
     let bestClusterId: string | null = null;
     let bestScore = 0;
@@ -162,13 +162,13 @@ export async function assignClusters(
     for (let i = 0; i < addToCluster.length; i++) {
       const entry = addToCluster[i]!;
       placeholders.push(`($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`);
-      values.push(tenantId, entry.clusterId, entry.itemId);
+      values.push(accountId, entry.clusterId, entry.itemId);
     }
     await pool.query(
       `INSERT INTO cluster_member (tenant_id, cluster_id, item_id)
        VALUES ${placeholders.join(", ")}
        ON CONFLICT (cluster_id, item_id) DO NOTHING`,
-      values
+      values,
     );
 
     // Batch update cluster sizes
@@ -189,7 +189,7 @@ export async function assignClusters(
        FROM (SELECT unnest($1::uuid[]) AS id, unnest($2::int[]) AS cnt) AS increment
        WHERE cluster.id = increment.id
          AND cluster.tenant_id = $3`,
-      [clusterUpdateIds, clusterUpdateCounts, tenantId]
+      [clusterUpdateIds, clusterUpdateCounts, accountId],
     );
   }
 
@@ -200,14 +200,16 @@ export async function assignClusters(
     for (let i = 0; i < newClusters.length; i++) {
       const entry = newClusters[i]!;
       const offset = i * 4;
-      clusterPlaceholders.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, 1)`);
-      clusterValues.push(tenantId, entry.item.id, entry.folderId, entry.topicId);
+      clusterPlaceholders.push(
+        `($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4}, 1)`,
+      );
+      clusterValues.push(accountId, entry.item.id, entry.folderId, entry.topicId);
     }
     const newClusterResult = await pool.query<{ id: string; rep_item_id: string }>(
       `INSERT INTO cluster (tenant_id, rep_item_id, folder_id, topic_id, size)
        VALUES ${clusterPlaceholders.join(", ")}
        RETURNING id, rep_item_id`,
-      clusterValues
+      clusterValues,
     );
 
     // Batch insert cluster_member rows for new clusters
@@ -217,12 +219,12 @@ export async function assignClusters(
       for (let i = 0; i < newClusterResult.rows.length; i++) {
         const row = newClusterResult.rows[i]!;
         memberPlaceholders.push(`($${i * 3 + 1}, $${i * 3 + 2}, $${i * 3 + 3})`);
-        memberValues.push(tenantId, row.id, row.rep_item_id);
+        memberValues.push(accountId, row.id, row.rep_item_id);
       }
       await pool.query(
         `INSERT INTO cluster_member (tenant_id, cluster_id, item_id)
          VALUES ${memberPlaceholders.join(", ")}`,
-        memberValues
+        memberValues,
       );
     }
   }
@@ -238,7 +240,7 @@ export async function assignClusters(
        JOIN feed f ON f.id = i.feed_id
        WHERE c.id = ANY($1)
          AND c.tenant_id = $2`,
-      [affectedClusterIds, tenantId]
+      [affectedClusterIds, accountId],
     );
     const currentRepWeights = new Map<string, string>();
     for (const row of currentReps.rows) {
@@ -260,7 +262,7 @@ export async function assignClusters(
            SET rep_item_id = $2, updated_at = NOW()
            WHERE id = $1
              AND tenant_id = $3`,
-          [clusterId, item.id, tenantId]
+          [clusterId, item.id, accountId],
         );
         // Update local state so subsequent items see the new rep weight
         currentRepWeights.set(clusterId, newWeight);

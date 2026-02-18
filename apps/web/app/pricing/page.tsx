@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import type { BillingInterval } from "@rss-wrangler/contracts";
 import Link from "next/link";
+import { useState } from "react";
 
 const hostedPlans = [
   {
@@ -11,7 +11,12 @@ const hostedPlans = [
     annualPrice: "$0",
     monthlyCadence: "forever",
     annualCadence: "forever",
-    features: ["Up to 50 feeds", "500 items/day ingestion", "Title/source search", "60-minute polling"]
+    features: [
+      "Up to 50 feeds",
+      "500 items/day ingestion",
+      "Title/source search",
+      "60-minute polling",
+    ],
   },
   {
     name: "Pro",
@@ -19,7 +24,12 @@ const hostedPlans = [
     annualPrice: "$70",
     monthlyCadence: "per month",
     annualCadence: "per year",
-    features: ["Unlimited feeds", "Full-text search", "10-minute polling", "Reader mode (hosted Pro gate)"]
+    features: [
+      "Unlimited feeds",
+      "Full-text search",
+      "10-minute polling",
+      "Reader mode (hosted Pro gate)",
+    ],
   },
   {
     name: "Pro + AI",
@@ -27,8 +37,13 @@ const hostedPlans = [
     annualPrice: "$140",
     monthlyCadence: "per month",
     annualCadence: "per year",
-    features: ["Everything in Pro", "AI summaries and digests", "AI-assisted ranking signals", "Advanced explainability tools"]
-  }
+    features: [
+      "Everything in Pro",
+      "AI summaries and digests",
+      "AI-assisted ranking signals",
+      "Advanced explainability tools",
+    ],
+  },
 ] as const;
 
 export default function PricingPage() {
@@ -42,7 +57,11 @@ export default function PricingPage() {
       </div>
 
       <section className="section-card">
-        <div className="layout-toggle billing-interval-toggle" role="tablist" aria-label="Pricing interval">
+        <div
+          className="layout-toggle billing-interval-toggle"
+          role="tablist"
+          aria-label="Pricing interval"
+        >
           <button
             type="button"
             className={`layout-toggle-btn button-small ${interval === "monthly" ? "button-active" : ""}`}
@@ -67,8 +86,12 @@ export default function PricingPage() {
           {hostedPlans.map((plan) => (
             <article key={plan.name} className="billing-plan-card">
               <div className="billing-plan-title">{plan.name}</div>
-              <div className="billing-plan-price">{interval === "annual" ? plan.annualPrice : plan.monthlyPrice}</div>
-              <p className="muted">{interval === "annual" ? plan.annualCadence : plan.monthlyCadence}</p>
+              <div className="billing-plan-price">
+                {interval === "annual" ? plan.annualPrice : plan.monthlyPrice}
+              </div>
+              <p className="muted">
+                {interval === "annual" ? plan.annualCadence : plan.monthlyCadence}
+              </p>
               <ul className="muted" style={{ margin: 0, paddingLeft: "1.1rem" }}>
                 {plan.features.map((feature) => (
                   <li key={feature}>{feature}</li>
@@ -78,7 +101,14 @@ export default function PricingPage() {
           ))}
         </div>
 
-        <div style={{ display: "flex", gap: "var(--sp-2)", flexWrap: "wrap", marginTop: "var(--sp-4)" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: "var(--sp-2)",
+            flexWrap: "wrap",
+            marginTop: "var(--sp-4)",
+          }}
+        >
           <Link href="/signup" className="button button-primary">
             Start free
           </Link>

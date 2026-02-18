@@ -1,4 +1,9 @@
-import type { AccountEntitlements, PlanId, PlanSubscriptionStatus, SearchMode } from "@rss-wrangler/contracts";
+import type {
+  AccountEntitlements,
+  PlanId,
+  PlanSubscriptionStatus,
+  SearchMode,
+} from "@rss-wrangler/contracts";
 
 type Queryable = {
   query: <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<{ rows: T[] }>;
@@ -16,20 +21,20 @@ const PLAN_DEFAULTS: Record<PlanId, PlanDefaults> = {
     feedLimit: 50,
     itemsPerDayLimit: 500,
     searchMode: "title_source",
-    minPollMinutes: 60
+    minPollMinutes: 60,
   },
   pro: {
     feedLimit: null,
     itemsPerDayLimit: null,
     searchMode: "full_text",
-    minPollMinutes: 10
+    minPollMinutes: 10,
   },
   pro_ai: {
     feedLimit: null,
     itemsPerDayLimit: null,
     searchMode: "full_text",
-    minPollMinutes: 10
-  }
+    minPollMinutes: 10,
+  },
 };
 
 function normalizePlanId(raw: string | null | undefined): PlanId {
@@ -48,7 +53,7 @@ function normalizePlanStatus(raw: string | null | undefined): PlanSubscriptionSt
 
 export async function getAccountEntitlements(
   client: Queryable,
-  tenantId: string
+  accountId: string,
 ): Promise<AccountEntitlements> {
   const planResult = await client.query<{
     plan_id: string;
@@ -60,14 +65,14 @@ export async function getAccountEntitlements(
      FROM tenant_plan_subscription
      WHERE tenant_id = $1
      LIMIT 1`,
-    [tenantId]
+    [accountId],
   );
 
   const feedCountResult = await client.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count
      FROM feed
      WHERE tenant_id = $1`,
-    [tenantId]
+    [accountId],
   );
 
   const usageResult = await client.query<{ usage_date: string; items_ingested_count: number }>(
@@ -76,11 +81,11 @@ export async function getAccountEntitlements(
      WHERE tenant_id = $1
        AND usage_date = CURRENT_DATE
      LIMIT 1`,
-    [tenantId]
+    [accountId],
   );
 
   const usageDateResult = await client.query<{ usage_date: string }>(
-    "SELECT CURRENT_DATE::text AS usage_date"
+    "SELECT CURRENT_DATE::text AS usage_date",
   );
 
   const planRow = planResult.rows[0];
@@ -92,15 +97,20 @@ export async function getAccountEntitlements(
     planId,
     subscriptionStatus: normalizePlanStatus(planRow?.status),
     trialEndsAt: planRow?.trial_ends_at ? planRow.trial_ends_at.toISOString() : null,
-    currentPeriodEndsAt: planRow?.current_period_ends_at ? planRow.current_period_ends_at.toISOString() : null,
+    currentPeriodEndsAt: planRow?.current_period_ends_at
+      ? planRow.current_period_ends_at.toISOString()
+      : null,
     feedLimit: defaults.feedLimit,
     itemsPerDayLimit: defaults.itemsPerDayLimit,
     searchMode: defaults.searchMode,
     minPollMinutes: defaults.minPollMinutes,
     usage: {
-      date: usage?.usage_date ?? usageDateResult.rows[0]?.usage_date ?? new Date().toISOString().slice(0, 10),
+      date:
+        usage?.usage_date ??
+        usageDateResult.rows[0]?.usage_date ??
+        new Date().toISOString().slice(0, 10),
       itemsIngested: usage?.items_ingested_count ?? 0,
-      feeds: Number.parseInt(feedCountResult.rows[0]?.count ?? "0", 10)
-    }
+      feeds: Number.parseInt(feedCountResult.rows[0]?.count ?? "0", 10),
+    },
   };
 }

@@ -61,7 +61,13 @@ describe("sendNewStoriesNotification", () => {
 
   it("returns {sent: 0, failed: 0} when no subscriptions exist", async () => {
     const pool = makePool([]);
-    const result = await sendNewStoriesNotification(pool, TENANT_ID, defaultConfig, 5, "Test headline");
+    const result = await sendNewStoriesNotification(
+      pool,
+      TENANT_ID,
+      defaultConfig,
+      5,
+      "Test headline",
+    );
     expect(result).toEqual({ sent: 0, failed: 0 });
   });
 
@@ -73,7 +79,13 @@ describe("sendNewStoriesNotification", () => {
     const pool = makePool(subs);
     mockSendNotification.mockResolvedValue({});
 
-    const result = await sendNewStoriesNotification(pool, TENANT_ID, defaultConfig, 3, "Breaking news");
+    const result = await sendNewStoriesNotification(
+      pool,
+      TENANT_ID,
+      defaultConfig,
+      3,
+      "Breaking news",
+    );
 
     expect(result).toEqual({ sent: 2, failed: 0 });
     expect(mockSendNotification).toHaveBeenCalledTimes(2);

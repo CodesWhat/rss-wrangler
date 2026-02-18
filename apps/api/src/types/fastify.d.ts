@@ -4,7 +4,7 @@ declare module "fastify" {
   interface FastifyRequest {
     authContext?: {
       userId: string;
-      tenantId: string;
+      accountId: string;
       role?: string;
     };
     dbClient?: PoolClient;
@@ -14,7 +14,7 @@ declare module "fastify" {
   interface FastifyInstance {
     verifyAccessToken: (
       request: import("fastify").FastifyRequest,
-      reply: import("fastify").FastifyReply
+      reply: import("fastify").FastifyReply,
     ) => Promise<void>;
     pg: Pool;
   }

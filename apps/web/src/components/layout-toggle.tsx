@@ -63,9 +63,33 @@ export function LayoutToggle({ layout, onChange }: LayoutToggleProps) {
       >
         {/* Compact icon */}
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-          <rect x="1" y="1" width="14" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.2" />
-          <rect x="1" y="6.5" width="14" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.2" />
-          <rect x="1" y="12" width="14" height="3" rx="0.5" stroke="currentColor" strokeWidth="1.2" />
+          <rect
+            x="1"
+            y="1"
+            width="14"
+            height="3"
+            rx="0.5"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          />
+          <rect
+            x="1"
+            y="6.5"
+            width="14"
+            height="3"
+            rx="0.5"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          />
+          <rect
+            x="1"
+            y="12"
+            width="14"
+            height="3"
+            rx="0.5"
+            stroke="currentColor"
+            strokeWidth="1.2"
+          />
         </svg>
       </button>
     </div>

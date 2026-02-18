@@ -5,7 +5,8 @@
   "license": "AGPL-3.0-only",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "tests/e2e"
   ],
   "scripts": {
     "dev:web": "npm run build -w @rss-wrangler/contracts && npm run dev -w @rss-wrangler/web",
@@ -22,14 +23,20 @@
     "test:coverage:policy": "npm run test:coverage && node scripts/check-coverage-policy.mjs",
     "debt:scan": "knip --include files,exports,duplicates,dependencies --reporter compact --no-exit-code",
     "db:migrate": "node scripts/run-migrations.mjs",
+    "seed:directory": "node scripts/seed-feed-directory.mjs",
     "orbstack:up": "docker compose -f infra/docker-compose.yml up --build -d",
     "orbstack:down": "docker compose -f infra/docker-compose.yml down",
     "orbstack:smoke": "bash scripts/orbstack-smoke.sh",
+    "selfhost:readiness": "node scripts/load/run-selfhost-readiness.mjs",
     "hosted:smoke": "node scripts/load/run-hosted-smoke.mjs",
+    "hosted:dogfood": "node scripts/load/run-hosted-dogfood-readiness.mjs",
     "backfill:enrichment": "tsx scripts/backfill-enrichment.ts",
     "push:vapid:keys": "node scripts/generate-vapid-keys.js",
     "hooks:install": "lefthook install",
-    "prepare": "lefthook install"
+    "prepare": "lefthook install",
+    "test:e2e": "npm run test -w @rss-wrangler/e2e",
+    "test:e2e:headed": "npm run test:headed -w @rss-wrangler/e2e",
+    "test:e2e:ui": "npm run test:ui -w @rss-wrangler/e2e"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.14",

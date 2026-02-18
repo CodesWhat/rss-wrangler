@@ -1,33 +1,32 @@
-import { randomBytes, randomUUID, createHash, timingSafeEqual } from "node:crypto";
-import type { FastifyInstance } from "fastify";
-import type { Pool, PoolClient } from "pg";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type {
   AccountDataExportStatus,
   AccountDeletionStatus,
-  CreateWorkspaceInviteRequest,
+  CreateMemberInviteRequest,
   ForgotPasswordRequest,
-  JoinWorkspaceRequest,
-  MembershipPolicy,
+  JoinAccountRequest,
+  Member,
+  MemberInvite,
   RequestAccountDeletion,
   ResendVerificationRequest,
   ResetPasswordRequest,
   SignupRequest,
   UserRole,
-  WorkspaceInvite,
-  WorkspaceMember
 } from "@rss-wrangler/contracts";
+import type { FastifyInstance } from "fastify";
+import type { Pool, PoolClient } from "pg";
 import type { ApiEnv } from "../config/env";
 import { createEmailService } from "./email-service";
 
 interface AccessTokenPayload {
   sub: string;
-  tenantId: string;
+  accountId: string;
   tokenType: "access";
 }
 
 interface RefreshTokenPayload {
   sub: string;
-  tenantId: string;
+  accountId: string;
   tokenType: "refresh";
   jti: string;
 }
@@ -47,7 +46,7 @@ interface UserAccountRow {
   password_hash: string;
 }
 
-const DEFAULT_TENANT_ID = "00000000-0000-0000-0000-000000000001";
+const DEFAULT_ACCOUNT_ID = "00000000-0000-0000-0000-000000000001";
 
 export function timingSafeStringEqual(left: string, right: string): boolean {
   const leftBuffer = Buffer.from(left);
@@ -61,17 +60,17 @@ export function timingSafeStringEqual(left: string, right: string): boolean {
 export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool) {
   const emailService = createEmailService(env, app.log);
 
-  async function withTenantClient<T>(
-    tenantId: string,
-    fn: (client: PoolClient) => Promise<T>
+  async function withAccountClient<T>(
+    accountId: string,
+    fn: (client: PoolClient) => Promise<T>,
   ): Promise<T> {
     const client = await pool.connect();
     try {
-      await client.query("SELECT set_config('app.tenant_id', $1, false)", [tenantId]);
+      await client.query("SELECT set_config('app.tenant_id', $1, false)", [accountId]);
       return await fn(client);
     } finally {
       try {
-        await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_TENANT_ID]);
+        await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_ACCOUNT_ID]);
       } catch {
         // Best effort reset.
       }
@@ -79,11 +78,11 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     }
   }
 
-  async function resolveTenantIdBySlug(tenantSlug: string): Promise<string | null> {
-    const normalized = normalizeTenantSlug(tenantSlug);
+  async function resolveAccountIdBySlug(accountSlug: string): Promise<string | null> {
+    const normalized = normalizeAccountSlug(accountSlug);
     const { rows } = await pool.query<{ id: string }>(
       "SELECT id FROM tenant WHERE slug = $1 LIMIT 1",
-      [normalized]
+      [normalized],
     );
     return rows[0]?.id ?? null;
   }
@@ -93,28 +92,28 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   }
 
   async function issueEmailVerificationToken(
-    tenantId: string,
-    userId: string
+    accountId: string,
+    userId: string,
   ): Promise<{ token: string; expiresAt: Date }> {
     const token = randomBytes(32).toString("hex");
     const tokenHash = hashToken(token);
     const ttlSeconds = parseDurationSeconds(env.EMAIL_VERIFICATION_TOKEN_TTL);
 
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       await client.query(
         `UPDATE auth_email_verification_token
          SET consumed_at = NOW()
          WHERE tenant_id = $1
            AND user_id = $2
            AND consumed_at IS NULL`,
-        [tenantId, userId]
+        [accountId, userId],
       );
 
       return client.query<{ expires_at: Date }>(
         `INSERT INTO auth_email_verification_token (tenant_id, user_id, token_hash, expires_at)
          VALUES ($1, $2, $3, NOW() + $4::interval)
          RETURNING expires_at`,
-        [tenantId, userId, tokenHash, `${ttlSeconds} seconds`]
+        [accountId, userId, tokenHash, `${ttlSeconds} seconds`],
       );
     });
 
@@ -126,12 +125,12 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   }
 
   async function sendVerificationEmail(
-    tenantId: string,
+    accountId: string,
     userId: string,
     email: string,
-    username: string
+    username: string,
   ): Promise<void> {
-    const issued = await issueEmailVerificationToken(tenantId, userId);
+    const issued = await issueEmailVerificationToken(accountId, userId);
     const verificationUrl = buildAppUrl(`/verify-email?token=${encodeURIComponent(issued.token)}`);
     const expires = issued.expiresAt.toISOString();
 
@@ -140,39 +139,36 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         to: email,
         subject: "Verify your RSS Wrangler email",
         text: `Hi ${username},\n\nVerify your email by opening this link:\n${verificationUrl}\n\nThis link expires at ${expires}.`,
-        html: `<p>Hi ${escapeHtml(username)},</p><p>Verify your email by opening this link:</p><p><a href="${verificationUrl}">${verificationUrl}</a></p><p>This link expires at ${expires}.</p>`
+        html: `<p>Hi ${escapeHtml(username)},</p><p>Verify your email by opening this link:</p><p><a href="${verificationUrl}">${verificationUrl}</a></p><p>This link expires at ${expires}.</p>`,
       });
     } catch (error) {
-      app.log.error(
-        { err: error, tenantId, userId, email },
-        "failed to send verification email"
-      );
+      app.log.error({ err: error, accountId, userId, email }, "failed to send verification email");
     }
   }
 
   async function issuePasswordResetToken(
-    tenantId: string,
-    userId: string
+    accountId: string,
+    userId: string,
   ): Promise<{ token: string; expiresAt: Date }> {
     const token = randomBytes(32).toString("hex");
     const tokenHash = hashToken(token);
     const ttlSeconds = parseDurationSeconds(env.PASSWORD_RESET_TOKEN_TTL);
 
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       await client.query(
         `UPDATE auth_password_reset_token
          SET consumed_at = NOW()
          WHERE tenant_id = $1
            AND user_id = $2
            AND consumed_at IS NULL`,
-        [tenantId, userId]
+        [accountId, userId],
       );
 
       return client.query<{ expires_at: Date }>(
         `INSERT INTO auth_password_reset_token (tenant_id, user_id, token_hash, expires_at)
          VALUES ($1, $2, $3, NOW() + $4::interval)
          RETURNING expires_at`,
-        [tenantId, userId, tokenHash, `${ttlSeconds} seconds`]
+        [accountId, userId, tokenHash, `${ttlSeconds} seconds`],
       );
     });
 
@@ -184,12 +180,12 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   }
 
   async function sendPasswordResetEmail(
-    tenantId: string,
+    accountId: string,
     userId: string,
     email: string,
-    username: string
+    username: string,
   ): Promise<void> {
-    const issued = await issuePasswordResetToken(tenantId, userId);
+    const issued = await issuePasswordResetToken(accountId, userId);
     const resetUrl = buildAppUrl(`/reset-password?token=${encodeURIComponent(issued.token)}`);
     const expires = issued.expiresAt.toISOString();
 
@@ -198,17 +194,21 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         to: email,
         subject: "Reset your RSS Wrangler password",
         text: `Hi ${username},\n\nReset your password by opening this link:\n${resetUrl}\n\nThis link expires at ${expires}.`,
-        html: `<p>Hi ${escapeHtml(username)},</p><p>Reset your password by opening this link:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires at ${expires}.</p>`
+        html: `<p>Hi ${escapeHtml(username)},</p><p>Reset your password by opening this link:</p><p><a href="${resetUrl}">${resetUrl}</a></p><p>This link expires at ${expires}.</p>`,
       });
     } catch (error) {
       app.log.error(
-        { err: error, tenantId, userId, email },
-        "failed to send password reset email"
+        { err: error, accountId, userId, email },
+        "failed to send password reset email",
       );
     }
   }
 
-  async function issueTokens(userId: string, _username: string, tenantId: string): Promise<TokenSet> {
+  async function issueTokens(
+    userId: string,
+    _username: string,
+    accountId: string,
+  ): Promise<TokenSet> {
     const sessionId = randomUUID();
     const refreshTtlSeconds = parseDurationSeconds(env.REFRESH_TOKEN_TTL);
     const accessTtlSeconds = parseDurationSeconds(env.ACCESS_TOKEN_TTL);
@@ -216,88 +216,85 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     const accessToken = await app.jwt.sign(
       {
         sub: userId,
-        tenantId,
-        tokenType: "access"
+        accountId,
+        tokenType: "access",
       } satisfies AccessTokenPayload,
       {
-        expiresIn: env.ACCESS_TOKEN_TTL
-      }
+        expiresIn: env.ACCESS_TOKEN_TTL,
+      },
     );
 
     const refreshToken = await app.jwt.sign(
       {
         sub: userId,
-        tenantId,
+        accountId,
         tokenType: "refresh",
-        jti: sessionId
+        jti: sessionId,
       } satisfies RefreshTokenPayload,
       {
-        expiresIn: env.REFRESH_TOKEN_TTL
-      }
+        expiresIn: env.REFRESH_TOKEN_TTL,
+      },
     );
 
     // Store session in DB
     const tokenHash = hashToken(refreshToken);
-    await withTenantClient(tenantId, async (client) => {
+    await withAccountClient(accountId, async (client) => {
       await client.query(
         `INSERT INTO auth_session (id, tenant_id, user_id, refresh_token_hash, expires_at, last_seen_at)
          VALUES ($1, $2, $3, $4, NOW() + $5::interval, NOW())`,
-        [sessionId, tenantId, userId, tokenHash, `${refreshTtlSeconds} seconds`]
+        [sessionId, accountId, userId, tokenHash, `${refreshTtlSeconds} seconds`],
       );
 
       // Update last_login_at
       await client.query(
         "UPDATE user_account SET last_login_at = NOW() WHERE id = $1 AND tenant_id = $2",
-        [userId, tenantId]
+        [userId, accountId],
       );
     });
 
     return {
       accessToken,
       refreshToken,
-      expiresInSeconds: accessTtlSeconds
+      expiresInSeconds: accessTtlSeconds,
     };
   }
 
   async function login(
     username: string,
     password: string,
-    tenantSlug = "default"
-  ): Promise<TokenSet | "email_not_verified" | "pending_approval" | "suspended" | null> {
-    const tenantId = await resolveTenantIdBySlug(tenantSlug);
-    if (!tenantId) {
+    accountSlug = "default",
+  ): Promise<TokenSet | "email_not_verified" | "suspended" | null> {
+    const accountId = await resolveAccountIdBySlug(accountSlug);
+    if (!accountId) {
       return null;
     }
 
     // First try DB-backed user lookup
-    const rows = await withTenantClient(tenantId, async (client) => {
+    const rows = await withAccountClient(accountId, async (client) => {
       const result = await client.query<UserAccountRow & { status: string }>(
         `SELECT id, tenant_id, username, email, email_verified_at, password_hash, status
          FROM user_account
          WHERE username = $1
            AND tenant_id = $2`,
-        [username, tenantId]
+        [username, accountId],
       );
       return result.rows;
     });
     if (rows.length > 0) {
       const user = rows[0] as UserAccountRow & { status: string };
       // Verify password using pgcrypto's crypt function
-      const verifyResult = await withTenantClient(tenantId, async (client) => {
+      const verifyResult = await withAccountClient(accountId, async (client) => {
         return client.query(
           `SELECT (password_hash = crypt($1, password_hash)) AS valid
            FROM user_account
            WHERE id = $2
              AND tenant_id = $3`,
-          [password, user.id, tenantId]
+          [password, user.id, accountId],
         );
       });
       const isValid = (verifyResult.rows[0] as { valid: boolean } | undefined)?.valid === true;
       if (!isValid) {
         return null;
-      }
-      if (user.status === "pending_approval") {
-        return "pending_approval";
       }
       if (user.status === "suspended") {
         return "suspended";
@@ -308,27 +305,26 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return issueTokens(user.id, user.username, user.tenant_id);
     }
 
-    // Fallback to env-based auth for default-tenant bootstrapping.
-    const countResult = await withTenantClient(tenantId, async (client) => {
-      return client.query(
-        "SELECT COUNT(*) AS cnt FROM user_account WHERE tenant_id = $1",
-        [tenantId]
-      );
+    // Fallback to env-based auth for default-account bootstrapping.
+    const countResult = await withAccountClient(accountId, async (client) => {
+      return client.query("SELECT COUNT(*) AS cnt FROM user_account WHERE tenant_id = $1", [
+        accountId,
+      ]);
     });
     const userCount = Number((countResult.rows[0] as { cnt: string } | undefined)?.cnt ?? "0");
     if (
-      tenantId === DEFAULT_TENANT_ID &&
+      accountId === DEFAULT_ACCOUNT_ID &&
       userCount === 0 &&
       timingSafeStringEqual(username, env.AUTH_USERNAME) &&
       timingSafeStringEqual(password, env.AUTH_PASSWORD)
     ) {
       // Auto-create the admin user in the DB using pgcrypto
-      const insertResult = await withTenantClient(tenantId, async (client) => {
+      const insertResult = await withAccountClient(accountId, async (client) => {
         return client.query(
           `INSERT INTO user_account (tenant_id, username, password_hash)
            VALUES ($1, $2, crypt($3, gen_salt('bf')))
            RETURNING id, tenant_id, username`,
-          [tenantId, username, password]
+          [accountId, username, password],
         );
       });
       const newUser = insertResult.rows[0] as { id: string; tenant_id: string; username: string };
@@ -339,35 +335,37 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   }
 
   async function signup(
-    payload: SignupRequest
-  ): Promise<TokenSet | "tenant_slug_taken" | "username_taken" | "email_taken" | "verification_required"> {
-    const tenantSlug = normalizeTenantSlug(payload.tenantSlug);
-    const tenantName = payload.tenantName.trim();
+    payload: SignupRequest,
+  ): Promise<
+    TokenSet | "account_slug_taken" | "username_taken" | "email_taken" | "verification_required"
+  > {
+    const accountSlug = normalizeAccountSlug(payload.accountSlug ?? payload.tenantSlug);
+    const accountName = (payload.accountName ?? payload.tenantName).trim();
     const username = payload.username.trim();
     const email = payload.email.trim().toLowerCase();
 
-    const existingTenantId = await resolveTenantIdBySlug(tenantSlug);
-    if (existingTenantId) {
-      return "tenant_slug_taken";
+    const existingAccountId = await resolveAccountIdBySlug(accountSlug);
+    if (existingAccountId) {
+      return "account_slug_taken";
     }
 
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_TENANT_ID]);
+      await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_ACCOUNT_ID]);
 
-      const tenantInsert = await client.query<{ id: string }>(
+      const accountInsert = await client.query<{ id: string }>(
         `INSERT INTO tenant (slug, name)
          VALUES ($1, $2)
          RETURNING id`,
-        [tenantSlug, tenantName]
+        [accountSlug, accountName],
       );
-      const tenantId = tenantInsert.rows[0]?.id;
-      if (!tenantId) {
-        throw new Error("tenant creation failed");
+      const accountId = accountInsert.rows[0]?.id;
+      if (!accountId) {
+        throw new Error("account creation failed");
       }
 
-      await client.query("SELECT set_config('app.tenant_id', $1, false)", [tenantId]);
+      await client.query("SELECT set_config('app.tenant_id', $1, false)", [accountId]);
 
       const existingUser = await client.query(
         `SELECT id
@@ -375,7 +373,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE tenant_id = $1
            AND username = $2
          LIMIT 1`,
-        [tenantId, username]
+        [accountId, username],
       );
       if (existingUser.rows.length > 0) {
         await client.query("ROLLBACK");
@@ -388,7 +386,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE tenant_id = $1
            AND lower(email) = $2
          LIMIT 1`,
-        [tenantId, email]
+        [accountId, email],
       );
       if (existingEmail.rows.length > 0) {
         await client.query("ROLLBACK");
@@ -399,7 +397,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         `INSERT INTO user_account (tenant_id, username, email, password_hash, role)
          VALUES ($1, $2, $3, crypt($4, gen_salt('bf')), 'owner')
          RETURNING id`,
-        [tenantId, username, email, payload.password]
+        [accountId, username, email, payload.password],
       );
 
       await client.query("COMMIT");
@@ -409,13 +407,13 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         throw new Error("user creation failed");
       }
 
-      await sendVerificationEmail(tenantId, userId, email, username);
+      await sendVerificationEmail(accountId, userId, email, username);
 
       if (env.REQUIRE_EMAIL_VERIFICATION) {
         return "verification_required";
       }
 
-      return issueTokens(userId, username, tenantId);
+      return issueTokens(userId, username, accountId);
     } catch (err) {
       try {
         await client.query("ROLLBACK");
@@ -424,7 +422,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       }
       const pgErr = err as { code?: string; constraint?: string };
       if (pgErr.code === "23505" && pgErr.constraint === "tenant_slug_key") {
-        return "tenant_slug_taken";
+        return "account_slug_taken";
       }
       if (pgErr.code === "23505" && pgErr.constraint === "user_account_tenant_username_uniq") {
         return "username_taken";
@@ -435,7 +433,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       throw err;
     } finally {
       try {
-        await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_TENANT_ID]);
+        await client.query("SELECT set_config('app.tenant_id', $1, false)", [DEFAULT_ACCOUNT_ID]);
       } catch {
         // Best effort reset.
       }
@@ -443,21 +441,20 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     }
   }
 
-  async function joinWorkspace(
-    payload: JoinWorkspaceRequest
+  async function joinAccount(
+    payload: JoinAccountRequest,
   ): Promise<
     | TokenSet
-    | "tenant_not_found"
+    | "account_not_found"
     | "invite_required"
     | "invalid_invite_code"
     | "username_taken"
     | "email_taken"
     | "verification_required"
-    | "pending_approval"
   > {
-    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug ?? "default");
-    if (!tenantId) {
-      return "tenant_not_found";
+    const accountId = await resolveAccountIdBySlug(payload.accountSlug ?? "default");
+    if (!accountId) {
+      return "account_not_found";
     }
 
     const username = payload.username.trim();
@@ -465,24 +462,25 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     const inviteCode = payload.inviteCode?.trim();
 
     try {
-      const existingCountResult = await withTenantClient(tenantId, async (client) => {
+      const existingCountResult = await withAccountClient(accountId, async (client) => {
         return client.query<{ cnt: string }>(
           `SELECT COUNT(*)::text AS cnt
            FROM user_account
            WHERE tenant_id = $1`,
-          [tenantId]
+          [accountId],
         );
       });
       const existingCount = Number.parseInt(existingCountResult.rows[0]?.cnt ?? "0", 10);
+      const creatingOwner = existingCount === 0;
 
       let inviteId: string | null = null;
-      if (existingCount > 0) {
+      if (!creatingOwner) {
         if (!inviteCode) {
           return "invite_required";
         }
 
         const inviteHash = hashToken(inviteCode);
-        const inviteResult = await withTenantClient(tenantId, async (client) => {
+        const inviteResult = await withAccountClient(accountId, async (client) => {
           // Normalize expired pending invites before lookup.
           await client.query(
             `UPDATE workspace_invite
@@ -490,7 +488,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
              WHERE tenant_id = $1
                AND status = 'pending'
                AND expires_at <= NOW()`,
-            [tenantId]
+            [accountId],
           );
 
           return client.query<{
@@ -504,7 +502,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
                AND status = 'pending'
                AND expires_at > NOW()
              LIMIT 1`,
-            [tenantId, inviteHash]
+            [accountId, inviteHash],
           );
         });
 
@@ -520,56 +518,42 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         inviteId = invite.id;
       }
 
-      const existingUser = await withTenantClient(tenantId, async (client) => {
+      const existingUser = await withAccountClient(accountId, async (client) => {
         return client.query(
           `SELECT id
            FROM user_account
            WHERE tenant_id = $1
              AND username = $2
            LIMIT 1`,
-          [tenantId, username]
+          [accountId, username],
         );
       });
       if (existingUser.rows.length > 0) {
         return "username_taken";
       }
 
-      const existingEmail = await withTenantClient(tenantId, async (client) => {
+      const existingEmail = await withAccountClient(accountId, async (client) => {
         return client.query(
           `SELECT id
            FROM user_account
            WHERE tenant_id = $1
              AND lower(email) = $2
            LIMIT 1`,
-          [tenantId, email]
+          [accountId, email],
         );
       });
       if (existingEmail.rows.length > 0) {
         return "email_taken";
       }
 
-      // Look up membership policy for the tenant
-      const policyResult = await withTenantClient(tenantId, async (client) => {
-        return client.query<{ membership_policy: string }>(
-          `SELECT membership_policy
-           FROM tenant
-           WHERE id = $1
-           LIMIT 1`,
-          [tenantId]
-        );
-      });
-      const membershipPolicy = policyResult.rows[0]?.membership_policy ?? "invite_only";
+      const userRole: UserRole = creatingOwner ? "owner" : "member";
 
-      // Determine initial user status based on policy
-      const needsApproval = membershipPolicy === "approval_required";
-      const userStatus = needsApproval ? "pending_approval" : "active";
-
-      const insert = await withTenantClient(tenantId, async (client) => {
+      const insert = await withAccountClient(accountId, async (client) => {
         return client.query<{ id: string }>(
           `INSERT INTO user_account (tenant_id, username, email, password_hash, role, status)
-           VALUES ($1, $2, $3, crypt($4, gen_salt('bf')), 'member', $5)
+           VALUES ($1, $2, $3, crypt($4, gen_salt('bf')), $5, 'active')
            RETURNING id`,
-          [tenantId, username, email, payload.password, userStatus]
+          [accountId, username, email, payload.password, userRole],
         );
       });
 
@@ -579,7 +563,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       }
 
       if (inviteId) {
-        await withTenantClient(tenantId, async (client) => {
+        await withAccountClient(accountId, async (client) => {
           await client.query(
             `UPDATE workspace_invite
              SET status = 'consumed',
@@ -589,22 +573,18 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
                AND tenant_id = $2
                AND status = 'pending'
                AND expires_at > NOW()`,
-            [inviteId, tenantId, userId]
+            [inviteId, accountId, userId],
           );
         });
       }
 
-      await sendVerificationEmail(tenantId, userId, email, username);
-
-      if (needsApproval) {
-        return "pending_approval";
-      }
+      await sendVerificationEmail(accountId, userId, email, username);
 
       if (env.REQUIRE_EMAIL_VERIFICATION) {
         return "verification_required";
       }
 
-      return issueTokens(userId, username, tenantId);
+      return issueTokens(userId, username, accountId);
     } catch (err) {
       const pgErr = err as { code?: string; constraint?: string };
       if (pgErr.code === "23505" && pgErr.constraint === "user_account_tenant_username_uniq") {
@@ -617,12 +597,12 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     }
   }
 
-  async function createWorkspaceInvite(
+  async function createMemberInvite(
     userId: string,
-    tenantId: string,
-    payload: CreateWorkspaceInviteRequest
-  ): Promise<WorkspaceInvite | "not_owner"> {
-    const actorRole = await getUserRole(userId, tenantId);
+    accountId: string,
+    payload: CreateMemberInviteRequest,
+  ): Promise<MemberInvite | "not_owner"> {
+    const actorRole = await getUserRole(userId, accountId);
     if (actorRole !== "owner") {
       return "not_owner";
     }
@@ -631,21 +611,21 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     const inviteCodeHash = hashToken(inviteCode);
     const invitedEmail = payload.email?.trim().toLowerCase() ?? null;
 
-    const tenantResult = await withTenantClient(tenantId, async (client) => {
+    const accountResult = await withAccountClient(accountId, async (client) => {
       return client.query<{ slug: string }>(
         `SELECT slug
          FROM tenant
          WHERE id = $1
          LIMIT 1`,
-        [tenantId]
+        [accountId],
       );
     });
-    const tenantSlug = tenantResult.rows[0]?.slug;
-    if (!tenantSlug) {
-      throw new Error("tenant not found for invite");
+    const accountSlug = accountResult.rows[0]?.slug;
+    if (!accountSlug) {
+      throw new Error("account not found for invite");
     }
 
-    const insert = await withTenantClient(tenantId, async (client) => {
+    const insert = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         email: string | null;
@@ -672,32 +652,38 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            NOW() + ($5::text || ' days')::interval
          )
          RETURNING id, email, status, created_at, expires_at, consumed_at, revoked_at`,
-        [tenantId, userId, inviteCodeHash, invitedEmail, payload.expiresInDays]
+        [accountId, userId, inviteCodeHash, invitedEmail, payload.expiresInDays],
       );
     });
 
     const row = insert.rows[0];
     if (!row) {
-      throw new Error("failed to create workspace invite");
+      throw new Error("failed to create member invite");
     }
 
     const inviteUrl = buildAppUrl(
-      `/join?tenant=${encodeURIComponent(tenantSlug)}&invite=${encodeURIComponent(inviteCode)}`
+      `/join?tenant=${encodeURIComponent(accountSlug)}&invite=${encodeURIComponent(inviteCode)}`,
     );
 
-    return toWorkspaceInvite(row, inviteCode, inviteUrl);
+    return toMemberInvite(row, inviteCode, inviteUrl);
   }
 
-  async function listWorkspaceInvites(userId: string, tenantId: string): Promise<WorkspaceInvite[]> {
-    void userId;
-    const result = await withTenantClient(tenantId, async (client) => {
+  async function listMemberInvites(
+    userId: string,
+    accountId: string,
+  ): Promise<MemberInvite[] | "not_owner"> {
+    const actorRole = await getUserRole(userId, accountId);
+    if (actorRole !== "owner") {
+      return "not_owner";
+    }
+    const result = await withAccountClient(accountId, async (client) => {
       await client.query(
         `UPDATE workspace_invite
          SET status = 'expired'
          WHERE tenant_id = $1
            AND status = 'pending'
            AND expires_at <= NOW()`,
-        [tenantId]
+        [accountId],
       );
 
       return client.query<{
@@ -714,24 +700,24 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE tenant_id = $1
          ORDER BY created_at DESC
          LIMIT 100`,
-        [tenantId]
+        [accountId],
       );
     });
 
-    return result.rows.map((row) => toWorkspaceInvite(row));
+    return result.rows.map((row) => toMemberInvite(row));
   }
 
-  async function revokeWorkspaceInvite(
+  async function revokeMemberInvite(
     userId: string,
-    tenantId: string,
-    inviteId: string
-  ): Promise<WorkspaceInvite | "not_owner" | null> {
-    const actorRole = await getUserRole(userId, tenantId);
+    accountId: string,
+    inviteId: string,
+  ): Promise<MemberInvite | "not_owner" | null> {
+    const actorRole = await getUserRole(userId, accountId);
     if (actorRole !== "owner") {
       return "not_owner";
     }
 
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         email: string | null;
@@ -749,32 +735,32 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND tenant_id = $2
            AND status = 'pending'
          RETURNING id, email, status, created_at, expires_at, consumed_at, revoked_at`,
-        [inviteId, tenantId, userId]
+        [inviteId, accountId, userId],
       );
     });
 
     const row = result.rows[0];
-    return row ? toWorkspaceInvite(row) : null;
+    return row ? toMemberInvite(row) : null;
   }
 
   async function changePassword(
     userId: string,
-    tenantId: string,
+    accountId: string,
     currentPassword: string,
-    newPassword: string
+    newPassword: string,
   ): Promise<"ok" | "invalid_current_password" | "same_password" | "user_not_found"> {
     if (currentPassword === newPassword) {
       return "same_password";
     }
 
-    const userResult = await withTenantClient(tenantId, async (client) => {
+    const userResult = await withAccountClient(accountId, async (client) => {
       return client.query<{ password_hash: string }>(
         `SELECT password_hash
          FROM user_account
          WHERE id = $1
            AND tenant_id = $2
          LIMIT 1`,
-        [userId, tenantId]
+        [userId, accountId],
       );
     });
 
@@ -782,13 +768,13 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "user_not_found";
     }
 
-    const verifyResult = await withTenantClient(tenantId, async (client) => {
+    const verifyResult = await withAccountClient(accountId, async (client) => {
       return client.query<{ valid: boolean }>(
         `SELECT (password_hash = crypt($1, password_hash)) AS valid
          FROM user_account
          WHERE id = $2
            AND tenant_id = $3`,
-        [currentPassword, userId, tenantId]
+        [currentPassword, userId, accountId],
       );
     });
 
@@ -797,13 +783,13 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "invalid_current_password";
     }
 
-    await withTenantClient(tenantId, async (client) => {
+    await withAccountClient(accountId, async (client) => {
       await client.query(
         `UPDATE user_account
          SET password_hash = crypt($1, gen_salt('bf'))
          WHERE id = $2
            AND tenant_id = $3`,
-        [newPassword, userId, tenantId]
+        [newPassword, userId, accountId],
       );
 
       await client.query(
@@ -812,7 +798,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE user_id = $1
            AND tenant_id = $2
            AND revoked_at IS NULL`,
-        [userId, tenantId]
+        [userId, accountId],
       );
     });
 
@@ -821,9 +807,9 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
   async function getAccountDeletionStatus(
     userId: string,
-    tenantId: string
+    accountId: string,
   ): Promise<AccountDeletionStatus | null> {
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         status: "pending" | "cancelled" | "completed";
@@ -837,7 +823,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND user_id = $2
          ORDER BY requested_at DESC
          LIMIT 1`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -851,22 +837,22 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       status: row.status,
       requestedAt: row.requested_at.toISOString(),
       cancelledAt: row.cancelled_at?.toISOString() ?? null,
-      completedAt: row.completed_at?.toISOString() ?? null
+      completedAt: row.completed_at?.toISOString() ?? null,
     };
   }
 
   async function requestAccountDeletion(
     userId: string,
-    tenantId: string,
-    payload: RequestAccountDeletion
+    accountId: string,
+    payload: RequestAccountDeletion,
   ): Promise<"invalid_password" | AccountDeletionStatus> {
-    const verifyResult = await withTenantClient(tenantId, async (client) => {
+    const verifyResult = await withAccountClient(accountId, async (client) => {
       return client.query<{ valid: boolean }>(
         `SELECT (password_hash = crypt($1, password_hash)) AS valid
          FROM user_account
          WHERE id = $2
            AND tenant_id = $3`,
-        [payload.password, userId, tenantId]
+        [payload.password, userId, accountId],
       );
     });
 
@@ -874,7 +860,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "invalid_password";
     }
 
-    const existing = await withTenantClient(tenantId, async (client) => {
+    const existing = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         status: "pending" | "cancelled" | "completed";
@@ -889,7 +875,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND status = 'pending'
          ORDER BY requested_at DESC
          LIMIT 1`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -900,11 +886,11 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         status: row.status,
         requestedAt: row.requested_at.toISOString(),
         cancelledAt: row.cancelled_at?.toISOString() ?? null,
-        completedAt: row.completed_at?.toISOString() ?? null
+        completedAt: row.completed_at?.toISOString() ?? null,
       };
     }
 
-    const insert = await withTenantClient(tenantId, async (client) => {
+    const insert = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         status: "pending" | "cancelled" | "completed";
@@ -915,7 +901,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         `INSERT INTO account_deletion_request (tenant_id, user_id, status)
          VALUES ($1, $2, 'pending')
          RETURNING id, status, requested_at, cancelled_at, completed_at`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -929,15 +915,15 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       status: row.status,
       requestedAt: row.requested_at.toISOString(),
       cancelledAt: row.cancelled_at?.toISOString() ?? null,
-      completedAt: row.completed_at?.toISOString() ?? null
+      completedAt: row.completed_at?.toISOString() ?? null,
     };
   }
 
   async function cancelAccountDeletion(
     userId: string,
-    tenantId: string
+    accountId: string,
   ): Promise<AccountDeletionStatus | null> {
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         status: "pending" | "cancelled" | "completed";
@@ -952,7 +938,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND user_id = $2
            AND status = 'pending'
          RETURNING id, status, requested_at, cancelled_at, completed_at`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -966,15 +952,15 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       status: row.status,
       requestedAt: row.requested_at.toISOString(),
       cancelledAt: row.cancelled_at?.toISOString() ?? null,
-      completedAt: row.completed_at?.toISOString() ?? null
+      completedAt: row.completed_at?.toISOString() ?? null,
     };
   }
 
   async function getAccountDataExportStatus(
     userId: string,
-    tenantId: string
+    accountId: string,
   ): Promise<AccountDataExportStatus | null> {
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         status: "pending" | "processing" | "completed" | "failed";
@@ -991,7 +977,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND user_id = $2
          ORDER BY requested_at DESC
          LIMIT 1`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -1001,9 +987,9 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
   async function requestAccountDataExport(
     userId: string,
-    tenantId: string
+    accountId: string,
   ): Promise<AccountDataExportStatus> {
-    const active = await withTenantClient(tenantId, async (client) => {
+    const active = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         status: "pending" | "processing" | "completed" | "failed";
@@ -1021,7 +1007,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND status IN ('pending', 'processing')
          ORDER BY requested_at DESC
          LIMIT 1`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -1029,7 +1015,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return toAccountDataExportStatus(active.rows[0]);
     }
 
-    const insert = await withTenantClient(tenantId, async (client) => {
+    const insert = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         status: "pending" | "processing" | "completed" | "failed";
@@ -1043,7 +1029,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         `INSERT INTO account_data_export_request (tenant_id, user_id, status)
          VALUES ($1, $2, 'pending')
          RETURNING id, status, requested_at, started_at, completed_at, failed_at, error_message, file_size_bytes`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -1052,16 +1038,16 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       throw new Error("failed to create account data export request");
     }
 
-    void processAccountDataExportRequest(tenantId, userId, row.id);
+    void processAccountDataExportRequest(accountId, userId, row.id);
     return toAccountDataExportStatus(row);
   }
 
   async function processAccountDataExportRequest(
-    tenantId: string,
+    accountId: string,
     userId: string,
-    requestId: string
+    requestId: string,
   ): Promise<void> {
-    const claimed = await withTenantClient(tenantId, async (client) => {
+    const claimed = await withAccountClient(accountId, async (client) => {
       return client.query<{ id: string }>(
         `UPDATE account_data_export_request
          SET status = 'processing',
@@ -1073,7 +1059,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND user_id = $3
            AND status = 'pending'
          RETURNING id`,
-        [requestId, tenantId, userId]
+        [requestId, accountId, userId],
       );
     });
 
@@ -1082,11 +1068,11 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     }
 
     try {
-      const exportPayload = await buildAccountDataExportPayload(tenantId, userId);
+      const exportPayload = await buildAccountDataExportPayload(accountId, userId);
       const payloadJson = JSON.stringify(exportPayload);
       const fileSizeBytes = Buffer.byteLength(payloadJson, "utf8");
 
-      await withTenantClient(tenantId, async (client) => {
+      await withAccountClient(accountId, async (client) => {
         await client.query(
           `UPDATE account_data_export_request
            SET status = 'completed',
@@ -1098,17 +1084,17 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            WHERE id = $1
              AND tenant_id = $2
              AND user_id = $3`,
-          [requestId, tenantId, userId, payloadJson, fileSizeBytes]
+          [requestId, accountId, userId, payloadJson, fileSizeBytes],
         );
       });
 
       app.log.info(
-        { tenantId, userId, requestId, fileSizeBytes },
-        "account data export completed"
+        { accountId, userId, requestId, fileSizeBytes },
+        "account data export completed",
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown error";
-      await withTenantClient(tenantId, async (client) => {
+      await withAccountClient(accountId, async (client) => {
         await client.query(
           `UPDATE account_data_export_request
            SET status = 'failed',
@@ -1117,22 +1103,19 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            WHERE id = $1
              AND tenant_id = $2
              AND user_id = $3`,
-          [requestId, tenantId, userId, message.slice(0, 500)]
+          [requestId, accountId, userId, message.slice(0, 500)],
         );
       });
 
-      app.log.error(
-        { err: error, tenantId, userId, requestId },
-        "account data export failed"
-      );
+      app.log.error({ err: error, accountId, userId, requestId }, "account data export failed");
     }
   }
 
   async function buildAccountDataExportPayload(
-    tenantId: string,
-    userId: string
+    accountId: string,
+    userId: string,
   ): Promise<Record<string, unknown>> {
-    return withTenantClient(tenantId, async (client) => {
+    return withAccountClient(accountId, async (client) => {
       const userResult = await client.query<{
         id: string;
         username: string;
@@ -1146,7 +1129,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE tenant_id = $1
            AND id = $2
          LIMIT 1`,
-        [tenantId, userId]
+        [accountId, userId],
       );
       const user = userResult.rows[0];
       if (!user) {
@@ -1159,7 +1142,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE tenant_id = $1
            AND key = 'main'
          LIMIT 1`,
-        [tenantId]
+        [accountId],
       );
 
       const folderRows = await client.query<{
@@ -1169,7 +1152,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       }>(
         `SELECT id, name, created_at
          FROM folder
-         ORDER BY name ASC`
+         ORDER BY name ASC`,
       );
 
       const feedRows = await client.query<{
@@ -1187,7 +1170,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          FROM feed
          WHERE tenant_id = $1
          ORDER BY created_at DESC`,
-        [tenantId]
+        [accountId],
       );
 
       const feedTopicRows = await client.query<{
@@ -1204,7 +1187,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          JOIN topic t ON t.id = ft.topic_id
          WHERE ft.tenant_id = $1
          ORDER BY ft.proposed_at DESC`,
-        [tenantId]
+        [accountId],
       );
 
       const filterRows = await client.query<{
@@ -1219,7 +1202,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          FROM filter_rule
          WHERE tenant_id = $1
          ORDER BY created_at DESC`,
-        [tenantId]
+        [accountId],
       );
 
       const savedRows = await client.query<{
@@ -1256,7 +1239,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE rs.tenant_id = $1
            AND rs.saved_at IS NOT NULL
          ORDER BY rs.saved_at DESC`,
-        [tenantId]
+        [accountId],
       );
 
       const annotationRows = await client.query<{
@@ -1271,7 +1254,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          FROM annotation
          WHERE tenant_id = $1
          ORDER BY created_at DESC`,
-        [tenantId]
+        [accountId],
       );
 
       const eventRows = await client.query<{
@@ -1285,7 +1268,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          FROM event
          WHERE tenant_id = $1
          ORDER BY ts DESC`,
-        [tenantId]
+        [accountId],
       );
 
       const digestRows = await client.query<{
@@ -1301,26 +1284,26 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          FROM digest
          WHERE tenant_id = $1
          ORDER BY created_at DESC`,
-        [tenantId]
+        [accountId],
       );
 
       return {
         schemaVersion: 1,
         generatedAt: new Date().toISOString(),
-        tenantId,
+        accountId,
         account: {
           id: user.id,
           username: user.username,
           email: user.email,
           createdAt: user.created_at.toISOString(),
           emailVerifiedAt: user.email_verified_at?.toISOString() ?? null,
-          lastLoginAt: user.last_login_at?.toISOString() ?? null
+          lastLoginAt: user.last_login_at?.toISOString() ?? null,
         },
         settings: settingsResult.rows[0]?.data ?? {},
         folders: folderRows.rows.map((row) => ({
           id: row.id,
           name: row.name,
-          createdAt: row.created_at.toISOString()
+          createdAt: row.created_at.toISOString(),
         })),
         feeds: feedRows.rows.map((row) => ({
           id: row.id,
@@ -1331,7 +1314,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
           weight: row.weight,
           classificationStatus: row.classification_status,
           createdAt: row.created_at.toISOString(),
-          lastPolledAt: row.last_polled_at?.toISOString() ?? null
+          lastPolledAt: row.last_polled_at?.toISOString() ?? null,
         })),
         feedTopics: feedTopicRows.rows.map((row) => ({
           feedId: row.feed_id,
@@ -1340,7 +1323,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
           status: row.status,
           confidence: Number(row.confidence),
           proposedAt: row.proposed_at.toISOString(),
-          resolvedAt: row.resolved_at?.toISOString() ?? null
+          resolvedAt: row.resolved_at?.toISOString() ?? null,
         })),
         filters: filterRows.rows.map((row) => ({
           id: row.id,
@@ -1348,7 +1331,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
           type: row.type,
           mode: row.mode,
           breakoutEnabled: row.breakout_enabled,
-          createdAt: row.created_at.toISOString()
+          createdAt: row.created_at.toISOString(),
         })),
         savedItems: savedRows.rows.map((row) => ({
           clusterId: row.cluster_id,
@@ -1359,7 +1342,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
           canonicalUrl: row.canonical_url,
           publishedAt: row.published_at?.toISOString() ?? null,
           sourceTitle: row.source_title,
-          sourceUrl: row.source_url
+          sourceUrl: row.source_url,
         })),
         annotations: annotationRows.rows.map((row) => ({
           id: row.id,
@@ -1367,14 +1350,14 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
           highlightedText: row.highlighted_text,
           note: row.note,
           color: row.color,
-          createdAt: row.created_at.toISOString()
+          createdAt: row.created_at.toISOString(),
         })),
         events: eventRows.rows.map((row) => ({
           id: row.id,
           idempotencyKey: row.idempotency_key,
           ts: row.ts.toISOString(),
           type: row.type,
-          payload: row.payload_json
+          payload: row.payload_json,
         })),
         digests: digestRows.rows.map((row) => ({
           id: row.id,
@@ -1383,17 +1366,17 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
           endTs: row.end_ts.toISOString(),
           title: row.title,
           body: row.body,
-          entries: row.entries_json
-        }))
+          entries: row.entries_json,
+        })),
       } satisfies Record<string, unknown>;
     });
   }
 
   async function getAccountDataExportPayload(
     userId: string,
-    tenantId: string
+    accountId: string,
   ): Promise<{ payload: unknown; requestedAt: string; completedAt: string } | null> {
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{
         export_payload: unknown;
         requested_at: Date;
@@ -1407,7 +1390,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND export_payload IS NOT NULL
          ORDER BY completed_at DESC NULLS LAST, requested_at DESC
          LIMIT 1`,
-        [tenantId, userId]
+        [accountId, userId],
       );
     });
 
@@ -1419,20 +1402,20 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     return {
       payload: row.export_payload,
       requestedAt: row.requested_at.toISOString(),
-      completedAt: row.completed_at.toISOString()
+      completedAt: row.completed_at.toISOString(),
     };
   }
 
   async function resendEmailVerification(
-    payload: ResendVerificationRequest
+    payload: ResendVerificationRequest,
   ): Promise<"ok" | "already_verified"> {
-    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug ?? "default");
-    if (!tenantId) {
+    const accountId = await resolveAccountIdBySlug(payload.accountSlug ?? "default");
+    if (!accountId) {
       return "ok";
     }
 
     const email = payload.email.trim().toLowerCase();
-    const userRows = await withTenantClient(tenantId, async (client) => {
+    const userRows = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         username: string;
@@ -1444,7 +1427,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE tenant_id = $1
            AND lower(email) = $2
          LIMIT 1`,
-        [tenantId, email]
+        [accountId, email],
       );
     });
 
@@ -1456,7 +1439,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "already_verified";
     }
 
-    await sendVerificationEmail(tenantId, user.id, user.email, user.username);
+    await sendVerificationEmail(accountId, user.id, user.email, user.username);
     return "ok";
   }
 
@@ -1474,7 +1457,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          AND expires_at > NOW()
        ORDER BY created_at DESC
        LIMIT 1`,
-      [tokenHash]
+      [tokenHash],
     );
 
     const tokenRow = tokenRows.rows[0];
@@ -1482,7 +1465,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "invalid_or_expired_token";
     }
 
-    const updated = await withTenantClient(tokenRow.tenant_id, async (client) => {
+    const updated = await withAccountClient(tokenRow.tenant_id, async (client) => {
       const consume = await client.query(
         `UPDATE auth_email_verification_token
          SET consumed_at = NOW()
@@ -1492,7 +1475,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND consumed_at IS NULL
            AND expires_at > NOW()
          RETURNING id`,
-        [tokenHash, tokenRow.tenant_id, tokenRow.user_id]
+        [tokenHash, tokenRow.tenant_id, tokenRow.user_id],
       );
 
       if (consume.rows.length === 0) {
@@ -1504,7 +1487,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          SET email_verified_at = COALESCE(email_verified_at, NOW())
          WHERE id = $1
            AND tenant_id = $2`,
-        [tokenRow.user_id, tokenRow.tenant_id]
+        [tokenRow.user_id, tokenRow.tenant_id],
       );
 
       return true;
@@ -1514,13 +1497,13 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
   }
 
   async function requestPasswordReset(payload: ForgotPasswordRequest): Promise<void> {
-    const tenantId = await resolveTenantIdBySlug(payload.tenantSlug ?? "default");
-    if (!tenantId) {
+    const accountId = await resolveAccountIdBySlug(payload.accountSlug ?? "default");
+    if (!accountId) {
       return;
     }
 
     const email = payload.email.trim().toLowerCase();
-    const userRows = await withTenantClient(tenantId, async (client) => {
+    const userRows = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         username: string;
@@ -1531,7 +1514,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE tenant_id = $1
            AND lower(email) = $2
          LIMIT 1`,
-        [tenantId, email]
+        [accountId, email],
       );
     });
 
@@ -1540,11 +1523,11 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return;
     }
 
-    await sendPasswordResetEmail(tenantId, user.id, user.email, user.username);
+    await sendPasswordResetEmail(accountId, user.id, user.email, user.username);
   }
 
   async function resetPassword(
-    payload: ResetPasswordRequest
+    payload: ResetPasswordRequest,
   ): Promise<"ok" | "invalid_or_expired_token"> {
     const tokenHash = hashToken(payload.token);
 
@@ -1559,7 +1542,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          AND expires_at > NOW()
        ORDER BY created_at DESC
        LIMIT 1`,
-      [tokenHash]
+      [tokenHash],
     );
 
     const tokenRow = tokenRows.rows[0];
@@ -1567,7 +1550,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "invalid_or_expired_token";
     }
 
-    const updated = await withTenantClient(tokenRow.tenant_id, async (client) => {
+    const updated = await withAccountClient(tokenRow.tenant_id, async (client) => {
       const consume = await client.query(
         `UPDATE auth_password_reset_token
          SET consumed_at = NOW()
@@ -1577,7 +1560,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND consumed_at IS NULL
            AND expires_at > NOW()
          RETURNING id`,
-        [tokenHash, tokenRow.tenant_id, tokenRow.user_id]
+        [tokenHash, tokenRow.tenant_id, tokenRow.user_id],
       );
 
       if (consume.rows.length === 0) {
@@ -1589,7 +1572,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          SET password_hash = crypt($1, gen_salt('bf'))
          WHERE id = $2
            AND tenant_id = $3`,
-        [payload.newPassword, tokenRow.user_id, tokenRow.tenant_id]
+        [payload.newPassword, tokenRow.user_id, tokenRow.tenant_id],
       );
 
       await client.query(
@@ -1598,7 +1581,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE user_id = $1
            AND tenant_id = $2
            AND revoked_at IS NULL`,
-        [tokenRow.user_id, tokenRow.tenant_id]
+        [tokenRow.user_id, tokenRow.tenant_id],
       );
 
       return true;
@@ -1621,7 +1604,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     }
 
     // Check session in DB and verify refresh token hash
-    const { rows } = await withTenantClient(payload.tenantId, async (client) => {
+    const { rows } = await withAccountClient(payload.accountId, async (client) => {
       return client.query(
         `SELECT s.id, s.tenant_id, s.user_id, s.refresh_token_hash, u.username
          FROM auth_session s
@@ -1630,7 +1613,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
            AND s.tenant_id = $2
            AND s.expires_at > NOW()
            AND s.revoked_at IS NULL`,
-        [payload.jti, payload.tenantId]
+        [payload.jti, payload.accountId],
       );
     });
 
@@ -1638,26 +1621,32 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return null;
     }
 
-    const session = rows[0] as { id: string; tenant_id: string; user_id: string; refresh_token_hash: string; username: string };
+    const session = rows[0] as {
+      id: string;
+      tenant_id: string;
+      user_id: string;
+      refresh_token_hash: string;
+      username: string;
+    };
 
     // Verify the refresh token hash matches what was stored at login (timing-safe)
     const presentedHash = hashToken(refreshToken);
     if (!timingSafeEqual(Buffer.from(session.refresh_token_hash), Buffer.from(presentedHash))) {
       // Hash mismatch: possible token theft. Revoke the session.
-      await withTenantClient(payload.tenantId, async (client) => {
+      await withAccountClient(payload.accountId, async (client) => {
         await client.query(
           "UPDATE auth_session SET revoked_at = NOW() WHERE id = $1 AND tenant_id = $2",
-          [session.id, payload.tenantId]
+          [session.id, payload.accountId],
         );
       });
       return null;
     }
 
     // Revoke old session
-    await withTenantClient(payload.tenantId, async (client) => {
+    await withAccountClient(payload.accountId, async (client) => {
       await client.query(
         "UPDATE auth_session SET revoked_at = NOW() WHERE id = $1 AND tenant_id = $2",
-        [session.id, payload.tenantId]
+        [session.id, payload.accountId],
       );
     });
 
@@ -1673,10 +1662,10 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     try {
       const payload = await app.jwt.verify<RefreshTokenPayload>(refreshToken);
       if (payload.tokenType === "refresh") {
-        await withTenantClient(payload.tenantId, async (client) => {
+        await withAccountClient(payload.accountId, async (client) => {
           await client.query(
             "UPDATE auth_session SET revoked_at = NOW() WHERE id = $1 AND tenant_id = $2",
-            [payload.jti, payload.tenantId]
+            [payload.jti, payload.accountId],
           );
         });
       }
@@ -1685,15 +1674,15 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     }
   }
 
-  async function getUserRole(userId: string, tenantId: string): Promise<string | null> {
-    const result = await withTenantClient(tenantId, async (client) => {
+  async function getUserRole(userId: string, accountId: string): Promise<string | null> {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{ role: string }>(
         `SELECT role
          FROM user_account
          WHERE id = $1
            AND tenant_id = $2
          LIMIT 1`,
-        [userId, tenantId]
+        [userId, accountId],
       );
     });
     return result.rows[0]?.role ?? null;
@@ -1701,23 +1690,23 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
   async function getUserRoleAndStatus(
     userId: string,
-    tenantId: string
+    accountId: string,
   ): Promise<{ role: string; status: string } | null> {
-    const result = await withTenantClient(tenantId, async (client) => {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{ role: string; status: string }>(
         `SELECT role, status
          FROM user_account
          WHERE id = $1
            AND tenant_id = $2
          LIMIT 1`,
-        [userId, tenantId]
+        [userId, accountId],
       );
     });
     return result.rows[0] ?? null;
   }
 
-  async function listMembers(tenantId: string): Promise<WorkspaceMember[]> {
-    const result = await withTenantClient(tenantId, async (client) => {
+  async function listMembers(accountId: string): Promise<Member[]> {
+    const result = await withAccountClient(accountId, async (client) => {
       return client.query<{
         id: string;
         username: string;
@@ -1731,7 +1720,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          FROM user_account
          WHERE tenant_id = $1
          ORDER BY created_at ASC`,
-        [tenantId]
+        [accountId],
       );
     });
 
@@ -1740,125 +1729,18 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       username: row.username,
       email: row.email,
       role: row.role as UserRole,
-      status: row.status as WorkspaceMember["status"],
+      status: row.status as Member["status"],
       joinedAt: row.created_at.toISOString(),
-      lastLoginAt: row.last_login_at?.toISOString() ?? null
+      lastLoginAt: row.last_login_at?.toISOString() ?? null,
     }));
-  }
-
-  async function approveMember(
-    actorUserId: string,
-    tenantId: string,
-    targetUserId: string
-  ): Promise<WorkspaceMember | "not_owner" | "user_not_found" | "not_pending"> {
-    const actorRole = await getUserRole(actorUserId, tenantId);
-    if (actorRole !== "owner") {
-      return "not_owner";
-    }
-
-    return withTenantClient(tenantId, async (client) => {
-      const targetResult = await client.query<{
-        id: string;
-        username: string;
-        email: string | null;
-        role: string;
-        status: string;
-        created_at: Date;
-        last_login_at: Date | null;
-      }>(
-        `SELECT id, username, email, role, status, created_at, last_login_at
-         FROM user_account
-         WHERE id = $1
-           AND tenant_id = $2
-         LIMIT 1`,
-        [targetUserId, tenantId]
-      );
-
-      const target = targetResult.rows[0];
-      if (!target) {
-        return "user_not_found";
-      }
-      if (target.status !== "pending_approval") {
-        return "not_pending";
-      }
-
-      await client.query(
-        `UPDATE user_account
-         SET status = 'active'
-         WHERE id = $1
-           AND tenant_id = $2`,
-        [targetUserId, tenantId]
-      );
-
-      await client.query(
-        `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
-         VALUES ($1, $2, $3, 'approved', '{}'::jsonb)`,
-        [tenantId, targetUserId, actorUserId]
-      );
-
-      return {
-        id: target.id,
-        username: target.username,
-        email: target.email,
-        role: target.role as UserRole,
-        status: "active" as const,
-        joinedAt: target.created_at.toISOString(),
-        lastLoginAt: target.last_login_at?.toISOString() ?? null
-      };
-    });
-  }
-
-  async function rejectMember(
-    actorUserId: string,
-    tenantId: string,
-    targetUserId: string
-  ): Promise<"ok" | "not_owner" | "user_not_found" | "not_pending"> {
-    const actorRole = await getUserRole(actorUserId, tenantId);
-    if (actorRole !== "owner") {
-      return "not_owner";
-    }
-
-    return withTenantClient(tenantId, async (client) => {
-      const targetResult = await client.query<{ id: string; status: string }>(
-        `SELECT id, status
-         FROM user_account
-         WHERE id = $1
-           AND tenant_id = $2
-         LIMIT 1`,
-        [targetUserId, tenantId]
-      );
-
-      const target = targetResult.rows[0];
-      if (!target) {
-        return "user_not_found";
-      }
-      if (target.status !== "pending_approval") {
-        return "not_pending";
-      }
-
-      await client.query(
-        `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
-         VALUES ($1, $2, $3, 'rejected', '{}'::jsonb)`,
-        [tenantId, targetUserId, actorUserId]
-      );
-
-      await client.query(
-        `DELETE FROM user_account
-         WHERE id = $1
-           AND tenant_id = $2`,
-        [targetUserId, tenantId]
-      );
-
-      return "ok";
-    });
   }
 
   async function removeMember(
     actorUserId: string,
-    tenantId: string,
-    targetUserId: string
+    accountId: string,
+    targetUserId: string,
   ): Promise<"ok" | "not_owner" | "user_not_found" | "cannot_modify_self"> {
-    const actorRole = await getUserRole(actorUserId, tenantId);
+    const actorRole = await getUserRole(actorUserId, accountId);
     if (actorRole !== "owner") {
       return "not_owner";
     }
@@ -1867,14 +1749,14 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "cannot_modify_self";
     }
 
-    return withTenantClient(tenantId, async (client) => {
+    return withAccountClient(accountId, async (client) => {
       const targetResult = await client.query<{ id: string }>(
         `SELECT id
          FROM user_account
          WHERE id = $1
            AND tenant_id = $2
          LIMIT 1`,
-        [targetUserId, tenantId]
+        [targetUserId, accountId],
       );
 
       if (targetResult.rows.length === 0) {
@@ -1884,14 +1766,14 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       await client.query(
         `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
          VALUES ($1, $2, $3, 'removed', '{}'::jsonb)`,
-        [tenantId, targetUserId, actorUserId]
+        [accountId, targetUserId, actorUserId],
       );
 
       await client.query(
         `DELETE FROM user_account
          WHERE id = $1
            AND tenant_id = $2`,
-        [targetUserId, tenantId]
+        [targetUserId, accountId],
       );
 
       return "ok";
@@ -1900,11 +1782,11 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
 
   async function updateMemberRole(
     actorUserId: string,
-    tenantId: string,
+    accountId: string,
     targetUserId: string,
-    newRole: UserRole
-  ): Promise<WorkspaceMember | "not_owner" | "user_not_found" | "cannot_modify_self"> {
-    const actorRole = await getUserRole(actorUserId, tenantId);
+    newRole: UserRole,
+  ): Promise<Member | "not_owner" | "user_not_found" | "cannot_modify_self"> {
+    const actorRole = await getUserRole(actorUserId, accountId);
     if (actorRole !== "owner") {
       return "not_owner";
     }
@@ -1913,7 +1795,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
       return "cannot_modify_self";
     }
 
-    return withTenantClient(tenantId, async (client) => {
+    return withAccountClient(accountId, async (client) => {
       const targetResult = await client.query<{
         id: string;
         username: string;
@@ -1928,7 +1810,7 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          WHERE id = $1
            AND tenant_id = $2
          LIMIT 1`,
-        [targetUserId, tenantId]
+        [targetUserId, accountId],
       );
 
       const target = targetResult.rows[0];
@@ -1941,13 +1823,13 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
          SET role = $3
          WHERE id = $1
            AND tenant_id = $2`,
-        [targetUserId, tenantId, newRole]
+        [targetUserId, accountId, newRole],
       );
 
       await client.query(
         `INSERT INTO member_event (tenant_id, target_user_id, actor_user_id, event_type, metadata)
          VALUES ($1, $2, $3, 'role_changed', $4::jsonb)`,
-        [tenantId, targetUserId, actorUserId, JSON.stringify({ oldRole: target.role, newRole })]
+        [accountId, targetUserId, actorUserId, JSON.stringify({ oldRole: target.role, newRole })],
       );
 
       return {
@@ -1955,62 +1837,25 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
         username: target.username,
         email: target.email,
         role: newRole,
-        status: target.status as WorkspaceMember["status"],
+        status: target.status as Member["status"],
         joinedAt: target.created_at.toISOString(),
-        lastLoginAt: target.last_login_at?.toISOString() ?? null
+        lastLoginAt: target.last_login_at?.toISOString() ?? null,
       };
     });
-  }
-
-  async function getMembershipPolicy(tenantId: string): Promise<MembershipPolicy | null> {
-    const result = await withTenantClient(tenantId, async (client) => {
-      return client.query<{ membership_policy: string }>(
-        `SELECT membership_policy
-         FROM tenant
-         WHERE id = $1
-         LIMIT 1`,
-        [tenantId]
-      );
-    });
-
-    const row = result.rows[0];
-    return row ? (row.membership_policy as MembershipPolicy) : null;
-  }
-
-  async function updateMembershipPolicy(
-    actorUserId: string,
-    tenantId: string,
-    policy: MembershipPolicy
-  ): Promise<MembershipPolicy | "not_owner"> {
-    const actorRole = await getUserRole(actorUserId, tenantId);
-    if (actorRole !== "owner") {
-      return "not_owner";
-    }
-
-    await withTenantClient(tenantId, async (client) => {
-      await client.query(
-        `UPDATE tenant
-         SET membership_policy = $2
-         WHERE id = $1`,
-        [tenantId, policy]
-      );
-    });
-
-    return policy;
   }
 
   return {
     login,
     signup,
-    joinWorkspace,
+    joinAccount,
     resendEmailVerification,
     verifyEmail,
     requestPasswordReset,
     resetPassword,
     changePassword,
-    createWorkspaceInvite,
-    listWorkspaceInvites,
-    revokeWorkspaceInvite,
+    createMemberInvite,
+    listMemberInvites,
+    revokeMemberInvite,
     getAccountDeletionStatus,
     requestAccountDeletion,
     cancelAccountDeletion,
@@ -2021,16 +1866,12 @@ export function createAuthService(app: FastifyInstance, env: ApiEnv, pool: Pool)
     logout,
     getUserRoleAndStatus,
     listMembers,
-    approveMember,
-    rejectMember,
     removeMember,
     updateMemberRole,
-    getMembershipPolicy,
-    updateMembershipPolicy
   };
 }
 
-function toWorkspaceInvite(
+function toMemberInvite(
   row: {
     id: string;
     email: string | null;
@@ -2041,8 +1882,8 @@ function toWorkspaceInvite(
     revoked_at: Date | null;
   },
   inviteCode: string | null = null,
-  inviteUrl: string | null = null
-): WorkspaceInvite {
+  inviteUrl: string | null = null,
+): MemberInvite {
   return {
     id: row.id,
     email: row.email,
@@ -2052,7 +1893,7 @@ function toWorkspaceInvite(
     createdAt: row.created_at.toISOString(),
     expiresAt: row.expires_at.toISOString(),
     consumedAt: row.consumed_at?.toISOString() ?? null,
-    revokedAt: row.revoked_at?.toISOString() ?? null
+    revokedAt: row.revoked_at?.toISOString() ?? null,
   };
 }
 
@@ -2074,7 +1915,7 @@ function toAccountDataExportStatus(row: {
     completedAt: row.completed_at?.toISOString() ?? null,
     failedAt: row.failed_at?.toISOString() ?? null,
     errorMessage: row.error_message,
-    fileSizeBytes: row.file_size_bytes
+    fileSizeBytes: row.file_size_bytes,
   };
 }
 
@@ -2105,7 +1946,7 @@ function parseDurationSeconds(input: string): number {
   return value * 86400;
 }
 
-function normalizeTenantSlug(input: string): string {
+function normalizeAccountSlug(input: string): string {
   return input.trim().toLowerCase();
 }
 
@@ -2114,6 +1955,6 @@ function escapeHtml(input: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;")
+    .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
 }

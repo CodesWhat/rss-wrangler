@@ -15,16 +15,16 @@ export interface PipelineEntitlements {
 const PIPELINE_PLAN_DEFAULTS: Record<PlanId, PipelinePlanDefaults> = {
   free: {
     itemsPerDayLimit: 500,
-    minPollMinutes: 60
+    minPollMinutes: 60,
   },
   pro: {
     itemsPerDayLimit: null,
-    minPollMinutes: 10
+    minPollMinutes: 10,
   },
   pro_ai: {
     itemsPerDayLimit: null,
-    minPollMinutes: 10
-  }
+    minPollMinutes: 10,
+  },
 };
 
 function normalizePlanId(raw: string | null | undefined): PlanId {
@@ -34,13 +34,16 @@ function normalizePlanId(raw: string | null | undefined): PlanId {
   return "free";
 }
 
-export async function getPipelineEntitlements(pool: Pool, tenantId: string): Promise<PipelineEntitlements> {
+export async function getPipelineEntitlements(
+  pool: Pool,
+  accountId: string,
+): Promise<PipelineEntitlements> {
   const result = await pool.query<{ plan_id: string }>(
     `SELECT plan_id
      FROM tenant_plan_subscription
      WHERE tenant_id = $1
      LIMIT 1`,
-    [tenantId]
+    [accountId],
   );
 
   const planId = normalizePlanId(result.rows[0]?.plan_id);
@@ -49,11 +52,15 @@ export async function getPipelineEntitlements(pool: Pool, tenantId: string): Pro
   return {
     planId,
     itemsPerDayLimit: defaults.itemsPerDayLimit,
-    minPollMinutes: defaults.minPollMinutes
+    minPollMinutes: defaults.minPollMinutes,
   };
 }
 
-export function isPollAllowed(lastPolledAt: Date | null, minPollMinutes: number, now = new Date()): boolean {
+export function isPollAllowed(
+  lastPolledAt: Date | null,
+  minPollMinutes: number,
+  now = new Date(),
+): boolean {
   if (!lastPolledAt) {
     return true;
   }
@@ -64,48 +71,49 @@ export function isPollAllowed(lastPolledAt: Date | null, minPollMinutes: number,
 
 export async function reserveDailyIngestionBudget(
   pool: Pool,
-  tenantId: string,
+  accountId: string,
   dailyLimit: number,
-  requested: number
+  requested: number,
 ): Promise<number> {
   if (requested <= 0) {
     return 0;
   }
 
+  // Ensure the daily-usage row exists (separate statement so the UPDATE below
+  // always sees it — data-modifying CTEs share the same snapshot).
+  await pool.query(
+    `INSERT INTO tenant_usage_daily (tenant_id, usage_date, items_ingested_count, updated_at)
+     VALUES ($1, CURRENT_DATE, 0, NOW())
+     ON CONFLICT (tenant_id, usage_date) DO NOTHING`,
+    [accountId],
+  );
+
+  // Atomically reserve slots against the daily limit.
   const result = await pool.query<{ allowed: number }>(
-    `WITH seeded AS (
-       INSERT INTO tenant_usage_daily (tenant_id, usage_date, items_ingested_count, updated_at)
-       VALUES ($1, CURRENT_DATE, 0, NOW())
-       ON CONFLICT (tenant_id, usage_date) DO NOTHING
-     ),
-     current_usage AS (
-       SELECT items_ingested_count
-       FROM tenant_usage_daily
-       WHERE tenant_id = $1
-         AND usage_date = CURRENT_DATE
-       FOR UPDATE
-     ),
-     allocation AS (
+    `WITH allocation AS (
        SELECT GREATEST(0, LEAST($3::int, $2::int - items_ingested_count)) AS allowed
-       FROM current_usage
-     ),
-     bumped AS (
-       UPDATE tenant_usage_daily usage
-       SET items_ingested_count = usage.items_ingested_count + allocation.allowed,
-           updated_at = NOW()
-       FROM allocation
-       WHERE usage.tenant_id = $1
-         AND usage.usage_date = CURRENT_DATE
-       RETURNING allocation.allowed
+       FROM tenant_usage_daily
+       WHERE tenant_id = $1 AND usage_date = CURRENT_DATE
+       FOR UPDATE
      )
-     SELECT COALESCE((SELECT allowed FROM bumped), 0)::int AS allowed`,
-    [tenantId, dailyLimit, requested]
+     UPDATE tenant_usage_daily
+     SET items_ingested_count = items_ingested_count + allocation.allowed,
+         updated_at = NOW()
+     FROM allocation
+     WHERE tenant_usage_daily.tenant_id = $1
+       AND tenant_usage_daily.usage_date = CURRENT_DATE
+     RETURNING allocation.allowed`,
+    [accountId, dailyLimit, requested],
   );
 
   return result.rows[0]?.allowed ?? 0;
 }
 
-export async function releaseDailyIngestionBudget(pool: Pool, tenantId: string, releaseCount: number): Promise<void> {
+export async function releaseDailyIngestionBudget(
+  pool: Pool,
+  accountId: string,
+  releaseCount: number,
+): Promise<void> {
   if (releaseCount <= 0) {
     return;
   }
@@ -116,11 +124,15 @@ export async function releaseDailyIngestionBudget(pool: Pool, tenantId: string, 
          updated_at = NOW()
      WHERE tenant_id = $1
        AND usage_date = CURRENT_DATE`,
-    [tenantId, releaseCount]
+    [accountId, releaseCount],
   );
 }
 
-export async function incrementDailyIngestionUsage(pool: Pool, tenantId: string, incrementBy: number): Promise<void> {
+export async function incrementDailyIngestionUsage(
+  pool: Pool,
+  accountId: string,
+  incrementBy: number,
+): Promise<void> {
   if (incrementBy <= 0) {
     return;
   }
@@ -132,6 +144,6 @@ export async function incrementDailyIngestionUsage(pool: Pool, tenantId: string,
      DO UPDATE SET
        items_ingested_count = tenant_usage_daily.items_ingested_count + EXCLUDED.items_ingested_count,
        updated_at = NOW()`,
-    [tenantId, incrementBy]
+    [accountId, incrementBy],
   );
 }

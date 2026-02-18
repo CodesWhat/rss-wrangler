@@ -8,7 +8,7 @@
    ```bash
    docker compose -f infra/docker-compose.yml up --build -d
    ```
-3. Access web UI at `http://<tailscale-hostname>:3000`.
+3. Access web UI at `http://<tailscale-hostname>:3001` (or your configured `HOST_WEB_PORT`).
 4. Keep API private to Tailscale; do not expose to public WAN.
 
 ## OrbStack self-host validation (default local loop)
@@ -25,6 +25,7 @@ What it does:
 - builds and boots the Docker Compose stack
 - waits for API and web health from inside containers (avoids host port conflicts)
 - performs an auth login smoke check (when `AUTH_USERNAME` and `AUTH_PASSWORD` exist)
+- runs a functional ingest check (queues RSS + JSON + Atom + RDF smoke feed polls and asserts ingest + hero image + extracted full text for all formats)
 - verifies `api`, `web`, `worker`, and `postgres` are running
 
 Related commands:
