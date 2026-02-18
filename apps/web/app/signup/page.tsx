@@ -1,10 +1,12 @@
 "use client";
 
-import { joinWorkspace } from "@/lib/api";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useAuth } from "@/components/auth-provider";
+import { joinAccount } from "@/lib/api";
 
 export default function SignupPage() {
+  const { markAuthenticated } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -26,24 +28,19 @@ export default function SignupPage() {
     setError("");
     setSubmitting(true);
     try {
-      const result = await joinWorkspace({
+      const result = await joinAccount({
         email,
         username,
         password,
-        inviteCode: inviteCode.trim() ? inviteCode.trim() : undefined
+        inviteCode: inviteCode.trim() ? inviteCode.trim() : undefined,
       });
       if (result.status === "verification_required") {
         router.replace(
-          `/login?notice=${encodeURIComponent("Check your email to verify your account before signing in.")}`
+          `/login?notice=${encodeURIComponent("Check your email to verify your account before signing in.")}`,
         );
         return;
       }
-      if (result.status === "pending_approval") {
-        router.replace(
-          `/login?notice=${encodeURIComponent("Your account is pending approval. An owner must approve access before you can sign in.")}`
-        );
-        return;
-      }
+      markAuthenticated();
       router.replace("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Account creation failed");
@@ -92,14 +89,14 @@ export default function SignupPage() {
             onChange={(e) => setPassword(e.target.value)}
             className="input"
           />
-          <label htmlFor="inviteCode">Invite code (optional)</label>
+          <label htmlFor="inviteCode">Invite code</label>
           <input
             id="inviteCode"
             type="text"
             value={inviteCode}
             onChange={(e) => setInviteCode(e.target.value)}
             className="input"
-            placeholder="Paste invite code if you were invited"
+            placeholder="Required to join an existing account"
           />
           {error ? <p className="error-text">{error}</p> : null}
           <button type="submit" className="button button-primary" disabled={submitting}>

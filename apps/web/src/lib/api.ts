@@ -759,11 +759,13 @@ export async function cancelAccountDeletion(): Promise<
 }
 
 export async function logout(): Promise<void> {
-  const headers = await authedHeaders(false);
+  const headers = await authedHeaders(true);
+  const rt = getRefreshToken();
   try {
     await fetch(`${API_BASE_URL}/v1/auth/logout`, {
       method: "POST",
       headers,
+      body: JSON.stringify({ refreshToken: rt }),
     });
   } catch {
     // best-effort

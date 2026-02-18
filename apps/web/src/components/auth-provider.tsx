@@ -1,29 +1,23 @@
 "use client";
 
+import type { LoginRequest } from "@rss-wrangler/contracts";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useState } from "react";
 import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-  type ReactNode,
-} from "react";
-import {
-  isLoggedIn,
-  isLoggedInFlag,
+  logout as apiLogout,
   clearLoggedInFlag,
   hasAccessToken,
+  isLoggedIn,
+  isLoggedInFlag,
   login,
-  logout as apiLogout,
   tryRestoreSession,
 } from "@/lib/api";
-import type { LoginRequest } from "@rss-wrangler/contracts";
 
 interface AuthContextValue {
   authenticated: boolean;
   loading: boolean;
   loginUser: (req: LoginRequest) => Promise<void>;
   logoutUser: () => Promise<void>;
+  markAuthenticated: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -31,6 +25,7 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
   loginUser: async () => Promise.resolve(),
   logoutUser: async () => Promise.resolve(),
+  markAuthenticated: () => {},
 });
 
 export function useAuth() {
@@ -66,7 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }
     restoreSession();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const loginUser = useCallback(async (req: LoginRequest) => {
@@ -77,6 +74,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logoutUser = useCallback(async () => {
     await apiLogout();
     setAuthenticated(false);
+  }, []);
+
+  const markAuthenticated = useCallback(() => {
+    setAuthenticated(true);
   }, []);
 
   // Register service worker for push notifications
@@ -103,7 +104,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ authenticated, loading, loginUser, logoutUser }}>
+    <AuthContext.Provider
+      value={{ authenticated, loading, loginUser, logoutUser, markAuthenticated }}
+    >
       {children}
     </AuthContext.Provider>
   );

@@ -20,6 +20,7 @@ import {
   listFeeds,
   listFolders,
   markAllRead,
+  markClusterRead,
   markClusterUnread,
   saveCluster,
   updateSettings,
@@ -71,6 +72,7 @@ function saveDisplaySettings(settings: DisplaySettings): void {
 function HomeFeed() {
   // --- Sidebar ---
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [sidebarFilter, setSidebarFilter] = useState<SidebarFilter>({
     type: "smart",
     state: "unread",
@@ -280,6 +282,7 @@ function HomeFeed() {
   // -------------------------------------------------------------------------
   function handleFilterChange(filter: SidebarFilter) {
     setSidebarFilter(filter);
+    setMobileSidebarOpen(false);
     setSelectedClusterId(null);
     setClusters([]);
     setCursor(null);
@@ -306,10 +309,20 @@ function HomeFeed() {
   // -------------------------------------------------------------------------
   // Cluster selection / reader open + close
   // -------------------------------------------------------------------------
-  const handleSelectCluster = useCallback((clusterId: string) => {
-    setSelectedClusterId(clusterId);
-    history.pushState({ clusterId }, "", `/clusters/${clusterId}`);
-  }, []);
+  const handleSelectCluster = useCallback(
+    (clusterId: string) => {
+      setSelectedClusterId(clusterId);
+      history.pushState({ clusterId }, "", `/clusters/${clusterId}`);
+
+      // Mark as read if not already read
+      const cluster = clusters.find((c) => c.id === clusterId);
+      if (cluster && !cluster.isRead) {
+        setClusters((prev) => prev.map((c) => (c.id === clusterId ? { ...c, isRead: true } : c)));
+        void markClusterRead(clusterId);
+      }
+    },
+    [clusters],
+  );
 
   const handleCloseReader = useCallback(() => {
     setSelectedClusterId(null);
@@ -481,7 +494,9 @@ function HomeFeed() {
         }
         case "Escape": {
           e.preventDefault();
-          if (showSettings) {
+          if (mobileSidebarOpen) {
+            setMobileSidebarOpen(false);
+          } else if (showSettings) {
             setShowSettings(false);
           } else if (selectedClusterId) {
             handleCloseReader();
@@ -503,6 +518,7 @@ function HomeFeed() {
     selectedIndex,
     selectedClusterId,
     showSettings,
+    mobileSidebarOpen,
     handleSelectCluster,
     handleCloseReader,
     handleRefresh,
@@ -592,6 +608,15 @@ function HomeFeed() {
             minWidth: 0,
           }}
         >
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(true)}
+            className="h3-hamburger"
+            title="Open sidebar"
+            aria-label="Open sidebar"
+          >
+            &#9776;
+          </button>
           {sidebarCollapsed && (
             <button
               type="button"
@@ -862,6 +887,42 @@ function HomeFeed() {
           >
             &times;
           </button>
+        </div>
+      )}
+
+      {/* ================================================================ */}
+      {/* MOBILE SIDEBAR OVERLAY                                           */}
+      {/* ================================================================ */}
+      {mobileSidebarOpen && (
+        <div className="h3-sidebar-overlay">
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: backdrop dismiss */}
+          <div className="h3-sidebar-overlay-bg" onClick={() => setMobileSidebarOpen(false)} />
+          <div className="h3-sidebar-overlay-panel">
+            <div className="h3-sidebar-overlay-header">
+              <span className="h3-mobile-brand">RSS_WRANGLER</span>
+              <button
+                type="button"
+                className="h3-btn"
+                onClick={() => setMobileSidebarOpen(false)}
+                aria-label="Close sidebar"
+              >
+                &times;
+              </button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              <FeedSidebar
+                feeds={feeds}
+                folders={folders}
+                activeFilter={sidebarFilter}
+                onFilterChange={handleFilterChange}
+                collapsed={false}
+                onToggleCollapse={() => setMobileSidebarOpen(false)}
+                unreadCount={clusters.length}
+                savedCount={0}
+                totalCount={clusters.length}
+              />
+            </div>
+          </div>
         </div>
       )}
     </div>

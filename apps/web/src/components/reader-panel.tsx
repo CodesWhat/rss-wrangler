@@ -32,6 +32,15 @@ function relativeTime(dateStr: string): string {
   return `${diffDay}d ago`;
 }
 
+function formatDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 type ReaderMode = "feed" | "original" | "text";
 
 const READER_MODE_STORAGE_KEY = "reader-mode-default";
@@ -226,6 +235,27 @@ export function ReaderPanel({ clusterId, onClose }: ReaderPanelProps) {
         </div>
 
         <h2 className="reader-panel-headline">{detail.cluster.headline}</h2>
+
+        <div className="reader-panel-byline">
+          <span className="reader-panel-byline-source">{detail.cluster.primarySource}</span>
+          <span className="reader-panel-byline-sep">/</span>
+          <time dateTime={detail.cluster.primarySourcePublishedAt}>
+            {formatDate(detail.cluster.primarySourcePublishedAt)}
+          </time>
+          {primaryMember && (
+            <>
+              <span className="reader-panel-byline-sep">/</span>
+              <a
+                href={primaryMember.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="reader-panel-byline-link"
+              >
+                View original &rarr;
+              </a>
+            </>
+          )}
+        </div>
 
         {heroImage && (
           <img
